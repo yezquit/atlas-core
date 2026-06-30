@@ -143,6 +143,7 @@ export function buildDirectorAtlasVerdict({
   realFixtureLookup,
   realFixtureStatistics,
   sourceConfidence,
+  confidenceCalibration,
   analysisInput,
 }) {
   const market = analysisInput?.mercado || "Mercado no especificado";
@@ -190,6 +191,9 @@ export function buildDirectorAtlasVerdict({
       sourceConfidence?.score ??
       sourceConfidence?.qualityScore ??
       0,
+    technicalSupport: confidenceCalibration?.technicalSupport ?? null,
+    estimatedProbability: confidenceCalibration?.estimatedProbability ?? null,
+    operationalLevel: confidenceCalibration?.operationalLevel || null,
     canRecommend,
     canUseInParlay,
     mainReasons: buildMainReasons({
@@ -214,6 +218,6 @@ export function buildDirectorAtlasVerdict({
       analysisInput,
     }),
     directorNote:
-      "Este dictamen resume los módulos técnicos de Atlas. No sustituye la auditoría: la justificación completa sigue disponible en los módulos inferiores.",
+      "Este dictamen integra los módulos técnicos de Atlas. El respaldo técnico mide calidad del análisis; la probabilidad estimada no garantiza resultado; el nivel operativo define qué acción permite Atlas.",
   };
 }

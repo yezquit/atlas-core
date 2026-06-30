@@ -342,6 +342,7 @@ export default function Home() {
       realFixtureLookup,
       realFixtureStatistics,
       sourceConfidence,
+      confidenceCalibration,
       analysisInput: {
         partido,
         competicion,
@@ -1423,6 +1424,31 @@ export default function Home() {
                   <div>
                     <small>Confianza informativa</small>
                     <p>{analysis.directorAtlas.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Respaldo técnico</small>
+                    <p>
+                      {analysis.directorAtlas.technicalSupport !== null
+                        ? `${analysis.directorAtlas.technicalSupport}%`
+                        : "No calibrado"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Probabilidad estimada</small>
+                    <p>
+                      {analysis.directorAtlas.estimatedProbability !== null
+                        ? `${analysis.directorAtlas.estimatedProbability}%`
+                        : "No calibrada"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Nivel operativo</small>
+                    <p>
+                      {analysis.directorAtlas.operationalLevel?.label || "No definido"}
+                    </p>
                   </div>
 
                   <div>
