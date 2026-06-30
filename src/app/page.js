@@ -25,6 +25,7 @@ import { coordinateGates } from "@/core/modules/gateCoordinator";
 import { buildAtlasExecutiveAnswer } from "@/core/modules/atlasExecutiveAnswer";
 import { buildDirectorAtlasVerdict } from "@/core/modules/directorAtlas";
 import { buildTechnicalConfidence } from "@/core/modules/technicalConfidence";
+import { calibrateConfidence } from "@/core/modules/confidenceCalibration";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -307,6 +308,17 @@ export default function Home() {
       marketFocusedStats,
     });
 
+    const confidenceCalibration = calibrateConfidence({
+      technicalConfidence,
+      sourceConfidence,
+      marketGate,
+      marketDataCoverage,
+      realFixtureLookup,
+      realFixtureStatistics,
+      marketFocusedStats,
+      gateCoordinator,
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -412,6 +424,7 @@ export default function Home() {
       marketGate,
       gateCoordinator,
       technicalConfidence,
+      confidenceCalibration,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -1231,6 +1244,74 @@ export default function Home() {
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {analysis.confidenceCalibration && (
+              <div className="confidence-calibration-panel">
+                <div className="confidence-calibration-header">
+                  <strong>Calibración de confianza Atlas</strong>
+                  <span>{analysis.confidenceCalibration.operationalLevel.label}</span>
+                </div>
+
+                <h3>{analysis.confidenceCalibration.summary}</h3>
+
+                <div className="confidence-calibration-grid">
+                  <div>
+                    <small>Respaldo técnico</small>
+                    <p>{analysis.confidenceCalibration.technicalSupport}%</p>
+                  </div>
+
+                  <div>
+                    <small>Probabilidad estimada</small>
+                    <p>{analysis.confidenceCalibration.estimatedProbability}%</p>
+                  </div>
+
+                  <div>
+                    <small>Nivel operativo</small>
+                    <p>{analysis.confidenceCalibration.operationalLevel.label}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza informativa</small>
+                    <p>{analysis.confidenceCalibration.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Tope respaldo técnico</small>
+                    <p>{analysis.confidenceCalibration.maxTechnicalSupport}%</p>
+                  </div>
+
+                  <div>
+                    <small>Tope probabilidad</small>
+                    <p>{analysis.confidenceCalibration.maxEstimatedProbability}%</p>
+                  </div>
+                </div>
+
+                <div className="confidence-calibration-section">
+                  <small>Qué significa el nivel operativo</small>
+                  <p>{analysis.confidenceCalibration.operationalLevel.description}</p>
+                </div>
+
+                {analysis.confidenceCalibration.capsApplied.length > 0 && (
+                  <div className="confidence-calibration-section cap">
+                    <small>Techos aplicados</small>
+                    <ul>
+                      {analysis.confidenceCalibration.capsApplied.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="confidence-calibration-section">
+                  <small>Explicación</small>
+                  <ul>
+                    {analysis.confidenceCalibration.explanations.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
 
