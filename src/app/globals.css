@@ -885,3 +885,117 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+.source-panel {
+  margin-bottom: 20px;
+  border: 1px solid rgba(180, 140, 255, 0.32);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(180, 140, 255, 0.045);
+}
+
+.source-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.source-header strong {
+  color: #c9b2ff;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.source-header span {
+  border: 1px solid rgba(180, 140, 255, 0.45);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #c9b2ff;
+  font-size: 13px;
+  background: rgba(180, 140, 255, 0.08);
+}
+
+.source-panel > p {
+  margin: 0 0 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.source-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.source-card {
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.source-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.source-title h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.source-title span {
+  border: 1px solid rgba(180, 140, 255, 0.45);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: #c9b2ff;
+  font-size: 12px;
+}
+
+.source-card p {
+  margin: 0 0 8px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.source-card small {
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .source-list {
+    grid-template-columns: 1fr;
+  }
+
+  .source-header,
+  .source-title {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.priority-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.priority-legend span {
+  border: 1px solid rgba(180, 140, 255, 0.32);
+  border-radius: 999px;
+  padding: 8px 11px;
+  color: var(--muted);
+  background: rgba(180, 140, 255, 0.055);
+  font-size: 13px;
+}
+
+.priority-legend strong {
+  color: #c9b2ff;
+}

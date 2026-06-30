@@ -8,6 +8,7 @@ import { runFiscalReview } from "@/core/modules/fiscalEngine";
 import { runDecisionEngine } from "@/core/modules/decisionEngine";
 import { createCaseRecord } from "@/core/modules/caseRecorder";
 import { evaluateMarkets } from "@/core/modules/marketEvaluator";
+import { buildSourceValidationPlan } from "@/core/modules/sourceValidation";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -121,6 +122,18 @@ export default function Home() {
       fiscalReview,
     });
 
+    const sourceValidation = buildSourceValidationPlan({
+      scenario,
+      specialistReports,
+      marketEvaluation,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     const decisionResult = runDecisionEngine({
       analysisInput: {
         partido,
@@ -169,6 +182,7 @@ export default function Home() {
       specialistReports,
       fiscalReview,
       marketEvaluation,
+      sourceValidation,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -407,6 +421,35 @@ export default function Home() {
                         ))}
                       </ul>
                     </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="source-panel">
+              <div className="source-header">
+                <strong>Validación de fuentes</strong>
+                <span>{analysis.sourceValidation.validationStatus}</span>
+              </div>
+
+              <p>{analysis.sourceValidation.summary}</p>
+
+              <div className="priority-legend">
+                <span><strong>Crítica:</strong> dato obligatorio para decidir.</span>
+                <span><strong>Alta:</strong> dato necesario para elevar confianza.</span>
+              </div>
+
+              <div className="source-list">
+                {analysis.sourceValidation.requiredSources.map((source) => (
+                  <article key={source.data} className="source-card">
+                    <div className="source-title">
+                      <h3>{source.data}</h3>
+                      <span>{source.priority}</span>
+                    </div>
+
+                    <p><strong>Fuente requerida:</strong> {source.sourceType}</p>
+                    <p>{source.reason}</p>
+                    <small>Estado: {source.status}</small>
                   </article>
                 ))}
               </div>
