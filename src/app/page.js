@@ -21,6 +21,7 @@ import { evaluateMarketDataCoverage } from "@/core/modules/marketDataCoverage";
 import { buildMarketFocusedStats } from "@/core/modules/marketFocusedStats";
 import { applyMarketCoverageToSourceConfidence } from "@/core/modules/marketCoverageImpact";
 import { runMarketGate } from "@/core/modules/marketGate";
+import { coordinateGates } from "@/core/modules/gateCoordinator";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -281,6 +282,18 @@ export default function Home() {
       sourceConfidence,
     });
 
+    const gateCoordinator = coordinateGates({
+      validationGate,
+      marketGate,
+      sourceConfidence,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
@@ -353,6 +366,7 @@ export default function Home() {
       marketDataCoverage,
       marketFocusedStats,
       marketGate,
+      gateCoordinator,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -1170,6 +1184,64 @@ export default function Home() {
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {analysis.gateCoordinator && (
+              <div className="gate-coordinator-panel">
+                <div className="gate-coordinator-header">
+                  <strong>Estado final Atlas</strong>
+                  <span>{analysis.gateCoordinator.finalLabel}</span>
+                </div>
+
+                <h3>{analysis.gateCoordinator.summary}</h3>
+
+                <div className="gate-coordinator-grid">
+                  <div>
+                    <small>Permiso operativo</small>
+                    <p>{analysis.gateCoordinator.operationalPermission}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede analizar</small>
+                    <p>{analysis.gateCoordinator.canAnalyze ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede recomendar</small>
+                    <p>{analysis.gateCoordinator.canRecommend ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede ir en parlay</small>
+                    <p>{analysis.gateCoordinator.canUseInParlay ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza informativa</small>
+                    <p>{analysis.gateCoordinator.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Estado interno</small>
+                    <p>{analysis.gateCoordinator.finalStatus}</p>
+                  </div>
+                </div>
+
+                <div className="gate-coordinator-list">
+                  <small>Razón principal</small>
+                  <p>{analysis.gateCoordinator.primaryReason}</p>
+                </div>
+
+                <div className="gate-coordinator-list">
+                  <small>Acción requerida</small>
+                  <p>{analysis.gateCoordinator.requiredAction}</p>
+                </div>
+
+                <div className="gate-coordinator-list">
+                  <small>Jerarquía aplicada</small>
+                  <p>{analysis.gateCoordinator.hierarchy}</p>
+                </div>
               </div>
             )}
 
