@@ -96,7 +96,22 @@ function detectRule(marketText = "") {
 }
 
 function formatValue(key, value) {
-  if (value === null || value === undefined) return "N/D";
+  const zeroWhenNullStats = [
+    "yellow_cards",
+    "red_cards",
+    "fouls",
+    "corner_kicks",
+    "offsides",
+    "shots_on_goal",
+    "shots_off_goal",
+    "total_shots",
+    "blocked_shots",
+    "goalkeeper_saves",
+  ];
+
+  if (value === null || value === undefined) {
+    return zeroWhenNullStats.includes(key) ? 0 : "N/D";
+  }
 
   if (key === "ball_possession" || key === "passes_%") {
     return `${value}%`;
@@ -110,7 +125,7 @@ function buildTeamStats(team, statKeys) {
     key,
     label: STAT_LABELS[key] || key,
     value: formatValue(key, team?.statistics?.[key]?.value),
-    available: team?.statistics?.[key]?.value !== null && team?.statistics?.[key]?.value !== undefined,
+    available: Boolean(team?.statistics?.[key]),
   }));
 }
 
