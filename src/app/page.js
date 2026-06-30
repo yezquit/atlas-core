@@ -10,6 +10,8 @@ import { createCaseRecord } from "@/core/modules/caseRecorder";
 import { evaluateMarkets } from "@/core/modules/marketEvaluator";
 import { buildSourceValidationPlan } from "@/core/modules/sourceValidation";
 import { getMockSourceData } from "@/core/modules/sourceConnectorMock";
+import { calculateSourceConfidence } from "@/core/modules/sourceConfidenceEngine";
+import { runValidationGate } from "@/core/modules/validationGate";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -145,6 +147,11 @@ export default function Home() {
       },
     });
 
+    const sourceConfidence = calculateSourceConfidence({
+      sourceConnector,
+      sourceValidation,
+    });
+
     const decisionResult = runDecisionEngine({
       analysisInput: {
         partido,
@@ -156,6 +163,19 @@ export default function Home() {
       specialistReports,
       fiscalReview,
       parlayStatus,
+    });
+
+    const validationGate = runValidationGate({
+      decisionResult,
+      fiscalReview,
+      sourceConfidence,
+      marketEvaluation,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
     });
 
     const caseRecord = createCaseRecord({
@@ -195,6 +215,8 @@ export default function Home() {
       marketEvaluation,
       sourceValidation,
       sourceConnector,
+      sourceConfidence,
+      validationGate,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -463,6 +485,58 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="confidence-panel">
+              <div className="confidence-header">
+                <strong>Calidad de información</strong>
+                <span>{analysis.sourceConfidence.status}</span>
+              </div>
+
+              <div className="confidence-grid">
+                <div>
+                  <small>Calidad</small>
+                  <p>{analysis.sourceConfidence.informationQuality}</p>
+                </div>
+
+                <div>
+                  <small>Puntaje</small>
+                  <p>{analysis.sourceConfidence.informationScore}</p>
+                </div>
+
+                <div>
+                  <small>Fuentes confirmadas</small>
+                  <p>{analysis.sourceConfidence.confirmedCount}/{analysis.sourceConfidence.totalSources}</p>
+                </div>
+
+                <div>
+                  <small>Fuentes pendientes</small>
+                  <p>{analysis.sourceConfidence.pendingCount}</p>
+                </div>
+
+                <div>
+                  <small>Críticas pendientes</small>
+                  <p>{analysis.sourceConfidence.criticalPendingCount}</p>
+                </div>
+
+                <div>
+                  <small>Decisión permitida</small>
+                  <p>{analysis.sourceConfidence.allowedDecisionLevel}</p>
+                </div>
+              </div>
+
+              <p className="confidence-summary">{analysis.sourceConfidence.summary}</p>
+
+              {analysis.sourceConfidence.blockers.length > 0 && (
+                <div className="confidence-blockers">
+                  <small>Bloqueos actuales</small>
+                  <ul>
+                    {analysis.sourceConfidence.blockers.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
             <div className="source-panel">
               <div className="source-header">
                 <strong>Validación de fuentes</strong>
@@ -521,6 +595,37 @@ export default function Home() {
                   </ul>
                 </div>
               )}
+            </div>
+
+            <div className="gate-panel">
+              <div className="gate-header">
+                <strong>Semáforo operativo Atlas</strong>
+                <span>{analysis.validationGate.gateStatus}</span>
+              </div>
+
+              <h3>{analysis.validationGate.finalMessage}</h3>
+
+              <div className="gate-grid">
+                <div>
+                  <small>Permiso</small>
+                  <p>{analysis.validationGate.permission}</p>
+                </div>
+
+                <div>
+                  <small>Razón</small>
+                  <p>{analysis.validationGate.reason}</p>
+                </div>
+
+                <div>
+                  <small>Acción requerida</small>
+                  <p>{analysis.validationGate.userAction}</p>
+                </div>
+
+                <div>
+                  <small>Uso en parlay</small>
+                  <p>{analysis.validationGate.canUseInParlay ? "Permitido" : "No permitido todavía"}</p>
+                </div>
+              </div>
             </div>
 
             <div className="case-panel">
