@@ -19,6 +19,7 @@ import { applyRealFixtureToSourceConfidence } from "@/core/modules/realFixtureSo
 import { lookupFixtureStatistics } from "@/core/modules/realFixtureStatisticsLookup";
 import { evaluateMarketDataCoverage } from "@/core/modules/marketDataCoverage";
 import { buildMarketFocusedStats } from "@/core/modules/marketFocusedStats";
+import { applyMarketCoverageToSourceConfidence } from "@/core/modules/marketCoverageImpact";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -233,6 +234,38 @@ export default function Home() {
     const marketFocusedStats = buildMarketFocusedStats({
       marketText: mercado,
       fixtureStatistics: realFixtureStatistics,
+    });
+
+    sourceConfidence = applyMarketCoverageToSourceConfidence({
+      sourceConfidence,
+      marketDataCoverage,
+    });
+
+    validationGate = runValidationGate({
+      decisionResult,
+      fiscalReview,
+      sourceConfidence,
+      marketEvaluation,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
+    auditPrep = prepareAuditPlan({
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+      scenario,
+      marketEvaluation,
+      fiscalReview,
+      decisionResult,
+      sourceConfidence,
     });
 
     validationGate = runValidationGate({
@@ -1121,6 +1154,67 @@ export default function Home() {
                   <div className="fixture-impact-list">
                     <small>Datos críticos resueltos</small>
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.sourceConfidence.marketCoverageImpact && (
+              <div className="market-impact-panel">
+                <div className="market-impact-header">
+                  <strong>Impacto de cobertura del mercado</strong>
+                  <span>
+                    {analysis.sourceConfidence.marketCoverageImpact.blocksMarket
+                      ? "Bloquea mercado"
+                      : "Aplicado"}
+                  </span>
+                </div>
+
+                <p>{analysis.sourceConfidence.marketCoverageImpact.summary}</p>
+
+                <div className="market-impact-grid">
+                  <div>
+                    <small>Mercado</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.marketLabel}</p>
+                  </div>
+
+                  <div>
+                    <small>Cobertura</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.coverageStatus}</p>
+                  </div>
+
+                  <div>
+                    <small>Puntaje anterior</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.originalScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Puntaje nuevo</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.newScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Incremento</small>
+                    <p>+{analysis.sourceConfidence.marketCoverageImpact.scoreAdded}</p>
+                  </div>
+
+                  <div>
+                    <small>Tope aplicado</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.cap}%</p>
+                  </div>
+                </div>
+
+                {analysis.sourceConfidence.marketCoverageImpact.missingRequiredStats?.length > 0 && (
+                  <div className="market-impact-list">
+                    <small>Estadísticas requeridas faltantes</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.missingRequiredStats.join(" · ")}</p>
+                  </div>
+                )}
+
+                {analysis.sourceConfidence.marketCoverageImpact.missingExternalData?.length > 0 && (
+                  <div className="market-impact-list">
+                    <small>Faltantes externos</small>
+                    <p>{analysis.sourceConfidence.marketCoverageImpact.missingExternalData.join(" · ")}</p>
                   </div>
                 )}
               </div>
