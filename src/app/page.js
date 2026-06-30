@@ -14,6 +14,7 @@ import { calculateSourceConfidence } from "@/core/modules/sourceConfidenceEngine
 import { runValidationGate } from "@/core/modules/validationGate";
 import { prepareAuditPlan } from "@/core/modules/auditPrep";
 import { getProjectStatus } from "@/core/modules/projectStatus";
+import { lookupRealFixture } from "@/core/modules/realFixtureLookup";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -82,7 +83,7 @@ export default function Home() {
     setSelectedCase(null);
   }
 
-  function runInitialAnalysis() {
+  async function runInitialAnalysis() {
     const partido = form.partido.trim() || "Partido pendiente";
     const competicion = form.competicion.trim() || "Competición pendiente";
     const mercado = form.mercado.trim();
@@ -206,6 +207,12 @@ export default function Home() {
       sourceConfidence,
     });
 
+    const realFixtureLookup = await lookupRealFixture({
+      matchText: partido,
+      resolvedCompetition: scenario?.resolvedCompetition || scenario?.competition || null,
+      competitionText: competicion,
+    });
+
     const caseRecord = createCaseRecord({
       analysisInput: {
         partido,
@@ -246,6 +253,7 @@ export default function Home() {
       sourceConfidence,
       validationGate,
       auditPrep,
+      realFixtureLookup,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -655,6 +663,101 @@ export default function Home() {
                   <p>{analysis.validationGate.canUseInParlay ? "Permitido" : "No permitido todavía"}</p>
                 </div>
               </div>
+            </div>
+
+            <div className="real-fixture-panel">
+              <div className="real-fixture-header">
+                <strong>Fuente real API-FOOTBALL</strong>
+                <span>{analysis.realFixtureLookup.status}</span>
+              </div>
+
+              <p>{analysis.realFixtureLookup.reason}</p>
+
+              <div className="real-fixture-grid">
+                <div>
+                  <small>Liga consultada</small>
+                  <p>{analysis.realFixtureLookup.leagueKey}</p>
+                </div>
+
+                <div>
+                  <small>Modo de búsqueda</small>
+                  <p>{analysis.realFixtureLookup.parsed.mode}</p>
+                </div>
+
+                <div>
+                  <small>Coincidencias</small>
+                  <p>{analysis.realFixtureLookup.count || 0}</p>
+                </div>
+
+                <div>
+                  <small>Conexión</small>
+                  <p>{analysis.realFixtureLookup.connected ? "Activa" : "No validada"}</p>
+                </div>
+              </div>
+
+              {analysis.realFixtureLookup.selectedFixture && (
+                <div className="real-fixture-card">
+                  <div>
+                    <small>Fixture ID</small>
+                    <p>{analysis.realFixtureLookup.selectedFixture.fixtureId}</p>
+                  </div>
+
+                  <div>
+                    <small>Partido real</small>
+                    <p>
+                      {analysis.realFixtureLookup.selectedFixture.teams.home.name}
+                      {" "}vs{" "}
+                      {analysis.realFixtureLookup.selectedFixture.teams.away.name}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Fecha UTC</small>
+                    <p>{analysis.realFixtureLookup.selectedFixture.date.utc}</p>
+                  </div>
+
+                  <div>
+                    <small>Estado</small>
+                    <p>
+                      {analysis.realFixtureLookup.selectedFixture.status.long}
+                      {" "}({analysis.realFixtureLookup.selectedFixture.status.short})
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Marcador</small>
+                    <p>
+                      {analysis.realFixtureLookup.selectedFixture.score.goals.home}
+                      {" - "}
+                      {analysis.realFixtureLookup.selectedFixture.score.goals.away}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Árbitro</small>
+                    <p>
+                      {analysis.realFixtureLookup.selectedFixture.referee.confirmed
+                        ? analysis.realFixtureLookup.selectedFixture.referee.name
+                        : "No confirmado"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Estadio</small>
+                    <p>
+                      {analysis.realFixtureLookup.selectedFixture.venue.name || "Sin estadio"}
+                      {analysis.realFixtureLookup.selectedFixture.venue.city
+                        ? ` · ${analysis.realFixtureLookup.selectedFixture.venue.city}`
+                        : ""}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Ronda</small>
+                    <p>{analysis.realFixtureLookup.selectedFixture.competition.round}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="auditprep-panel">
