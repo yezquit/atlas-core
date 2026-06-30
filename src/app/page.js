@@ -15,6 +15,7 @@ import { runValidationGate } from "@/core/modules/validationGate";
 import { prepareAuditPlan } from "@/core/modules/auditPrep";
 import { getProjectStatus } from "@/core/modules/projectStatus";
 import { lookupRealFixture } from "@/core/modules/realFixtureLookup";
+import { applyRealFixtureToSourceConfidence } from "@/core/modules/realFixtureSourceImpact";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -162,7 +163,7 @@ export default function Home() {
       },
     });
 
-    const sourceConfidence = calculateSourceConfidence({
+    let sourceConfidence = calculateSourceConfidence({
       sourceConnector,
       sourceValidation,
     });
@@ -180,7 +181,7 @@ export default function Home() {
       parlayStatus,
     });
 
-    const validationGate = runValidationGate({
+    let validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
       sourceConfidence,
@@ -193,7 +194,7 @@ export default function Home() {
       },
     });
 
-    const auditPrep = prepareAuditPlan({
+    let auditPrep = prepareAuditPlan({
       analysisInput: {
         partido,
         competicion,
@@ -211,6 +212,39 @@ export default function Home() {
       matchText: partido,
       resolvedCompetition: scenario?.resolvedCompetition || scenario?.competition || null,
       competitionText: competicion,
+    });
+
+    sourceConfidence = applyRealFixtureToSourceConfidence({
+      sourceConfidence,
+      realFixtureLookup,
+      marketEvaluation,
+    });
+
+    validationGate = runValidationGate({
+      decisionResult,
+      fiscalReview,
+      sourceConfidence,
+      marketEvaluation,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
+    auditPrep = prepareAuditPlan({
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+      scenario,
+      marketEvaluation,
+      fiscalReview,
+      decisionResult,
+      sourceConfidence,
     });
 
     const caseRecord = createCaseRecord({
@@ -759,6 +793,61 @@ export default function Home() {
                 </div>
               )}
             </div>
+
+            {analysis.sourceConfidence.realFixtureImpact && (
+              <div className="fixture-impact-panel">
+                <div className="fixture-impact-header">
+                  <strong>Impacto de fuente real</strong>
+                  <span>
+                    {analysis.sourceConfidence.realFixtureImpact.applied
+                      ? "Aplicado"
+                      : "No aplicado"}
+                  </span>
+                </div>
+
+                <p>{analysis.sourceConfidence.realFixtureImpact.summary}</p>
+
+                <div className="fixture-impact-grid">
+                  <div>
+                    <small>Puntaje anterior</small>
+                    <p>{analysis.sourceConfidence.realFixtureImpact.originalScore ?? 0}%</p>
+                  </div>
+
+                  <div>
+                    <small>Puntaje nuevo</small>
+                    <p>{analysis.sourceConfidence.realFixtureImpact.newScore ?? analysis.sourceConfidence.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Incremento</small>
+                    <p>+{analysis.sourceConfidence.realFixtureImpact.scoreAdded ?? 0}</p>
+                  </div>
+
+                  <div>
+                    <small>Críticos pendientes</small>
+                    <p>
+                      {analysis.sourceConfidence.realFixtureImpact.originalCriticalPending ?? 0}
+                      {" → "}
+                      {analysis.sourceConfidence.realFixtureImpact.newCriticalPending ?? 0}
+                    </p>
+                  </div>
+                </div>
+
+                {analysis.sourceConfidence.realFixtureImpact.confirmedData?.length > 0 && (
+                  <div className="fixture-impact-list">
+                    <small>Datos confirmados</small>
+                    <p>{analysis.sourceConfidence.realFixtureImpact.confirmedData.join(" · ")}</p>
+                  </div>
+                )}
+
+                {analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData?.length > 0 && (
+                  <div className="fixture-impact-list">
+                    <small>Datos críticos resueltos</small>
+                    <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="auditprep-panel">
               <div className="auditprep-header">
