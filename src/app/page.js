@@ -20,6 +20,7 @@ import { lookupFixtureStatistics } from "@/core/modules/realFixtureStatisticsLoo
 import { evaluateMarketDataCoverage } from "@/core/modules/marketDataCoverage";
 import { buildMarketFocusedStats } from "@/core/modules/marketFocusedStats";
 import { applyMarketCoverageToSourceConfidence } from "@/core/modules/marketCoverageImpact";
+import { runMarketGate } from "@/core/modules/marketGate";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -241,6 +242,18 @@ export default function Home() {
       marketDataCoverage,
     });
 
+    const marketGate = runMarketGate({
+      marketDataCoverage,
+      marketFocusedStats,
+      sourceConfidence,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
@@ -339,6 +352,7 @@ export default function Home() {
       realFixtureStatistics,
       marketDataCoverage,
       marketFocusedStats,
+      marketGate,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -1154,6 +1168,73 @@ export default function Home() {
                   <div className="fixture-impact-list">
                     <small>Datos críticos resueltos</small>
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.marketGate && (
+              <div className="market-gate-panel">
+                <div className="market-gate-header">
+                  <strong>Gate operativo del mercado</strong>
+                  <span>{analysis.marketGate.gateLabel}</span>
+                </div>
+
+                <h3>{analysis.marketGate.summary}</h3>
+
+                <div className="market-gate-grid">
+                  <div>
+                    <small>Mercado</small>
+                    <p>{analysis.marketGate.marketLabel}</p>
+                  </div>
+
+                  <div>
+                    <small>Permiso</small>
+                    <p>{analysis.marketGate.permission}</p>
+                  </div>
+
+                  <div>
+                    <small>Razón</small>
+                    <p>{analysis.marketGate.reason}</p>
+                  </div>
+
+                  <div>
+                    <small>Acción requerida</small>
+                    <p>{analysis.marketGate.requiredAction}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede analizar</small>
+                    <p>{analysis.marketGate.canAnalyze ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede recomendar</small>
+                    <p>{analysis.marketGate.canRecommend ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede ir en parlay</small>
+                    <p>{analysis.marketGate.canUseInParlay ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza informativa</small>
+                    <p>{analysis.marketGate.informationScore}%</p>
+                  </div>
+                </div>
+
+                {analysis.marketGate.missingRequiredStats?.length > 0 && (
+                  <div className="market-gate-list">
+                    <small>Estadísticas base faltantes</small>
+                    <p>{analysis.marketGate.missingRequiredStats.join(" · ")}</p>
+                  </div>
+                )}
+
+                {analysis.marketGate.missingExternalData?.length > 0 && (
+                  <div className="market-gate-list">
+                    <small>Faltantes externos</small>
+                    <p>{analysis.marketGate.missingExternalData.join(" · ")}</p>
                   </div>
                 )}
               </div>
