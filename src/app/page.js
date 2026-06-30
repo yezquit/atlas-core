@@ -6,6 +6,7 @@ import { routeSpecialists } from "@/core/modules/specialistRouter";
 import { generateSpecialistReports } from "@/core/modules/specialistEngine";
 import { runFiscalReview } from "@/core/modules/fiscalEngine";
 import { runDecisionEngine } from "@/core/modules/decisionEngine";
+import { createCaseRecord } from "@/core/modules/caseRecorder";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -97,6 +98,21 @@ export default function Home() {
       parlayStatus,
     });
 
+    const caseRecord = createCaseRecord({
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+      scenario,
+      specialistRoute,
+      specialistReports,
+      fiscalReview,
+      decisionResult,
+      parlayStatus,
+    });
+
     setAnalysis({
       partido,
       competicion: resolvedCompetitionLabel,
@@ -114,6 +130,7 @@ export default function Home() {
       specialistRoute,
       specialistReports,
       fiscalReview,
+      caseRecord,
       nextAction: decisionResult.nextAction,
     });
   }
@@ -344,6 +361,54 @@ export default function Home() {
                   </ul>
                 </div>
               )}
+            </div>
+
+            <div className="case-panel">
+              <div className="case-header">
+                <strong>Expediente Atlas</strong>
+                <span>{analysis.caseRecord.caseId}</span>
+              </div>
+
+              <div className="case-grid">
+                <div>
+                  <small>Fecha de análisis</small>
+                  <p>{analysis.caseRecord.readableDate}</p>
+                </div>
+
+                <div>
+                  <small>Decisión registrada</small>
+                  <p>{analysis.caseRecord.decision.status}</p>
+                </div>
+
+                <div>
+                  <small>Fiscal</small>
+                  <p>{analysis.caseRecord.fiscal.status}</p>
+                </div>
+
+                <div>
+                  <small>Auditoría</small>
+                  <p>{analysis.caseRecord.pending.auditStatus}</p>
+                </div>
+
+                <div>
+                  <small>Fuentes</small>
+                  <p>{analysis.caseRecord.pending.sourceValidation}</p>
+                </div>
+
+                <div>
+                  <small>Especialistas</small>
+                  <p>{analysis.caseRecord.specialists.reportsCount} informes iniciales</p>
+                </div>
+              </div>
+
+              <div className="case-missing">
+                <small>Datos faltantes principales</small>
+                <p>
+                  {analysis.caseRecord.pending.missingData.length > 0
+                    ? analysis.caseRecord.pending.missingData.slice(0, 8).join(", ")
+                    : "Sin datos faltantes registrados"}
+                </p>
+              </div>
             </div>
 
             <div className="analysis-notes">
