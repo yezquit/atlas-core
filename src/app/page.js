@@ -13,6 +13,7 @@ import { getMockSourceData } from "@/core/modules/sourceConnectorMock";
 import { calculateSourceConfidence } from "@/core/modules/sourceConfidenceEngine";
 import { runValidationGate } from "@/core/modules/validationGate";
 import { prepareAuditPlan } from "@/core/modules/auditPrep";
+import { getProjectStatus } from "@/core/modules/projectStatus";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -25,6 +26,7 @@ export default function Home() {
   const [analysis, setAnalysis] = useState(null);
   const [caseHistory, setCaseHistory] = useState([]);
   const [selectedCase, setSelectedCase] = useState(null);
+  const projectStatus = getProjectStatus();
 
   useEffect(() => {
     const savedHistory = window.localStorage.getItem("atlas_case_history");
@@ -805,6 +807,53 @@ export default function Home() {
             </div>
           </section>
         )}
+
+        <section className="project-status-panel">
+          <div className="project-status-header">
+            <div>
+              <strong>Estado interno de Atlas</strong>
+              <h2>{projectStatus.version}</h2>
+            </div>
+
+            <span>{projectStatus.phase}</span>
+          </div>
+
+          <p className="project-warning">{projectStatus.warning}</p>
+
+          <div className="project-summary-grid">
+            <div>
+              <small>Estado</small>
+              <p>{projectStatus.status}</p>
+            </div>
+
+            <div>
+              <small>Módulos activos</small>
+              <p>{projectStatus.activeModules}</p>
+            </div>
+
+            <div>
+              <small>Siguiente decisión</small>
+              <p>Fuentes/API reales</p>
+            </div>
+          </div>
+
+          <div className="modules-grid">
+            {projectStatus.modules.map((module) => (
+              <article key={module.name} className="module-card">
+                <div>
+                  <h3>{module.name}</h3>
+                  <span>{module.status}</span>
+                </div>
+                <p>{module.description}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="next-modules">
+            <small>Próximos módulos</small>
+            <p>{projectStatus.nextModules.join(" · ")}</p>
+          </div>
+        </section>
 
         {selectedCase && (
           <section className="case-detail-panel">
