@@ -12,6 +12,7 @@ import { buildSourceValidationPlan } from "@/core/modules/sourceValidation";
 import { getMockSourceData } from "@/core/modules/sourceConnectorMock";
 import { calculateSourceConfidence } from "@/core/modules/sourceConfidenceEngine";
 import { runValidationGate } from "@/core/modules/validationGate";
+import { prepareAuditPlan } from "@/core/modules/auditPrep";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -189,6 +190,20 @@ export default function Home() {
       },
     });
 
+    const auditPrep = prepareAuditPlan({
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+      scenario,
+      marketEvaluation,
+      fiscalReview,
+      decisionResult,
+      sourceConfidence,
+    });
+
     const caseRecord = createCaseRecord({
       analysisInput: {
         partido,
@@ -228,6 +243,7 @@ export default function Home() {
       sourceConnector,
       sourceConfidence,
       validationGate,
+      auditPrep,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -636,6 +652,85 @@ export default function Home() {
                   <small>Uso en parlay</small>
                   <p>{analysis.validationGate.canUseInParlay ? "Permitido" : "No permitido todavía"}</p>
                 </div>
+              </div>
+            </div>
+
+            <div className="auditprep-panel">
+              <div className="auditprep-header">
+                <strong>Preparación de auditoría</strong>
+                <span>{analysis.auditPrep.auditStatus} · Prioridad {analysis.auditPrep.auditPriority}</span>
+              </div>
+
+              <p>{analysis.auditPrep.summary}</p>
+
+              <div className="auditprep-grid">
+                <div>
+                  <small>Tipo de auditoría</small>
+                  <p>{analysis.auditPrep.auditType}</p>
+                </div>
+
+                <div>
+                  <small>Mercado auditado</small>
+                  <p>{analysis.auditPrep.market}</p>
+                </div>
+
+                <div>
+                  <small>Familia</small>
+                  <p>{analysis.auditPrep.marketFamily}</p>
+                </div>
+
+                <div>
+                  <small>Decisión a auditar</small>
+                  <p>{analysis.auditPrep.decisionToAudit}</p>
+                </div>
+
+                <div>
+                  <small>Confianza a auditar</small>
+                  <p>{analysis.auditPrep.confidenceToAudit}</p>
+                </div>
+
+                <div>
+                  <small>Resultado</small>
+                  <p>Pendiente</p>
+                </div>
+              </div>
+
+              <div className="auditprep-lists">
+                <article>
+                  <small>Preguntas obligatorias</small>
+                  <ul>
+                    {analysis.auditPrep.auditQuestions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+
+                <article>
+                  <small>Datos a comparar después</small>
+                  <ul>
+                    {analysis.auditPrep.postMatchChecks.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+
+                <article>
+                  <small>Revisiones especiales</small>
+                  <ul>
+                    {analysis.auditPrep.specialChecks.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+
+                <article>
+                  <small>Clasificaciones posibles</small>
+                  <ul>
+                    {analysis.auditPrep.expectedAuditResultTypes.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
               </div>
             </div>
 
