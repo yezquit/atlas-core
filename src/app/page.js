@@ -16,6 +16,8 @@ import { prepareAuditPlan } from "@/core/modules/auditPrep";
 import { getProjectStatus } from "@/core/modules/projectStatus";
 import { lookupRealFixture } from "@/core/modules/realFixtureLookup";
 import { applyRealFixtureToSourceConfidence } from "@/core/modules/realFixtureSourceImpact";
+import { lookupFixtureStatistics } from "@/core/modules/realFixtureStatisticsLookup";
+import { evaluateMarketDataCoverage } from "@/core/modules/marketDataCoverage";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -220,6 +222,13 @@ export default function Home() {
       marketEvaluation,
     });
 
+    const realFixtureStatistics = await lookupFixtureStatistics(realFixtureLookup);
+
+    const marketDataCoverage = evaluateMarketDataCoverage({
+      marketText: mercado,
+      fixtureStatistics: realFixtureStatistics,
+    });
+
     validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
@@ -288,6 +297,8 @@ export default function Home() {
       validationGate,
       auditPrep,
       realFixtureLookup,
+      realFixtureStatistics,
+      marketDataCoverage,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -793,6 +804,190 @@ export default function Home() {
                 </div>
               )}
             </div>
+
+            {analysis.realFixtureStatistics && (
+              <div className="fixture-statistics-panel">
+                <div className="fixture-statistics-header">
+                  <strong>Estadísticas reales del fixture</strong>
+                  <span>{analysis.realFixtureStatistics.status}</span>
+                </div>
+
+                <p>{analysis.realFixtureStatistics.reason}</p>
+
+                <div className="fixture-statistics-grid">
+                  <div>
+                    <small>Fixture ID</small>
+                    <p>{analysis.realFixtureStatistics.fixtureId || "Sin fixture"}</p>
+                  </div>
+
+                  <div>
+                    <small>Conexión</small>
+                    <p>{analysis.realFixtureStatistics.connected ? "Activa" : "No validada"}</p>
+                  </div>
+
+                  <div>
+                    <small>Equipos con datos</small>
+                    <p>{analysis.realFixtureStatistics.statistics?.countTeams || 0}</p>
+                  </div>
+
+                  <div>
+                    <small>Tarjetas</small>
+                    <p>{analysis.realFixtureStatistics.statistics?.qualityFlags?.hasCards ? "Disponibles" : "No disponibles"}</p>
+                  </div>
+
+                  <div>
+                    <small>Faltas</small>
+                    <p>{analysis.realFixtureStatistics.statistics?.qualityFlags?.hasFouls ? "Disponibles" : "No disponibles"}</p>
+                  </div>
+
+                  <div>
+                    <small>Córners</small>
+                    <p>{analysis.realFixtureStatistics.statistics?.qualityFlags?.hasCorners ? "Disponibles" : "No disponibles"}</p>
+                  </div>
+
+                  <div>
+                    <small>Remates</small>
+                    <p>{analysis.realFixtureStatistics.statistics?.qualityFlags?.hasShots ? "Disponibles" : "No disponibles"}</p>
+                  </div>
+
+                  <div>
+                    <small>Posesión</small>
+                    <p>{analysis.realFixtureStatistics.statistics?.qualityFlags?.hasPossession ? "Disponible" : "No disponible"}</p>
+                  </div>
+                </div>
+
+                {analysis.realFixtureStatistics.statistics?.teams?.length > 0 && (
+                  <div className="team-stats-grid">
+                    {analysis.realFixtureStatistics.statistics.teams.map((team) => (
+                      <article key={team.team.id || team.team.name}>
+                        <h3>{team.team.name}</h3>
+
+                        <div>
+                          <small>Faltas</small>
+                          <p>{team.statistics?.fouls?.value ?? "N/D"}</p>
+                        </div>
+
+                        <div>
+                          <small>Amarillas</small>
+                          <p>{team.statistics?.yellow_cards?.value ?? 0}</p>
+                        </div>
+
+                        <div>
+                          <small>Rojas</small>
+                          <p>{team.statistics?.red_cards?.value ?? 0}</p>
+                        </div>
+
+                        <div>
+                          <small>Córners</small>
+                          <p>{team.statistics?.corner_kicks?.value ?? "N/D"}</p>
+                        </div>
+
+                        <div>
+                          <small>Remates</small>
+                          <p>{team.statistics?.total_shots?.value ?? "N/D"}</p>
+                        </div>
+
+                        <div>
+                          <small>Posesión</small>
+                          <p>
+                            {team.statistics?.ball_possession?.value ?? "N/D"}
+                            {team.statistics?.ball_possession?.value !== undefined ? "%" : ""}
+                          </p>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                {analysis.realFixtureStatistics.statistics?.availableStats?.length > 0 && (
+                  <div className="available-stats-list">
+                    <small>Estadísticas disponibles</small>
+                    <p>{analysis.realFixtureStatistics.statistics.availableStats.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.marketDataCoverage && (
+              <div className="market-coverage-panel">
+                <div className="market-coverage-header">
+                  <strong>Cobertura de datos del mercado</strong>
+                  <span>{analysis.marketDataCoverage.coverageStatus}</span>
+                </div>
+
+                <p>{analysis.marketDataCoverage.summary}</p>
+
+                <div className="market-coverage-grid">
+                  <div>
+                    <small>Mercado detectado</small>
+                    <p>{analysis.marketDataCoverage.marketLabel}</p>
+                  </div>
+
+                  <div>
+                    <small>Nivel</small>
+                    <p>{analysis.marketDataCoverage.coverageLevel}</p>
+                  </div>
+
+                  <div>
+                    <small>Requeridos cubiertos</small>
+                    <p>
+                      {analysis.marketDataCoverage.coveredRequiredStats.length}
+                      {" / "}
+                      {analysis.marketDataCoverage.requiredStats.length}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Fuente base</small>
+                    <p>API-FOOTBALL</p>
+                  </div>
+                </div>
+
+                <div className="coverage-lists">
+                  <article>
+                    <small>Datos requeridos</small>
+                    <ul>
+                      {analysis.marketDataCoverage.requiredStats.map((stat) => (
+                        <li key={stat.key}>
+                          {stat.available ? "✅" : "❌"} {stat.label}
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+
+                  <article>
+                    <small>Datos útiles complementarios</small>
+                    <ul>
+                      {analysis.marketDataCoverage.usefulStats.length > 0
+                        ? analysis.marketDataCoverage.usefulStats.map((stat) => (
+                            <li key={stat.key}>
+                              {stat.available ? "✅" : "❌"} {stat.label}
+                            </li>
+                          ))
+                        : <li>Sin datos complementarios definidos</li>}
+                    </ul>
+                  </article>
+
+                  <article>
+                    <small>Faltantes externos</small>
+                    <ul>
+                      {analysis.marketDataCoverage.missingExternalData.map((item) => (
+                        <li key={item}>⚠️ {item}</li>
+                      ))}
+                    </ul>
+                  </article>
+
+                  <article>
+                    <small>Todas las estadísticas disponibles</small>
+                    <ul>
+                      {analysis.marketDataCoverage.availableStats.map((stat) => (
+                        <li key={stat.key}>{stat.label}</li>
+                      ))}
+                    </ul>
+                  </article>
+                </div>
+              </div>
+            )}
 
             {analysis.sourceConfidence.realFixtureImpact && (
               <div className="fixture-impact-panel">

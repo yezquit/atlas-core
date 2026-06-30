@@ -1880,3 +1880,222 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+.fixture-statistics-panel {
+  margin-bottom: 20px;
+  border: 1px solid rgba(124, 196, 255, 0.34);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(77, 163, 255, 0.045);
+}
+
+.fixture-statistics-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.fixture-statistics-header strong {
+  color: var(--accent-strong);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.fixture-statistics-header span {
+  border: 1px solid rgba(124, 196, 255, 0.45);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--accent-strong);
+  font-size: 13px;
+  background: rgba(77, 163, 255, 0.08);
+}
+
+.fixture-statistics-panel > p {
+  margin: 0 0 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.fixture-statistics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fixture-statistics-grid div,
+.available-stats-list {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(8, 13, 24, 0.62);
+}
+
+.fixture-statistics-grid small,
+.available-stats-list small,
+.team-stats-grid small {
+  display: block;
+  color: var(--accent-strong);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.fixture-statistics-grid p,
+.available-stats-list p,
+.team-stats-grid p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.team-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.team-stats-grid article {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(8, 13, 24, 0.62);
+}
+
+.team-stats-grid h3 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.team-stats-grid article > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+@media (max-width: 1000px) {
+  .fixture-statistics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .team-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .fixture-statistics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fixture-statistics-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.market-coverage-panel {
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 190, 92, 0.36);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(255, 190, 92, 0.045);
+}
+
+.market-coverage-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.market-coverage-header strong {
+  color: #ffd28a;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.market-coverage-header span {
+  border: 1px solid rgba(255, 190, 92, 0.45);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #ffd28a;
+  font-size: 13px;
+  background: rgba(255, 190, 92, 0.08);
+}
+
+.market-coverage-panel > p {
+  margin: 0 0 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.market-coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.market-coverage-grid div,
+.coverage-lists article {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(8, 13, 24, 0.62);
+}
+
+.market-coverage-grid small,
+.coverage-lists small {
+  display: block;
+  color: #ffd28a;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.market-coverage-grid p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.coverage-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.coverage-lists ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.coverage-lists li {
+  margin-bottom: 5px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1000px) {
+  .market-coverage-grid,
+  .coverage-lists {
+    grid-template-columns: 1fr;
+  }
+
+  .market-coverage-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
