@@ -2492,3 +2492,111 @@ h1 {
     align-items: flex-start;
   }
 }
+
+.atlas-answer-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(49, 209, 124, 0.44);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(49, 209, 124, 0.12), transparent 34%),
+    rgba(49, 209, 124, 0.045);
+}
+
+.atlas-answer-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.atlas-answer-header strong {
+  color: #8df0bd;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.atlas-answer-header span {
+  border: 1px solid rgba(49, 209, 124, 0.48);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #8df0bd;
+  font-size: 13px;
+  background: rgba(49, 209, 124, 0.1);
+}
+
+.atlas-answer-panel h2 {
+  margin: 0 0 18px;
+  font-size: clamp(24px, 4vw, 40px);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+
+.atlas-answer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.atlas-answer-grid div,
+.atlas-answer-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.67);
+}
+
+.atlas-answer-grid small,
+.atlas-answer-section small {
+  display: block;
+  color: #8df0bd;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.atlas-answer-grid p,
+.atlas-answer-section p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.atlas-answer-section {
+  margin-top: 12px;
+}
+
+.atlas-answer-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.atlas-answer-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.atlas-answer-section.warning {
+  border-color: rgba(255, 190, 92, 0.36);
+  background: rgba(255, 190, 92, 0.045);
+}
+
+.atlas-answer-section.warning small {
+  color: #ffd28a;
+}
+
+@media (max-width: 900px) {
+  .atlas-answer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .atlas-answer-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

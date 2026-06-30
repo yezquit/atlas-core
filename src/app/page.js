@@ -22,6 +22,7 @@ import { buildMarketFocusedStats } from "@/core/modules/marketFocusedStats";
 import { applyMarketCoverageToSourceConfidence } from "@/core/modules/marketCoverageImpact";
 import { runMarketGate } from "@/core/modules/marketGate";
 import { coordinateGates } from "@/core/modules/gateCoordinator";
+import { buildAtlasExecutiveAnswer } from "@/core/modules/atlasExecutiveAnswer";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -294,6 +295,21 @@ export default function Home() {
       },
     });
 
+    const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
+      gateCoordinator,
+      marketGate,
+      marketDataCoverage,
+      realFixtureLookup,
+      realFixtureStatistics,
+      sourceConfidence,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
@@ -367,6 +383,7 @@ export default function Home() {
       marketFocusedStats,
       marketGate,
       gateCoordinator,
+      atlasExecutiveAnswer,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -1182,6 +1199,81 @@ export default function Home() {
                   <div className="fixture-impact-list">
                     <small>Datos críticos resueltos</small>
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.atlasExecutiveAnswer && (
+              <div className="atlas-answer-panel">
+                <div className="atlas-answer-header">
+                  <strong>{analysis.atlasExecutiveAnswer.title}</strong>
+                  <span>{analysis.atlasExecutiveAnswer.finalLabel}</span>
+                </div>
+
+                <h2>{analysis.atlasExecutiveAnswer.mainConclusion}</h2>
+
+                <div className="atlas-answer-grid">
+                  <div>
+                    <small>Permiso operativo</small>
+                    <p>{analysis.atlasExecutiveAnswer.operationalPermission}</p>
+                  </div>
+
+                  <div>
+                    <small>Mercado</small>
+                    <p>{analysis.atlasExecutiveAnswer.market}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza informativa</small>
+                    <p>{analysis.atlasExecutiveAnswer.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Puede analizar</small>
+                    <p>{analysis.atlasExecutiveAnswer.canAnalyze ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede recomendar</small>
+                    <p>{analysis.atlasExecutiveAnswer.canRecommend ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede ir en parlay</small>
+                    <p>{analysis.atlasExecutiveAnswer.canUseInParlay ? "Sí" : "No"}</p>
+                  </div>
+                </div>
+
+                <div className="atlas-answer-section">
+                  <small>Razón principal</small>
+                  <p>{analysis.atlasExecutiveAnswer.primaryReason}</p>
+                </div>
+
+                <div className="atlas-answer-section">
+                  <small>Acción requerida</small>
+                  <p>{analysis.atlasExecutiveAnswer.requiredAction}</p>
+                </div>
+
+                {analysis.atlasExecutiveAnswer.keyFacts.length > 0 && (
+                  <div className="atlas-answer-section">
+                    <small>Hechos confirmados</small>
+                    <ul>
+                      {analysis.atlasExecutiveAnswer.keyFacts.map((fact) => (
+                        <li key={fact}>{fact}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.atlasExecutiveAnswer.warnings.length > 0 && (
+                  <div className="atlas-answer-section warning">
+                    <small>Advertencias</small>
+                    <ul>
+                      {analysis.atlasExecutiveAnswer.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
