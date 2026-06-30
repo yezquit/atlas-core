@@ -9,6 +9,7 @@ import { runDecisionEngine } from "@/core/modules/decisionEngine";
 import { createCaseRecord } from "@/core/modules/caseRecorder";
 import { evaluateMarkets } from "@/core/modules/marketEvaluator";
 import { buildSourceValidationPlan } from "@/core/modules/sourceValidation";
+import { getMockSourceData } from "@/core/modules/sourceConnectorMock";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -134,6 +135,16 @@ export default function Home() {
       },
     });
 
+    const sourceConnector = getMockSourceData({
+      scenario,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     const decisionResult = runDecisionEngine({
       analysisInput: {
         partido,
@@ -183,6 +194,7 @@ export default function Home() {
       fiscalReview,
       marketEvaluation,
       sourceValidation,
+      sourceConnector,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -421,6 +433,31 @@ export default function Home() {
                         ))}
                       </ul>
                     </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="connector-panel">
+              <div className="connector-header">
+                <strong>Conector de fuentes</strong>
+                <span>{analysis.sourceConnector.status}</span>
+              </div>
+
+              <p>{analysis.sourceConnector.summary}</p>
+
+              <div className="connector-grid">
+                {analysis.sourceConnector.sourceData.map((item) => (
+                  <article key={item.data} className="connector-card">
+                    <div className="connector-title">
+                      <h3>{item.data}</h3>
+                      <span>{item.status}</span>
+                    </div>
+
+                    <p><strong>Valor:</strong> {item.value}</p>
+                    <p><strong>Fuente:</strong> {item.source}</p>
+                    <p><strong>Nivel:</strong> {item.sourceLevel}</p>
+                    <small>{item.note}</small>
                   </article>
                 ))}
               </div>

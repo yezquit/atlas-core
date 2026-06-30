@@ -999,3 +999,99 @@ h1 {
 .priority-legend strong {
   color: #c9b2ff;
 }
+
+.connector-panel {
+  margin-bottom: 20px;
+  border: 1px solid rgba(77, 163, 255, 0.3);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(77, 163, 255, 0.035);
+}
+
+.connector-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.connector-header strong {
+  color: var(--accent-strong);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.connector-header span {
+  border: 1px solid rgba(124, 196, 255, 0.45);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--accent-strong);
+  font-size: 13px;
+  background: rgba(77, 163, 255, 0.08);
+}
+
+.connector-panel > p {
+  margin: 0 0 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.connector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.connector-card {
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.connector-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.connector-title h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.connector-title span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
+.connector-card p {
+  margin: 0 0 8px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.connector-card small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .connector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .connector-header,
+  .connector-title {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
