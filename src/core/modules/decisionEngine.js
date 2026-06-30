@@ -9,18 +9,18 @@ export function runDecisionEngine({
   const useCase = analysisInput?.uso || "analisis";
 
   let decision = "Análisis inicial";
-  let confidence = 35;
+  let confidence = 15;
   let robustness = "Inicial";
-  let fragility = "Media";
+  let fragility = "Alta";
   let temporalStatus = "🔵 Análisis inicial";
   let mainReason =
-    "Atlas tiene clasificación de escenario, especialistas activados, informes iniciales y fiscalización preliminar.";
+    "Atlas solo ha realizado clasificación inicial del caso. Todavía no existe análisis estadístico, consulta de fuentes, árbitro, alineaciones ni validación externa.";
   let mainRisk =
-    "Todavía faltan fuentes externas, datos confirmados y validación final.";
+    "La salida no puede interpretarse como recomendación porque aún no hay evidencia real suficiente.";
   let invalidationCondition =
-    "No usar como recomendación real hasta confirmar datos críticos.";
+    "No usar como recomendación real hasta conectar fuentes confiables, datos estadísticos y validación final.";
   let nextAction =
-    "Conectar fuentes confiables, árbitro, estadísticas recientes y validación final.";
+    "Conectar fuentes confiables, árbitro, estadísticas recientes, alineaciones y validación final.";
 
   const resolvedCompetition = scenario?.resolvedCompetition?.resolved;
   const fiscalStatus = fiscalReview?.fiscalStatus || "Objeción moderada";
@@ -40,22 +40,24 @@ export function runDecisionEngine({
 
   if (!resolvedCompetition) {
     decision = "Esperar validación";
-    confidence = 25;
+    confidence = 10;
     robustness = "Baja";
     fragility = "Alta";
+    temporalStatus = "🔴 No decidir todavía";
     mainReason =
-      "Atlas no tiene competición suficientemente confirmada, por lo que no puede avanzar a decisión fuerte.";
+      "Atlas no tiene competición suficientemente confirmada, por lo que no puede avanzar en el análisis.";
     mainRisk =
-      "Analizar un partido en la división equivocada puede contaminar todo el análisis.";
+      "Analizar un partido en la división equivocada puede contaminar todo el proceso.";
     invalidationCondition =
       "La competición debe confirmarse antes de evaluar mercados.";
   } else if (hasStrongObjection) {
     decision = "Esperar validación";
-    confidence = 40;
-    robustness = "Baja-media";
+    confidence = 15;
+    robustness = "Baja";
     fragility = "Alta";
+    temporalStatus = "🟠 Esperar validación";
     mainReason =
-      "El Fiscal detectó objeciones fuertes que impiden emitir recomendación.";
+      "El Fiscal detectó objeciones fuertes y faltan datos críticos. Atlas no puede emitir recomendación.";
     mainRisk =
       fiscalReview?.objections?.join(" ") ||
       "Existen datos críticos pendientes.";
@@ -63,25 +65,27 @@ export function runDecisionEngine({
       "No avanzar hasta resolver las objeciones del Fiscal.";
   } else if (hasModerateObjection) {
     decision = "Análisis preliminar";
-    confidence = 50;
-    robustness = "Media";
-    fragility = "Media-alta";
+    confidence = 20;
+    robustness = "Baja-media";
+    fragility = "Alta";
+    temporalStatus = "🔵 Análisis inicial";
     mainReason =
-      "Atlas tiene señales iniciales, pero todavía faltan datos críticos para elevar la decisión.";
+      "Atlas tiene una estructura inicial del caso, pero todavía faltan datos críticos para evaluar el mercado.";
     mainRisk =
       fiscalReview?.objections?.join(" ") ||
       "El análisis todavía depende de información pendiente.";
     invalidationCondition =
       "Si los datos críticos contradicen el escenario inicial, el mercado debe descartarse o bajar confianza.";
   } else {
-    decision = "Apuesta aceptable preliminar";
-    confidence = 65;
-    robustness = "Media";
-    fragility = "Media";
+    decision = "Análisis preliminar";
+    confidence = 25;
+    robustness = "Media-baja";
+    fragility = "Media-alta";
+    temporalStatus = "🔵 Análisis inicial";
     mainReason =
-      "La clasificación, especialistas y Fiscal no presentan objeción crítica en esta fase inicial.";
+      "La clasificación inicial no presenta objeción crítica, pero aún no existe validación con fuentes externas.";
     mainRisk =
-      "La decisión sigue siendo preliminar porque aún no existe validación final con fuentes externas.";
+      "Sin datos reales, estadísticas, árbitro, alineaciones y fuentes, Atlas no puede elevar confianza.";
     invalidationCondition =
       "Datos oficiales o fuentes confiables que contradigan el escenario inicial.";
   }
@@ -99,14 +103,12 @@ export function runDecisionEngine({
   }
 
   if (useCase === "parlay" && parlayStatus !== "🟢 Apto para parlay") {
-    if (confidence > 45) confidence -= 10;
+    confidence = Math.min(confidence, 15);
     fragility = "Alta";
+    temporalStatus = "🟠 Esperar validación";
     nextAction =
       "No congelar para parlay todavía. Validar datos críticos y revisar compatibilidad antes de usar.";
   }
-
-  if (confidence < 0) confidence = 0;
-  if (confidence > 100) confidence = 100;
 
   return {
     decision,

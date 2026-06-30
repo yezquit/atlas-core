@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { classifyScenario } from "@/core/modules/scenarioClassifier";
 import { routeSpecialists } from "@/core/modules/specialistRouter";
 import { generateSpecialistReports } from "@/core/modules/specialistEngine";
 import { runFiscalReview } from "@/core/modules/fiscalEngine";
 import { runDecisionEngine } from "@/core/modules/decisionEngine";
 import { createCaseRecord } from "@/core/modules/caseRecorder";
+import { evaluateMarkets } from "@/core/modules/marketEvaluator";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -17,6 +18,34 @@ export default function Home() {
     uso: "analisis",
   });
   const [analysis, setAnalysis] = useState(null);
+  const [caseHistory, setCaseHistory] = useState([]);
+
+  useEffect(() => {
+    const savedHistory = window.localStorage.getItem("atlas_case_history");
+
+    if (savedHistory) {
+      try {
+        setCaseHistory(JSON.parse(savedHistory));
+      } catch {
+        setCaseHistory([]);
+      }
+    }
+  }, []);
+
+  function saveCaseToHistory(caseRecord) {
+    const updatedHistory = [caseRecord, ...caseHistory].slice(0, 10);
+
+    setCaseHistory(updatedHistory);
+    window.localStorage.setItem(
+      "atlas_case_history",
+      JSON.stringify(updatedHistory)
+    );
+  }
+
+  function clearCaseHistory() {
+    setCaseHistory([]);
+    window.localStorage.removeItem("atlas_case_history");
+  }
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -85,6 +114,13 @@ export default function Home() {
       parlayStatus,
     });
 
+    const marketEvaluation = evaluateMarkets({
+      mercado,
+      scenario,
+      specialistReports,
+      fiscalReview,
+    });
+
     const decisionResult = runDecisionEngine({
       analysisInput: {
         partido,
@@ -113,6 +149,8 @@ export default function Home() {
       parlayStatus,
     });
 
+    saveCaseToHistory(caseRecord);
+
     setAnalysis({
       partido,
       competicion: resolvedCompetitionLabel,
@@ -130,6 +168,7 @@ export default function Home() {
       specialistRoute,
       specialistReports,
       fiscalReview,
+      marketEvaluation,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -298,6 +337,47 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="market-panel">
+              <div className="market-header">
+                <strong>Evaluación de mercados</strong>
+                <span>{analysis.marketEvaluation.marketFamily}</span>
+              </div>
+
+              <p>{analysis.marketEvaluation.summary}</p>
+
+              <div className="market-list">
+                {analysis.marketEvaluation.evaluations.map((market) => (
+                  <article key={market.name} className="market-card">
+                    <div className="market-title">
+                      <h3>{market.name}</h3>
+                      <span>{market.status} · {market.confidence}</span>
+                    </div>
+
+                    <p><strong>Rol:</strong> {market.role}</p>
+                    <p><strong>Fragilidad:</strong> {market.fragility}</p>
+
+                    <div className="market-section">
+                      <small>Fortalezas</small>
+                      <ul>
+                        {market.strengths.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="market-section">
+                      <small>Validación necesaria</small>
+                      <ul>
+                        {market.validationNeeded.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
             <div className="reports-panel">
               <strong>Informes iniciales de especialistas</strong>
               <div className="reports-list">
@@ -434,6 +514,35 @@ export default function Home() {
             </div>
           </section>
         )}
+
+        {caseHistory.length > 0 && (
+          <section className="history-panel">
+            <div className="history-header">
+              <strong>Historial local de expedientes</strong>
+              <button type="button" onClick={clearCaseHistory}>
+                Limpiar historial
+              </button>
+            </div>
+
+            <div className="history-list">
+              {caseHistory.map((item) => (
+                <article key={item.caseId} className="history-item">
+                  <div>
+                    <strong>{item.input.partido}</strong>
+                    <small>{item.caseId}</small>
+                  </div>
+
+                  <p>
+                    {item.resolvedCompetition.name} ({item.resolvedCompetition.division})
+                  </p>
+
+                  <span>{item.decision.status} · {item.decision.confidence}</span>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
       </section>
     </main>
   );
