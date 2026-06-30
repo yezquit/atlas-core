@@ -23,6 +23,7 @@ import { applyMarketCoverageToSourceConfidence } from "@/core/modules/marketCove
 import { runMarketGate } from "@/core/modules/marketGate";
 import { coordinateGates } from "@/core/modules/gateCoordinator";
 import { buildAtlasExecutiveAnswer } from "@/core/modules/atlasExecutiveAnswer";
+import { buildDirectorAtlasVerdict } from "@/core/modules/directorAtlas";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -310,6 +311,22 @@ export default function Home() {
       },
     });
 
+    const directorAtlas = buildDirectorAtlasVerdict({
+      gateCoordinator,
+      marketGate,
+      marketDataCoverage,
+      marketFocusedStats,
+      realFixtureLookup,
+      realFixtureStatistics,
+      sourceConfidence,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
@@ -384,6 +401,7 @@ export default function Home() {
       marketGate,
       gateCoordinator,
       atlasExecutiveAnswer,
+      directorAtlas,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -1201,6 +1219,108 @@ export default function Home() {
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {analysis.directorAtlas && (
+              <div className="director-atlas-panel">
+                <div className="director-atlas-header">
+                  <strong>{analysis.directorAtlas.title}</strong>
+                  <span>{analysis.directorAtlas.actionLevel.label}</span>
+                </div>
+
+                <h2>{analysis.directorAtlas.verdict}</h2>
+
+                <div className="director-atlas-grid">
+                  <div>
+                    <small>Nivel de acción</small>
+                    <p>{analysis.directorAtlas.actionLevel.level}</p>
+                  </div>
+
+                  <div>
+                    <small>Mercado evaluado</small>
+                    <p>{analysis.directorAtlas.market}</p>
+                  </div>
+
+                  <div>
+                    <small>Mercado preferente</small>
+                    <p>{analysis.directorAtlas.preferredMarket}</p>
+                  </div>
+
+                  <div>
+                    <small>Selección candidata</small>
+                    <p>{analysis.directorAtlas.candidateSelection}</p>
+                  </div>
+
+                  <div>
+                    <small>Cuota mínima aceptable</small>
+                    <p>{analysis.directorAtlas.minimumAcceptableOdds}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza informativa</small>
+                    <p>{analysis.directorAtlas.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Puede recomendar</small>
+                    <p>{analysis.directorAtlas.canRecommend ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Parlay</small>
+                    <p>{analysis.directorAtlas.canUseInParlay ? "Apto" : "No apto"}</p>
+                  </div>
+
+                  <div>
+                    <small>Uso solicitado</small>
+                    <p>{analysis.directorAtlas.useCase}</p>
+                  </div>
+                </div>
+
+                <div className="director-atlas-section">
+                  <small>Razones principales</small>
+                  <ul>
+                    {analysis.directorAtlas.mainReasons.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {analysis.directorAtlas.risks.length > 0 && (
+                  <div className="director-atlas-section risk">
+                    <small>Riesgos / faltantes</small>
+                    <ul>
+                      {analysis.directorAtlas.risks.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.directorAtlas.requiredConditions.length > 0 && (
+                  <div className="director-atlas-section">
+                    <small>Condiciones para volverlo accionable</small>
+                    <ul>
+                      {analysis.directorAtlas.requiredConditions.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.directorAtlas.avoid.length > 0 && (
+                  <div className="director-atlas-section avoid">
+                    <small>Qué evitar</small>
+                    <ul>
+                      {analysis.directorAtlas.avoid.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <p className="director-note">{analysis.directorAtlas.directorNote}</p>
               </div>
             )}
 

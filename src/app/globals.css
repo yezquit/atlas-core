@@ -2600,3 +2600,122 @@ h1 {
     align-items: flex-start;
   }
 }
+
+.director-atlas-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(255, 190, 92, 0.5);
+  border-radius: 26px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 190, 92, 0.14), transparent 36%),
+    rgba(255, 190, 92, 0.045);
+}
+
+.director-atlas-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.director-atlas-header strong {
+  color: #ffd28a;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.director-atlas-header span {
+  border: 1px solid rgba(255, 190, 92, 0.52);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #ffd28a;
+  font-size: 13px;
+  background: rgba(255, 190, 92, 0.1);
+}
+
+.director-atlas-panel h2 {
+  margin: 0 0 18px;
+  font-size: clamp(26px, 4.5vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.director-atlas-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.director-atlas-grid div,
+.director-atlas-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.director-atlas-grid small,
+.director-atlas-section small {
+  display: block;
+  color: #ffd28a;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.director-atlas-grid p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.director-atlas-section {
+  margin-top: 12px;
+}
+
+.director-atlas-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.director-atlas-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.director-atlas-section.risk {
+  border-color: rgba(255, 190, 92, 0.38);
+  background: rgba(255, 190, 92, 0.055);
+}
+
+.director-atlas-section.avoid {
+  border-color: rgba(255, 92, 122, 0.38);
+  background: rgba(255, 92, 122, 0.055);
+}
+
+.director-atlas-section.avoid small {
+  color: #ffb3c0;
+}
+
+.director-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+@media (max-width: 950px) {
+  .director-atlas-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .director-atlas-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
