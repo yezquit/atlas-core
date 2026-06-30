@@ -24,6 +24,7 @@ import { runMarketGate } from "@/core/modules/marketGate";
 import { coordinateGates } from "@/core/modules/gateCoordinator";
 import { buildAtlasExecutiveAnswer } from "@/core/modules/atlasExecutiveAnswer";
 import { buildDirectorAtlasVerdict } from "@/core/modules/directorAtlas";
+import { buildTechnicalConfidence } from "@/core/modules/technicalConfidence";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -296,6 +297,16 @@ export default function Home() {
       },
     });
 
+    const technicalConfidence = buildTechnicalConfidence({
+      sourceConfidence,
+      marketGate,
+      gateCoordinator,
+      marketDataCoverage,
+      realFixtureLookup,
+      realFixtureStatistics,
+      marketFocusedStats,
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -400,6 +411,7 @@ export default function Home() {
       marketFocusedStats,
       marketGate,
       gateCoordinator,
+      technicalConfidence,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -1217,6 +1229,76 @@ export default function Home() {
                   <div className="fixture-impact-list">
                     <small>Datos críticos resueltos</small>
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.technicalConfidence && (
+              <div className="technical-confidence-panel">
+                <div className="technical-confidence-header">
+                  <strong>Fuerza técnica Atlas</strong>
+                  <span>{analysis.technicalConfidence.technicalLevel.label}</span>
+                </div>
+
+                <h3>{analysis.technicalConfidence.summary}</h3>
+
+                <div className="technical-confidence-grid">
+                  <div>
+                    <small>Confianza informativa</small>
+                    <p>{analysis.technicalConfidence.informationScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Fuerza técnica</small>
+                    <p>{analysis.technicalConfidence.technicalScore}%</p>
+                  </div>
+
+                  <div>
+                    <small>Nivel técnico</small>
+                    <p>{analysis.technicalConfidence.technicalLevel.level}</p>
+                  </div>
+
+                  <div>
+                    <small>Nivel de exposición</small>
+                    <p>{analysis.technicalConfidence.exposure.label}</p>
+                  </div>
+
+                  <div>
+                    <small>Puede recomendar</small>
+                    <p>{analysis.technicalConfidence.canRecommend ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div>
+                    <small>Parlay</small>
+                    <p>{analysis.technicalConfidence.canUseInParlay ? "Apto" : "No apto"}</p>
+                  </div>
+                </div>
+
+                <div className="technical-confidence-section">
+                  <small>Razón del nivel de exposición</small>
+                  <p>{analysis.technicalConfidence.exposure.reason}</p>
+                </div>
+
+                {analysis.technicalConfidence.factors.length > 0 && (
+                  <div className="technical-confidence-section">
+                    <small>Factores a favor</small>
+                    <ul>
+                      {analysis.technicalConfidence.factors.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.technicalConfidence.penalties.length > 0 && (
+                  <div className="technical-confidence-section penalty">
+                    <small>Limitantes / penalizaciones</small>
+                    <ul>
+                      {analysis.technicalConfidence.penalties.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>

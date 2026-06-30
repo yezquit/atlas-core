@@ -2719,3 +2719,111 @@ h1 {
     align-items: flex-start;
   }
 }
+
+.technical-confidence-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(49, 209, 124, 0.42);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(49, 209, 124, 0.12), transparent 35%),
+    rgba(49, 209, 124, 0.045);
+}
+
+.technical-confidence-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.technical-confidence-header strong {
+  color: #8df0bd;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.technical-confidence-header span {
+  border: 1px solid rgba(49, 209, 124, 0.48);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #8df0bd;
+  font-size: 13px;
+  background: rgba(49, 209, 124, 0.1);
+}
+
+.technical-confidence-panel h3 {
+  margin: 0 0 16px;
+  font-size: clamp(22px, 3.6vw, 34px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.technical-confidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.technical-confidence-grid div,
+.technical-confidence-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.technical-confidence-grid small,
+.technical-confidence-section small {
+  display: block;
+  color: #8df0bd;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.technical-confidence-grid p,
+.technical-confidence-section p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.technical-confidence-section {
+  margin-top: 12px;
+}
+
+.technical-confidence-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.technical-confidence-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.technical-confidence-section.penalty {
+  border-color: rgba(255, 190, 92, 0.38);
+  background: rgba(255, 190, 92, 0.055);
+}
+
+.technical-confidence-section.penalty small {
+  color: #ffd28a;
+}
+
+@media (max-width: 900px) {
+  .technical-confidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .technical-confidence-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
