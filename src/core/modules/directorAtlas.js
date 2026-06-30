@@ -178,6 +178,16 @@ export function buildDirectorAtlasVerdict({
     candidateSelection = "Pendiente de selección específica según línea disponible.";
   }
 
+  if (fiscalImpact?.fiscalLevel === "strong") {
+    verdict = "No apostar todavía por objeción fuerte del Fiscal.";
+    candidateSelection = "Sin selección accionable hasta resolver objeciones fiscales.";
+  } else if (fiscalImpact?.fiscalLevel === "medium") {
+    verdict = "Análisis limitado por objeciones del Fiscal.";
+    candidateSelection = "No convertir en apuesta real hasta resolver riesgos detectados.";
+  } else if (fiscalImpact?.fiscalLevel === "low" && !canRecommend) {
+    verdict = "Mercado observable, pero con advertencia fiscal.";
+  }
+
   return {
     title: "Dictamen del Director Atlas",
     verdict,
@@ -201,6 +211,9 @@ export function buildDirectorAtlasVerdict({
       confidenceCalibration?.estimatedProbability ??
       null,
     operationalLevel: confidenceCalibration?.operationalLevel || null,
+    fiscalLevel: fiscalImpact?.fiscalLevel || "not_applied",
+    fiscalLabel: fiscalImpact?.fiscalLabel || "Fiscal no aplicado",
+    fiscalPenalty: fiscalImpact?.penalty ?? 0,
     canRecommend: fiscalImpact?.blocksRecommendation ? false : canRecommend,
     canUseInParlay: fiscalImpact?.blocksParlay ? false : canUseInParlay,
     mainReasons: buildMainReasons({

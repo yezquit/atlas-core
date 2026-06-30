@@ -1539,6 +1539,16 @@ export default function Home() {
                   </div>
 
                   <div>
+                    <small>Fiscal</small>
+                    <p>{analysis.directorAtlas.fiscalLabel}</p>
+                  </div>
+
+                  <div>
+                    <small>Penalización fiscal</small>
+                    <p>-{analysis.directorAtlas.fiscalPenalty}</p>
+                  </div>
+
+                  <div>
                     <small>Puede recomendar</small>
                     <p>{analysis.directorAtlas.canRecommend ? "Sí" : "No"}</p>
                   </div>
