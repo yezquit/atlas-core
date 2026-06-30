@@ -18,6 +18,7 @@ import { lookupRealFixture } from "@/core/modules/realFixtureLookup";
 import { applyRealFixtureToSourceConfidence } from "@/core/modules/realFixtureSourceImpact";
 import { lookupFixtureStatistics } from "@/core/modules/realFixtureStatisticsLookup";
 import { evaluateMarketDataCoverage } from "@/core/modules/marketDataCoverage";
+import { buildMarketFocusedStats } from "@/core/modules/marketFocusedStats";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -229,6 +230,11 @@ export default function Home() {
       fixtureStatistics: realFixtureStatistics,
     });
 
+    const marketFocusedStats = buildMarketFocusedStats({
+      marketText: mercado,
+      fixtureStatistics: realFixtureStatistics,
+    });
+
     validationGate = runValidationGate({
       decisionResult,
       fiscalReview,
@@ -299,6 +305,7 @@ export default function Home() {
       realFixtureLookup,
       realFixtureStatistics,
       marketDataCoverage,
+      marketFocusedStats,
       caseRecord,
       nextAction: decisionResult.nextAction,
     });
@@ -905,6 +912,81 @@ export default function Home() {
                     <p>{analysis.realFixtureStatistics.statistics.availableStats.join(" · ")}</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {analysis.marketFocusedStats && (
+              <div className="focused-stats-panel">
+                <div className="focused-stats-header">
+                  <strong>Estadísticas relevantes para el mercado</strong>
+                  <span>{analysis.marketFocusedStats.status}</span>
+                </div>
+
+                <p>{analysis.marketFocusedStats.summary}</p>
+
+                <div className="focused-stats-summary">
+                  <div>
+                    <small>Mercado</small>
+                    <p>{analysis.marketFocusedStats.marketLabel}</p>
+                  </div>
+
+                  <div>
+                    <small>Datos principales disponibles</small>
+                    <p>
+                      {analysis.marketFocusedStats.primaryAvailable.length}
+                      {" / "}
+                      {analysis.marketFocusedStats.primaryStatKeys.length}
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Datos de apoyo disponibles</small>
+                    <p>
+                      {analysis.marketFocusedStats.supportAvailable.length}
+                      {" / "}
+                      {analysis.marketFocusedStats.supportStatKeys.length}
+                    </p>
+                  </div>
+                </div>
+
+                {analysis.marketFocusedStats.primaryMissing.length > 0 && (
+                  <div className="focused-missing">
+                    <small>Datos principales faltantes</small>
+                    <p>{analysis.marketFocusedStats.primaryMissing.join(" · ")}</p>
+                  </div>
+                )}
+
+                <div className="focused-team-grid">
+                  {analysis.marketFocusedStats.teamRows.map((row) => (
+                    <article key={row.team.id || row.team.name}>
+                      <h3>{row.team.name}</h3>
+
+                      <strong>Datos principales</strong>
+                      {row.primaryStats.length > 0 ? (
+                        row.primaryStats.map((stat) => (
+                          <div key={stat.key}>
+                            <small>{stat.available ? "✅" : "❌"} {stat.label}</small>
+                            <p>{stat.value}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="focused-empty">Sin datos principales definidos</p>
+                      )}
+
+                      {row.supportStats.length > 0 && (
+                        <>
+                          <strong className="support-title">Datos de apoyo</strong>
+                          {row.supportStats.map((stat) => (
+                            <div key={stat.key}>
+                              <small>{stat.available ? "✅" : "❌"} {stat.label}</small>
+                              <p>{stat.value}</p>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </article>
+                  ))}
+                </div>
               </div>
             )}
 

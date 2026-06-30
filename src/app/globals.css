@@ -2099,3 +2099,135 @@ h1 {
     align-items: flex-start;
   }
 }
+
+.focused-stats-panel {
+  margin-bottom: 20px;
+  border: 1px solid rgba(49, 209, 124, 0.34);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(49, 209, 124, 0.045);
+}
+
+.focused-stats-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.focused-stats-header strong {
+  color: #8df0bd;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.focused-stats-header span {
+  border: 1px solid rgba(49, 209, 124, 0.45);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #8df0bd;
+  font-size: 13px;
+  background: rgba(49, 209, 124, 0.08);
+}
+
+.focused-stats-panel > p {
+  margin: 0 0 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.focused-stats-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.focused-stats-summary div,
+.focused-missing {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(8, 13, 24, 0.62);
+}
+
+.focused-stats-summary small,
+.focused-missing small,
+.focused-team-grid small {
+  display: block;
+  color: #8df0bd;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.focused-stats-summary p,
+.focused-missing p,
+.focused-team-grid p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.focused-missing {
+  margin-bottom: 14px;
+}
+
+.focused-team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.focused-team-grid article {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(8, 13, 24, 0.62);
+}
+
+.focused-team-grid h3 {
+  margin: 0 0 12px;
+  font-size: 22px;
+}
+
+.focused-team-grid article > strong {
+  display: block;
+  color: #8df0bd;
+  margin: 10px 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.focused-team-grid article > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.support-title {
+  margin-top: 18px !important;
+}
+
+.focused-empty {
+  color: var(--muted) !important;
+}
+
+@media (max-width: 900px) {
+  .focused-stats-summary,
+  .focused-team-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .focused-stats-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
