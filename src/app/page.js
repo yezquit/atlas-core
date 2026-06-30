@@ -23,6 +23,7 @@ export default function Home() {
   });
   const [analysis, setAnalysis] = useState(null);
   const [caseHistory, setCaseHistory] = useState([]);
+  const [selectedCase, setSelectedCase] = useState(null);
 
   useEffect(() => {
     const savedHistory = window.localStorage.getItem("atlas_case_history");
@@ -48,7 +49,16 @@ export default function Home() {
 
   function clearCaseHistory() {
     setCaseHistory([]);
+    setSelectedCase(null);
     window.localStorage.removeItem("atlas_case_history");
+  }
+
+  function openCaseDetail(caseRecord) {
+    setSelectedCase(caseRecord);
+  }
+
+  function closeCaseDetail() {
+    setSelectedCase(null);
   }
 
   function updateField(field, value) {
@@ -66,6 +76,7 @@ export default function Home() {
       uso: "analisis",
     });
     setAnalysis(null);
+    setSelectedCase(null);
   }
 
   function runInitialAnalysis() {
@@ -700,6 +711,111 @@ export default function Home() {
           </section>
         )}
 
+        {selectedCase && (
+          <section className="case-detail-panel">
+            <div className="case-detail-header">
+              <div>
+                <strong>Detalle de expediente</strong>
+                <h2>{selectedCase.caseId}</h2>
+              </div>
+
+              <button type="button" onClick={closeCaseDetail}>
+                Cerrar detalle
+              </button>
+            </div>
+
+            <div className="case-detail-grid">
+              <div>
+                <small>Partido</small>
+                <p>{selectedCase.input.partido}</p>
+              </div>
+
+              <div>
+                <small>Competición</small>
+                <p>{selectedCase.resolvedCompetition.name} ({selectedCase.resolvedCompetition.division})</p>
+              </div>
+
+              <div>
+                <small>Mercado</small>
+                <p>{selectedCase.input.mercado}</p>
+              </div>
+
+              <div>
+                <small>Uso</small>
+                <p>{selectedCase.input.uso}</p>
+              </div>
+
+              <div>
+                <small>Decisión</small>
+                <p>{selectedCase.decision.status}</p>
+              </div>
+
+              <div>
+                <small>Confianza</small>
+                <p>{selectedCase.decision.confidence}</p>
+              </div>
+
+              <div>
+                <small>Robustez</small>
+                <p>{selectedCase.decision.robustness}</p>
+              </div>
+
+              <div>
+                <small>Fragilidad</small>
+                <p>{selectedCase.decision.fragility}</p>
+              </div>
+
+              <div>
+                <small>Estado temporal</small>
+                <p>{selectedCase.decision.temporalStatus}</p>
+              </div>
+
+              <div>
+                <small>Estado parlay</small>
+                <p>{selectedCase.decision.parlayStatus}</p>
+              </div>
+
+              <div>
+                <small>Fiscal</small>
+                <p>{selectedCase.fiscal.status}</p>
+              </div>
+
+              <div>
+                <small>Auditoría</small>
+                <p>{selectedCase.pending.auditStatus}</p>
+              </div>
+            </div>
+
+            <div className="case-detail-section">
+              <small>Escenario</small>
+              <p>{selectedCase.scenario.tags.join(" · ")}</p>
+            </div>
+
+            <div className="case-detail-section">
+              <small>Mercados candidatos</small>
+              <p>{selectedCase.scenario.candidateMarkets.join(", ")}</p>
+            </div>
+
+            <div className="case-detail-section">
+              <small>Objeciones del Fiscal</small>
+              <p>
+                {selectedCase.fiscal.objections.length > 0
+                  ? selectedCase.fiscal.objections.join(" ")
+                  : "Sin objeciones registradas"}
+              </p>
+            </div>
+
+            <div className="case-detail-section">
+              <small>Datos faltantes</small>
+              <p>
+                {selectedCase.pending.missingData.length > 0
+                  ? selectedCase.pending.missingData.join(", ")
+                  : "Sin datos faltantes registrados"}
+              </p>
+            </div>
+          </section>
+        )}
+
         {caseHistory.length > 0 && (
           <section className="history-panel">
             <div className="history-header">
@@ -711,7 +827,13 @@ export default function Home() {
 
             <div className="history-list">
               {caseHistory.map((item) => (
-                <article key={item.caseId} className="history-item">
+                <article
+                  key={item.caseId}
+                  className="history-item"
+                  onClick={() => openCaseDetail(item)}
+                  role="button"
+                  tabIndex={0}
+                >
                   <div>
                     <strong>{item.input.partido}</strong>
                     <small>{item.caseId}</small>
