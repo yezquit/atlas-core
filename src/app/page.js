@@ -26,6 +26,7 @@ import { buildAtlasExecutiveAnswer } from "@/core/modules/atlasExecutiveAnswer";
 import { buildDirectorAtlasVerdict } from "@/core/modules/directorAtlas";
 import { buildTechnicalConfidence } from "@/core/modules/technicalConfidence";
 import { calibrateConfidence } from "@/core/modules/confidenceCalibration";
+import { applyFiscalImpact } from "@/core/modules/fiscalImpact";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -319,6 +320,18 @@ export default function Home() {
       gateCoordinator,
     });
 
+    const fiscalImpact = applyFiscalImpact({
+      fiscalReview,
+      confidenceCalibration,
+      gateCoordinator,
+      analysisInput: {
+        partido,
+        competicion,
+        mercado,
+        uso: form.uso,
+      },
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -343,6 +356,7 @@ export default function Home() {
       realFixtureStatistics,
       sourceConfidence,
       confidenceCalibration,
+      fiscalImpact,
       analysisInput: {
         partido,
         competicion,
@@ -426,6 +440,7 @@ export default function Home() {
       gateCoordinator,
       technicalConfidence,
       confidenceCalibration,
+      fiscalImpact,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -1243,6 +1258,78 @@ export default function Home() {
                   <div className="fixture-impact-list">
                     <small>Datos críticos resueltos</small>
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.fiscalImpact && (
+              <div className="fiscal-impact-panel">
+                <div className="fiscal-impact-header">
+                  <strong>Impacto del Fiscal</strong>
+                  <span>{analysis.fiscalImpact.fiscalLabel}</span>
+                </div>
+
+                <h3>{analysis.fiscalImpact.summary}</h3>
+
+                <div className="fiscal-impact-grid">
+                  <div>
+                    <small>Penalización</small>
+                    <p>-{analysis.fiscalImpact.penalty}</p>
+                  </div>
+
+                  <div>
+                    <small>Respaldo técnico</small>
+                    <p>
+                      {analysis.fiscalImpact.originalTechnicalSupport}%
+                      {" → "}
+                      {analysis.fiscalImpact.adjustedTechnicalSupport}%
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Probabilidad estimada</small>
+                    <p>
+                      {analysis.fiscalImpact.originalEstimatedProbability}%
+                      {" → "}
+                      {analysis.fiscalImpact.adjustedEstimatedProbability}%
+                    </p>
+                  </div>
+
+                  <div>
+                    <small>Recomendación</small>
+                    <p>{analysis.fiscalImpact.blocksRecommendation ? "Bloqueada" : "No bloqueada"}</p>
+                  </div>
+
+                  <div>
+                    <small>Parlay</small>
+                    <p>{analysis.fiscalImpact.blocksParlay ? "No apto" : "No bloqueado"}</p>
+                  </div>
+
+                  <div>
+                    <small>Tope técnico</small>
+                    <p>{analysis.fiscalImpact.maxTechnicalSupport}%</p>
+                  </div>
+                </div>
+
+                <div className="fiscal-impact-section">
+                  <small>Efecto operativo</small>
+                  <p>{analysis.fiscalImpact.operationalEffect}</p>
+                </div>
+
+                <div className="fiscal-impact-section">
+                  <small>Efecto en parlay</small>
+                  <p>{analysis.fiscalImpact.parlayEffect}</p>
+                </div>
+
+                {analysis.fiscalImpact.objections.length > 0 && (
+                  <div className="fiscal-impact-section objection">
+                    <small>Objeciones fiscales</small>
+                    <ul>
+                      {analysis.fiscalImpact.objections.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>

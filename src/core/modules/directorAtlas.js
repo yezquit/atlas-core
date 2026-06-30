@@ -144,6 +144,7 @@ export function buildDirectorAtlasVerdict({
   realFixtureStatistics,
   sourceConfidence,
   confidenceCalibration,
+  fiscalImpact,
   analysisInput,
 }) {
   const market = analysisInput?.mercado || "Mercado no especificado";
@@ -191,11 +192,17 @@ export function buildDirectorAtlasVerdict({
       sourceConfidence?.score ??
       sourceConfidence?.qualityScore ??
       0,
-    technicalSupport: confidenceCalibration?.technicalSupport ?? null,
-    estimatedProbability: confidenceCalibration?.estimatedProbability ?? null,
+    technicalSupport:
+      fiscalImpact?.adjustedTechnicalSupport ??
+      confidenceCalibration?.technicalSupport ??
+      null,
+    estimatedProbability:
+      fiscalImpact?.adjustedEstimatedProbability ??
+      confidenceCalibration?.estimatedProbability ??
+      null,
     operationalLevel: confidenceCalibration?.operationalLevel || null,
-    canRecommend,
-    canUseInParlay,
+    canRecommend: fiscalImpact?.blocksRecommendation ? false : canRecommend,
+    canUseInParlay: fiscalImpact?.blocksParlay ? false : canUseInParlay,
     mainReasons: buildMainReasons({
       realFixtureLookup,
       realFixtureStatistics,
