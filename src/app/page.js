@@ -28,6 +28,7 @@ import { buildTechnicalConfidence } from "@/core/modules/technicalConfidence";
 import { calibrateConfidence } from "@/core/modules/confidenceCalibration";
 import { applyFiscalImpact } from "@/core/modules/fiscalImpact";
 import { buildRefereeProfile } from "@/core/modules/refereeProfile";
+import { buildTeamRecentProfile } from "@/core/modules/teamRecentProfile";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -47,6 +48,58 @@ export default function Home() {
     document.body.setAttribute("data-atlas-view", viewMode);
     return () => document.body.removeAttribute("data-atlas-view");
   }, [viewMode]);
+
+  useEffect(() => {
+    if (!analysis) return;
+
+    const panelSelectors = [
+      ".referee-profile-panel",
+      ".team-recent-profile-panel",
+      ".fiscal-impact-panel",
+      ".gate-coordinator-panel",
+      ".market-gate-panel",
+      ".market-impact-panel",
+      ".market-coverage-panel",
+      ".focused-stats-panel",
+      ".real-fixture-panel",
+      ".fixture-statistics-panel",
+      ".fixture-impact-panel",
+      ".auditprep-panel",
+      ".case-panel",
+      ".case-detail-panel",
+      ".project-status-panel",
+      ".source-validation-panel",
+      ".source-connector-panel",
+      ".source-confidence-panel",
+      ".fiscal-panel",
+      ".specialists-panel",
+      ".market-evaluator-panel",
+      ".validation-gate-panel"
+    ];
+
+    const panels = document.querySelectorAll(panelSelectors.join(","));
+
+    panels.forEach((panel) => {
+      panel.classList.add("atlas-collapsible");
+      panel.classList.add("technical-only-panel");
+
+      const header = panel.firstElementChild;
+
+      if (!header) return;
+
+      header.classList.add("atlas-accordion-header");
+
+      if (!panel.dataset.atlasAccordionReady) {
+        panel.classList.add("collapsed");
+
+        header.addEventListener("click", () => {
+          panel.classList.toggle("collapsed");
+        });
+
+        panel.dataset.atlasAccordionReady = "true";
+      }
+    });
+  }, [analysis, viewMode]);
 
   useEffect(() => {
     const savedHistory = window.localStorage.getItem("atlas_case_history");
@@ -345,6 +398,13 @@ export default function Home() {
       sourceConfidence,
     });
 
+    const teamRecentProfile = buildTeamRecentProfile({
+      realFixtureLookup,
+      realFixtureStatistics,
+      marketFocusedStats,
+      marketText: mercado,
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -455,6 +515,7 @@ export default function Home() {
       confidenceCalibration,
       fiscalImpact,
       refereeProfile,
+      teamRecentProfile,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -1350,6 +1411,81 @@ export default function Home() {
                     <small>Datos pendientes</small>
                     <ul>
                       {analysis.refereeProfile.missingData.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.teamRecentProfile && (
+              <div className="team-recent-profile-panel">
+                <div className="team-recent-profile-header">
+                  <strong>Perfil reciente de equipos</strong>
+                  <span>{analysis.teamRecentProfile.profileLabel}</span>
+                </div>
+
+                <h3>{analysis.teamRecentProfile.summary}</h3>
+
+                <div className="team-recent-profile-grid">
+                  <div>
+                    <small>Local</small>
+                    <p>{analysis.teamRecentProfile.homeTeam || "No confirmado"}</p>
+                  </div>
+
+                  <div>
+                    <small>Visitante</small>
+                    <p>{analysis.teamRecentProfile.awayTeam || "No confirmado"}</p>
+                  </div>
+
+                  <div>
+                    <small>Familia del mercado</small>
+                    <p>{analysis.teamRecentProfile.marketNeed.family}</p>
+                  </div>
+
+                  <div>
+                    <small>Necesidad de histórico</small>
+                    <p>{analysis.teamRecentProfile.marketNeed.label}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza del perfil</small>
+                    <p>{analysis.teamRecentProfile.confidence}%</p>
+                  </div>
+
+                  <div>
+                    <small>Estadísticas actuales</small>
+                    <p>{analysis.teamRecentProfile.hasCurrentMatchStats ? "Disponibles" : "No disponibles"}</p>
+                  </div>
+                </div>
+
+                <div className="team-recent-profile-section">
+                  <small>Uso operativo</small>
+                  <p>{analysis.teamRecentProfile.operationalUse}</p>
+                </div>
+
+                <div className="team-recent-profile-section">
+                  <small>Razón técnica</small>
+                  <p>{analysis.teamRecentProfile.marketNeed.reason}</p>
+                </div>
+
+                {analysis.teamRecentProfile.marketNeed.requiredSignals.length > 0 && (
+                  <div className="team-recent-profile-section">
+                    <small>Señales requeridas</small>
+                    <ul>
+                      {analysis.teamRecentProfile.marketNeed.requiredSignals.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.teamRecentProfile.missingData.length > 0 && (
+                  <div className="team-recent-profile-section warning">
+                    <small>Datos pendientes</small>
+                    <ul>
+                      {analysis.teamRecentProfile.missingData.map((item) => (
                         <li key={item}>{item}</li>
                       ))}
                     </ul>

@@ -3242,3 +3242,142 @@ body[data-atlas-view="simple"] .view-mode-panel {
     align-items: flex-start;
   }
 }
+
+.team-recent-profile-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(141, 240, 190, 0.42);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(141, 240, 190, 0.12), transparent 35%),
+    rgba(141, 240, 190, 0.045);
+}
+
+.team-recent-profile-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.team-recent-profile-header strong {
+  color: #9ff0c2;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.team-recent-profile-header span {
+  border: 1px solid rgba(141, 240, 190, 0.5);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #9ff0c2;
+  font-size: 13px;
+  background: rgba(141, 240, 190, 0.1);
+}
+
+.team-recent-profile-panel h3 {
+  margin: 0 0 16px;
+  font-size: clamp(22px, 3.5vw, 32px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.team-recent-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.team-recent-profile-grid div,
+.team-recent-profile-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.team-recent-profile-grid small,
+.team-recent-profile-section small {
+  display: block;
+  color: #9ff0c2;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.team-recent-profile-grid p,
+.team-recent-profile-section p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.team-recent-profile-section {
+  margin-top: 12px;
+}
+
+.team-recent-profile-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.team-recent-profile-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.team-recent-profile-section.warning {
+  border-color: rgba(255, 190, 92, 0.38);
+  background: rgba(255, 190, 92, 0.055);
+}
+
+@media (max-width: 900px) {
+  .team-recent-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .team-recent-profile-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* TechnicalAccordion v0.2 — comportamiento robusto */
+.atlas-collapsible {
+  overflow: hidden;
+}
+
+.atlas-collapsible > .atlas-accordion-header {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 36px;
+}
+
+.atlas-collapsible > .atlas-accordion-header::after {
+  content: "▾";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.85;
+  font-size: 18px;
+}
+
+.atlas-collapsible.collapsed > .atlas-accordion-header::after {
+  content: "▸";
+}
+
+.atlas-collapsible.collapsed > :not(:first-child) {
+  display: none !important;
+}
+
+/* Vista simple: oculta módulos técnicos */
+body[data-atlas-view="simple"] .technical-only-panel {
+  display: none !important;
+}
