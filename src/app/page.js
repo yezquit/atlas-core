@@ -1959,7 +1959,7 @@ export default function Home() {
                   </div>
 
                   <div>
-                    <small>Cuota mínima aceptable</small>
+                    <small>Línea/cuota</small>
                     <p>{analysis.directorAtlas.minimumAcceptableOdds}</p>
                   </div>
 
