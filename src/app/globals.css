@@ -3677,3 +3677,107 @@ body[data-atlas-view="technical"] .view-mode-buttons {
     align-items: flex-start;
   }
 }
+
+.complementary-source-coverage-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(255, 150, 120, 0.42);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 150, 120, 0.12), transparent 35%),
+    rgba(255, 150, 120, 0.045);
+}
+
+.complementary-source-coverage-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.complementary-source-coverage-header strong {
+  color: #ffb39d;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.complementary-source-coverage-header span {
+  border: 1px solid rgba(255, 150, 120, 0.5);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #ffb39d;
+  font-size: 13px;
+  background: rgba(255, 150, 120, 0.1);
+}
+
+.complementary-source-coverage-panel h3 {
+  margin: 0 0 16px;
+  font-size: clamp(22px, 3.5vw, 32px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.complementary-source-coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.complementary-source-coverage-grid div,
+.complementary-source-coverage-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.complementary-source-coverage-grid small,
+.complementary-source-coverage-section small {
+  display: block;
+  color: #ffb39d;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.complementary-source-coverage-grid p,
+.complementary-source-coverage-section p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.complementary-source-coverage-section {
+  margin-top: 12px;
+}
+
+.complementary-source-coverage-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.complementary-source-coverage-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.complementary-source-coverage-section.warning {
+  border-color: rgba(255, 190, 92, 0.38);
+  background: rgba(255, 190, 92, 0.055);
+}
+
+@media (max-width: 900px) {
+  .complementary-source-coverage-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .complementary-source-coverage-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

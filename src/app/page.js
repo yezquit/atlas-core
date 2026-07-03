@@ -30,6 +30,7 @@ import { applyFiscalImpact } from "@/core/modules/fiscalImpact";
 import { buildRefereeProfile } from "@/core/modules/refereeProfile";
 import { buildTeamRecentProfile } from "@/core/modules/teamRecentProfile";
 import { buildMarketLineContext } from "@/core/modules/marketLineContext";
+import { buildComplementarySourceCoverage } from "@/core/modules/complementarySourceCoverage";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -423,6 +424,15 @@ export default function Home() {
       teamRecentProfile,
     });
 
+    const complementarySourceCoverage = buildComplementarySourceCoverage({
+      marketText: mercado,
+      realFixtureStatistics,
+      marketDataCoverage,
+      refereeProfile,
+      teamRecentProfile,
+      marketLineContext,
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -535,6 +545,7 @@ export default function Home() {
       refereeProfile,
       teamRecentProfile,
       marketLineContext,
+      complementarySourceCoverage,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -1480,6 +1491,92 @@ export default function Home() {
                     <small>Datos pendientes</small>
                     <ul>
                       {analysis.marketLineContext.missingData.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.complementarySourceCoverage && (
+              <div className="complementary-source-coverage-panel">
+                <div className="complementary-source-coverage-header">
+                  <strong>Cobertura de fuentes complementarias</strong>
+                  <span>{analysis.complementarySourceCoverage.coverageLabel}</span>
+                </div>
+
+                <h3>{analysis.complementarySourceCoverage.summary}</h3>
+
+                <div className="complementary-source-coverage-grid">
+                  <div>
+                    <small>Familia</small>
+                    <p>{analysis.complementarySourceCoverage.marketFamily}</p>
+                  </div>
+
+                  <div>
+                    <small>Cobertura API-FOOTBALL</small>
+                    <p>{analysis.complementarySourceCoverage.apiFootballExpectedCoverage}</p>
+                  </div>
+
+                  <div>
+                    <small>Necesidad principal</small>
+                    <p>{analysis.complementarySourceCoverage.primarySourceNeed}</p>
+                  </div>
+
+                  <div>
+                    <small>Prioridad</small>
+                    <p>{analysis.complementarySourceCoverage.priority}</p>
+                  </div>
+
+                  <div>
+                    <small>Bloquea decisión</small>
+                    <p>{analysis.complementarySourceCoverage.blocksDecision ? "Sí" : "No por sí sola"}</p>
+                  </div>
+
+                  <div>
+                    <small>Stats disponibles</small>
+                    <p>{analysis.complementarySourceCoverage.availableStats.length}</p>
+                  </div>
+                </div>
+
+                <div className="complementary-source-coverage-section">
+                  <small>Acción requerida</small>
+                  <p>{analysis.complementarySourceCoverage.action}</p>
+                </div>
+
+                <div className="complementary-source-coverage-section">
+                  <small>Razón técnica</small>
+                  <p>{analysis.complementarySourceCoverage.reason}</p>
+                </div>
+
+                {analysis.complementarySourceCoverage.requiredData.length > 0 && (
+                  <div className="complementary-source-coverage-section">
+                    <small>Datos requeridos</small>
+                    <ul>
+                      {analysis.complementarySourceCoverage.requiredData.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.complementarySourceCoverage.missingRequired.length > 0 && (
+                  <div className="complementary-source-coverage-section warning">
+                    <small>Datos requeridos faltantes</small>
+                    <ul>
+                      {analysis.complementarySourceCoverage.missingRequired.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.complementarySourceCoverage.missingComplementary.length > 0 && (
+                  <div className="complementary-source-coverage-section warning">
+                    <small>Fuentes complementarias pendientes</small>
+                    <ul>
+                      {analysis.complementarySourceCoverage.missingComplementary.map((item) => (
                         <li key={item}>{item}</li>
                       ))}
                     </ul>
