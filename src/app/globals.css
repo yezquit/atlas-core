@@ -3043,3 +3043,202 @@ h1 {
     align-items: flex-start;
   }
 }
+
+.view-mode-panel {
+  margin-top: 24px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(124, 196, 255, 0.32);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(77, 163, 255, 0.04);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.view-mode-panel strong {
+  display: block;
+  color: var(--accent-strong);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.view-mode-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.view-mode-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.view-mode-buttons button {
+  border: 1px solid rgba(124, 196, 255, 0.36);
+  border-radius: 999px;
+  padding: 10px 14px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.view-mode-buttons button.active {
+  color: #07111f;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.view-mode-buttons button:hover {
+  border-color: var(--accent-strong);
+}
+
+@media (max-width: 760px) {
+  .view-mode-panel {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ViewMode v0.2 — Vista simple limpia */
+body[data-atlas-view="simple"] .gate-coordinator-panel,
+body[data-atlas-view="simple"] .market-gate-panel,
+body[data-atlas-view="simple"] .market-line-panel,
+body[data-atlas-view="simple"] .market-impact-panel,
+body[data-atlas-view="simple"] .market-coverage-panel,
+body[data-atlas-view="simple"] .focused-stats-panel,
+body[data-atlas-view="simple"] .real-fixture-panel,
+body[data-atlas-view="simple"] .fixture-statistics-panel,
+body[data-atlas-view="simple"] .fixture-impact-panel,
+body[data-atlas-view="simple"] .fiscal-impact-panel,
+body[data-atlas-view="simple"] .auditprep-panel,
+body[data-atlas-view="simple"] .case-panel,
+body[data-atlas-view="simple"] .case-detail-panel,
+body[data-atlas-view="simple"] .project-status-panel,
+body[data-atlas-view="simple"] .source-validation-panel,
+body[data-atlas-view="simple"] .source-connector-panel,
+body[data-atlas-view="simple"] .source-confidence-panel,
+body[data-atlas-view="simple"] .fiscal-panel,
+body[data-atlas-view="simple"] .specialists-panel,
+body[data-atlas-view="simple"] .market-evaluator-panel,
+body[data-atlas-view="simple"] .validation-gate-panel {
+  display: none !important;
+}
+
+/* El dictamen y los resúmenes estratégicos permanecen visibles */
+body[data-atlas-view="simple"] .director-atlas-panel,
+body[data-atlas-view="simple"] .confidence-calibration-panel,
+body[data-atlas-view="simple"] .technical-confidence-panel,
+body[data-atlas-view="simple"] .atlas-answer-panel,
+body[data-atlas-view="simple"] .view-mode-panel {
+  display: block !important;
+}
+
+.referee-profile-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(255, 210, 138, 0.42);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 210, 138, 0.12), transparent 35%),
+    rgba(255, 210, 138, 0.045);
+}
+
+.referee-profile-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.referee-profile-header strong {
+  color: #ffd28a;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.referee-profile-header span {
+  border: 1px solid rgba(255, 210, 138, 0.5);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #ffd28a;
+  font-size: 13px;
+  background: rgba(255, 210, 138, 0.1);
+}
+
+.referee-profile-panel h3 {
+  margin: 0 0 16px;
+  font-size: clamp(22px, 3.5vw, 32px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.referee-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.referee-profile-grid div,
+.referee-profile-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.referee-profile-grid small,
+.referee-profile-section small {
+  display: block;
+  color: #ffd28a;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.referee-profile-grid p,
+.referee-profile-section p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.referee-profile-section {
+  margin-top: 12px;
+}
+
+.referee-profile-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.referee-profile-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.referee-profile-section.warning {
+  border-color: rgba(255, 190, 92, 0.38);
+  background: rgba(255, 190, 92, 0.055);
+}
+
+@media (max-width: 900px) {
+  .referee-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .referee-profile-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

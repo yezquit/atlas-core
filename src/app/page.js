@@ -27,6 +27,7 @@ import { buildDirectorAtlasVerdict } from "@/core/modules/directorAtlas";
 import { buildTechnicalConfidence } from "@/core/modules/technicalConfidence";
 import { calibrateConfidence } from "@/core/modules/confidenceCalibration";
 import { applyFiscalImpact } from "@/core/modules/fiscalImpact";
+import { buildRefereeProfile } from "@/core/modules/refereeProfile";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -39,7 +40,13 @@ export default function Home() {
   const [analysis, setAnalysis] = useState(null);
   const [caseHistory, setCaseHistory] = useState([]);
   const [selectedCase, setSelectedCase] = useState(null);
+  const [viewMode, setViewMode] = useState("simple");
   const projectStatus = getProjectStatus();
+
+  useEffect(() => {
+    document.body.setAttribute("data-atlas-view", viewMode);
+    return () => document.body.removeAttribute("data-atlas-view");
+  }, [viewMode]);
 
   useEffect(() => {
     const savedHistory = window.localStorage.getItem("atlas_case_history");
@@ -332,6 +339,12 @@ export default function Home() {
       },
     });
 
+    const refereeProfile = buildRefereeProfile({
+      realFixtureLookup,
+      marketText: mercado,
+      sourceConfidence,
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -441,6 +454,7 @@ export default function Home() {
       technicalConfidence,
       confidenceCalibration,
       fiscalImpact,
+      refereeProfile,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -540,6 +554,33 @@ export default function Home() {
             Analizar con Atlas
           </button>
         </form>
+
+        {analysis && (
+          <section className="view-mode-panel">
+            <div>
+              <strong>Modo de vista</strong>
+              <p>Elige cuánto detalle quieres ver del análisis de Atlas.</p>
+            </div>
+
+            <div className="view-mode-buttons">
+              <button
+                type="button"
+                className={viewMode === "simple" ? "active" : ""}
+                onClick={() => setViewMode("simple")}
+              >
+                Vista simple
+              </button>
+
+              <button
+                type="button"
+                className={viewMode === "technical" ? "active" : ""}
+                onClick={() => setViewMode("technical")}
+              >
+                Vista técnica
+              </button>
+            </div>
+          </section>
+        )}
 
         {analysis && (
           <section className="result-card">
@@ -949,7 +990,7 @@ export default function Home() {
               )}
             </div>
 
-            {analysis.realFixtureStatistics && (
+            {viewMode === "technical" && analysis.realFixtureStatistics && (
               <div className="fixture-statistics-panel">
                 <div className="fixture-statistics-header">
                   <strong>Estadísticas reales del fixture</strong>
@@ -1052,7 +1093,7 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.marketFocusedStats && (
+            {viewMode === "technical" && analysis.marketFocusedStats && (
               <div className="focused-stats-panel">
                 <div className="focused-stats-header">
                   <strong>Estadísticas relevantes para el mercado</strong>
@@ -1127,7 +1168,7 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.marketDataCoverage && (
+            {viewMode === "technical" && analysis.marketDataCoverage && (
               <div className="market-coverage-panel">
                 <div className="market-coverage-header">
                   <strong>Cobertura de datos del mercado</strong>
@@ -1208,7 +1249,7 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.sourceConfidence.realFixtureImpact && (
+            {viewMode === "technical" && analysis.sourceConfidence.realFixtureImpact && (
               <div className="fixture-impact-panel">
                 <div className="fixture-impact-header">
                   <strong>Impacto de fuente real</strong>
@@ -1263,7 +1304,61 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.fiscalImpact && (
+            {analysis.refereeProfile && (
+              <div className="referee-profile-panel">
+                <div className="referee-profile-header">
+                  <strong>Perfil arbitral</strong>
+                  <span>{analysis.refereeProfile.profileLabel}</span>
+                </div>
+
+                <h3>{analysis.refereeProfile.summary}</h3>
+
+                <div className="referee-profile-grid">
+                  <div>
+                    <small>Árbitro</small>
+                    <p>{analysis.refereeProfile.refereeName || "No confirmado"}</p>
+                  </div>
+
+                  <div>
+                    <small>Sensibilidad del mercado</small>
+                    <p>{analysis.refereeProfile.sensitivity.label}</p>
+                  </div>
+
+                  <div>
+                    <small>Confianza del perfil</small>
+                    <p>{analysis.refereeProfile.confidence}%</p>
+                  </div>
+
+                  <div>
+                    <small>Uso operativo</small>
+                    <p>{analysis.refereeProfile.operationalUse}</p>
+                  </div>
+                </div>
+
+                <div className="referee-profile-section">
+                  <small>Impacto en decisión</small>
+                  <p>{analysis.refereeProfile.impactOnDecision}</p>
+                </div>
+
+                <div className="referee-profile-section">
+                  <small>Razón de sensibilidad</small>
+                  <p>{analysis.refereeProfile.sensitivity.reason}</p>
+                </div>
+
+                {analysis.refereeProfile.missingData.length > 0 && (
+                  <div className="referee-profile-section warning">
+                    <small>Datos pendientes</small>
+                    <ul>
+                      {analysis.refereeProfile.missingData.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {viewMode === "technical" && analysis.fiscalImpact && (
               <div className="fiscal-impact-panel">
                 <div className="fiscal-impact-header">
                   <strong>Impacto del Fiscal</strong>
@@ -1685,7 +1780,9 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.gateCoordinator && (
+            {viewMode === "technical" && (
+              <>
+            {viewMode === "technical" && analysis.gateCoordinator && (
               <div className="gate-coordinator-panel">
                 <div className="gate-coordinator-header">
                   <strong>Estado final Atlas</strong>
@@ -1743,7 +1840,7 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.marketGate && (
+            {viewMode === "technical" && analysis.marketGate && (
               <div className="market-gate-panel">
                 <div className="market-gate-header">
                   <strong>Gate operativo del mercado</strong>
@@ -1810,7 +1907,7 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.sourceConfidence.marketCoverageImpact && (
+            {viewMode === "technical" && analysis.sourceConfidence.marketCoverageImpact && (
               <div className="market-impact-panel">
                 <div className="market-impact-header">
                   <strong>Impacto de cobertura del mercado</strong>
@@ -1949,6 +2046,9 @@ export default function Home() {
                 </article>
               </div>
             </div>
+
+              </>
+            )}
 
             <div className="case-panel">
               <div className="case-header">
