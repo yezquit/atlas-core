@@ -217,9 +217,7 @@ export function buildMarketLineContext({
   }
 
   const blocksDecision =
-    marketGate?.canRecommend === false ||
-    status === "missing" ||
-    status === "odds_only";
+    status !== "available";
 
   const cautionFlags = [];
 

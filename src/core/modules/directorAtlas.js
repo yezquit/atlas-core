@@ -1,3 +1,21 @@
+function filterResolvedExternalMissing(items = [], marketLineContext) {
+  const hasLine = Boolean(marketLineContext?.lineText);
+  const hasOdds = Boolean(marketLineContext?.oddsText);
+
+  return items.filter((item) => {
+    const normalized = item
+      .toString()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "");
+
+    if (hasLine && normalized.includes("linea")) return false;
+    if (hasOdds && normalized.includes("cuota")) return false;
+
+    return true;
+  });
+}
+
 function detectUseCaseLabel(useCase = "") {
   if (useCase === "parlay") return "Parlay";
   if (useCase === "apuesta_simple") return "Apuesta simple";
@@ -5,7 +23,12 @@ function detectUseCaseLabel(useCase = "") {
   return "Solo análisis";
 }
 
-function buildAvoidList({ marketGate, marketDataCoverage, analysisInput }) {
+function buildAvoidList({
+  marketGate,
+  marketDataCoverage,
+  marketLineContext,
+  analysisInput,
+}) {
   const avoid = [];
 
   if (marketGate?.canUseInParlay === false) {
@@ -22,20 +45,35 @@ function buildAvoidList({ marketGate, marketDataCoverage, analysisInput }) {
     );
   }
 
-  if (marketDataCoverage?.missingExternalData?.length > 0) {
+  const unresolvedExternalMissing = filterResolvedExternalMissing(
+    marketDataCoverage?.missingExternalData || [],
+    marketLineContext
+  );
+
+  if (unresolvedExternalMissing.length > 0) {
     avoid.push(
-      "No decidir sin revisar los faltantes externos: línea de mercado, cuota y contexto adicional."
+      `No decidir sin revisar faltantes externos pendientes: ${unresolvedExternalMissing.join(", ")}.`
     );
   }
 
   return avoid;
 }
 
-function buildConditions({ marketDataCoverage, marketGate, gateCoordinator }) {
+function buildConditions({
+  marketDataCoverage,
+  marketGate,
+  gateCoordinator,
+  marketLineContext,
+}) {
   const conditions = [];
 
-  if (marketDataCoverage?.missingExternalData?.length > 0) {
-    conditions.push(...marketDataCoverage.missingExternalData);
+  const unresolvedExternalMissing = filterResolvedExternalMissing(
+    marketDataCoverage?.missingExternalData || [],
+    marketLineContext
+  );
+
+  if (unresolvedExternalMissing.length > 0) {
+    conditions.push(...unresolvedExternalMissing);
   }
 
   if (marketGate?.requiredAction) {
@@ -198,7 +236,13 @@ export function buildDirectorAtlasVerdict({
       "Sin selección accionable hasta completar fuentes requeridas.";
   }
 
-  if (marketLineContext?.blocksDecision) {
+  if (marketLineContext?.status === "available") {
+    minimumAcceptableOdds = `Cuota informada: ${
+      marketLineContext.oddsText || "informada"
+    }. No implica aceptación automática.`;
+  }
+
+  if (marketLineContext?.status && marketLineContext.status !== "available") {
     verdict = "No convertir en apuesta real: línea/cuota insuficiente o no validada.";
     candidateSelection =
       "Mantener como análisis técnico hasta validar línea y cuota.";
@@ -206,10 +250,14 @@ export function buildDirectorAtlasVerdict({
 
   if (refereeProfile?.sourceImpact?.shouldLimitConfidence && market.includes("tarjeta")) {
     verdict = "Análisis disciplinario limitado por falta de histórico arbitral.";
+    candidateSelection =
+      "Mantener como análisis técnico hasta conectar histórico arbitral verificable.";
   }
 
   if (teamRecentProfile?.sourceImpact?.shouldLimitConfidence) {
     verdict = "Análisis limitado por falta de histórico reciente de equipos.";
+    candidateSelection =
+      "Mantener como análisis técnico hasta conectar histórico reciente de equipos.";
   }
 
   return {
@@ -268,10 +316,12 @@ export function buildDirectorAtlasVerdict({
       marketDataCoverage,
       marketGate,
       gateCoordinator,
+      marketLineContext,
     }),
     avoid: buildAvoidList({
       marketGate,
       marketDataCoverage,
+      marketLineContext,
       analysisInput,
     }),
     directorNote:
