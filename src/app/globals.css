@@ -3566,3 +3566,114 @@ body[data-atlas-view="technical"] .view-mode-buttons {
     justify-content: flex-start !important;
   }
 }
+
+.line-market-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.market-line-context-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(196, 163, 255, 0.42);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(196, 163, 255, 0.12), transparent 35%),
+    rgba(196, 163, 255, 0.045);
+}
+
+.market-line-context-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.market-line-context-header strong {
+  color: #d7c2ff;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.market-line-context-header span {
+  border: 1px solid rgba(196, 163, 255, 0.5);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #d7c2ff;
+  font-size: 13px;
+  background: rgba(196, 163, 255, 0.1);
+}
+
+.market-line-context-panel h3 {
+  margin: 0 0 16px;
+  font-size: clamp(22px, 3.5vw, 32px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.market-line-context-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.market-line-context-grid div,
+.market-line-context-section {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.market-line-context-grid small,
+.market-line-context-section small {
+  display: block;
+  color: #d7c2ff;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.market-line-context-grid p,
+.market-line-context-section p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.market-line-context-section {
+  margin-top: 12px;
+}
+
+.market-line-context-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.market-line-context-section li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.market-line-context-section.warning {
+  border-color: rgba(255, 190, 92, 0.38);
+  background: rgba(255, 190, 92, 0.055);
+}
+
+@media (max-width: 900px) {
+  .line-market-grid,
+  .market-line-context-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .market-line-context-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -29,6 +29,7 @@ import { calibrateConfidence } from "@/core/modules/confidenceCalibration";
 import { applyFiscalImpact } from "@/core/modules/fiscalImpact";
 import { buildRefereeProfile } from "@/core/modules/refereeProfile";
 import { buildTeamRecentProfile } from "@/core/modules/teamRecentProfile";
+import { buildMarketLineContext } from "@/core/modules/marketLineContext";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -36,6 +37,8 @@ export default function Home() {
     partido: "",
     competicion: "",
     mercado: "",
+    lineaMercado: "",
+    cuotaMercado: "",
     uso: "analisis",
   });
   const [analysis, setAnalysis] = useState(null);
@@ -410,6 +413,16 @@ export default function Home() {
       marketText: mercado,
     });
 
+    const marketLineContext = buildMarketLineContext({
+      marketText: mercado,
+      lineText: form.lineaMercado || "",
+      oddsText: form.cuotaMercado || "",
+      confidenceCalibration,
+      marketGate,
+      refereeProfile,
+      teamRecentProfile,
+    });
+
     const atlasExecutiveAnswer = buildAtlasExecutiveAnswer({
       gateCoordinator,
       marketGate,
@@ -521,6 +534,7 @@ export default function Home() {
       fiscalImpact,
       refereeProfile,
       teamRecentProfile,
+      marketLineContext,
       atlasExecutiveAnswer,
       directorAtlas,
       caseRecord,
@@ -602,6 +616,30 @@ export default function Home() {
               onChange={(event) => updateField("mercado", event.target.value)}
               placeholder="Ej: tarjetas, pases, remates"
             />
+
+            <div className="line-market-grid">
+              <label>
+                Línea del mercado opcional
+                <input
+                  value={form.lineaMercado || ""}
+                  onChange={(event) =>
+                    updateField("lineaMercado", event.target.value)
+                  }
+                  placeholder="Ej: Más de 4.5 tarjetas, Over 8.5 córners"
+                />
+              </label>
+
+              <label>
+                Cuota opcional
+                <input
+                  value={form.cuotaMercado || ""}
+                  onChange={(event) =>
+                    updateField("cuotaMercado", event.target.value)
+                  }
+                  placeholder="Ej: 1.85"
+                />
+              </label>
+            </div>
           </label>
 
           <label>
@@ -1365,6 +1403,86 @@ export default function Home() {
                   <div className="fixture-impact-list">
                     <small>Datos críticos resueltos</small>
                     <p>{analysis.sourceConfidence.realFixtureImpact.resolvedCriticalData.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.marketLineContext && (
+              <div className="market-line-context-panel">
+                <div className="market-line-context-header">
+                  <strong>Contexto de línea y cuota</strong>
+                  <span>{analysis.marketLineContext.label}</span>
+                </div>
+
+                <h3>{analysis.marketLineContext.summary}</h3>
+
+                <div className="market-line-context-grid">
+                  <div>
+                    <small>Línea</small>
+                    <p>{analysis.marketLineContext.lineText || "No informada"}</p>
+                  </div>
+
+                  <div>
+                    <small>Cuota</small>
+                    <p>{analysis.marketLineContext.oddsText || "No informada"}</p>
+                  </div>
+
+                  <div>
+                    <small>Familia</small>
+                    <p>{analysis.marketLineContext.marketFamily.label}</p>
+                  </div>
+
+                  <div>
+                    <small>Sensibilidad</small>
+                    <p>{analysis.marketLineContext.marketFamily.lineSensitivity}</p>
+                  </div>
+
+                  <div>
+                    <small>Lectura de cuota</small>
+                    <p>{analysis.marketLineContext.oddsProfile.label}</p>
+                  </div>
+
+                  <div>
+                    <small>Bloquea decisión</small>
+                    <p>{analysis.marketLineContext.blocksDecision ? "Sí" : "No por sí sola"}</p>
+                  </div>
+                </div>
+
+                <div className="market-line-context-section">
+                  <small>Lectura de valor</small>
+                  <p>{analysis.marketLineContext.valueRead}</p>
+                </div>
+
+                <div className="market-line-context-section">
+                  <small>Efecto operativo</small>
+                  <p>{analysis.marketLineContext.operationalEffect}</p>
+                </div>
+
+                <div className="market-line-context-section">
+                  <small>Razón técnica</small>
+                  <p>{analysis.marketLineContext.marketFamily.reason}</p>
+                </div>
+
+                {analysis.marketLineContext.cautionFlags.length > 0 && (
+                  <div className="market-line-context-section warning">
+                    <small>Advertencias</small>
+                    <ul>
+                      {analysis.marketLineContext.cautionFlags.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.marketLineContext.missingData.length > 0 && (
+                  <div className="market-line-context-section warning">
+                    <small>Datos pendientes</small>
+                    <ul>
+                      {analysis.marketLineContext.missingData.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
