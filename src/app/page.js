@@ -458,6 +458,10 @@ export default function Home() {
       sourceConfidence,
       confidenceCalibration,
       fiscalImpact,
+      refereeProfile,
+      teamRecentProfile,
+      marketLineContext,
+      complementarySourceCoverage,
       analysisInput: {
         partido,
         competicion,

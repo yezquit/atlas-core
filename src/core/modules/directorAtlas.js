@@ -145,6 +145,10 @@ export function buildDirectorAtlasVerdict({
   sourceConfidence,
   confidenceCalibration,
   fiscalImpact,
+  refereeProfile,
+  teamRecentProfile,
+  marketLineContext,
+  complementarySourceCoverage,
   analysisInput,
 }) {
   const market = analysisInput?.mercado || "Mercado no especificado";
@@ -188,6 +192,26 @@ export function buildDirectorAtlasVerdict({
     verdict = "Mercado observable, pero con advertencia fiscal.";
   }
 
+  if (complementarySourceCoverage?.blocksDecision) {
+    verdict = "No apostar todavía: falta cobertura de fuente suficiente.";
+    candidateSelection =
+      "Sin selección accionable hasta completar fuentes requeridas.";
+  }
+
+  if (marketLineContext?.blocksDecision) {
+    verdict = "No convertir en apuesta real: línea/cuota insuficiente o no validada.";
+    candidateSelection =
+      "Mantener como análisis técnico hasta validar línea y cuota.";
+  }
+
+  if (refereeProfile?.sourceImpact?.shouldLimitConfidence && market.includes("tarjeta")) {
+    verdict = "Análisis disciplinario limitado por falta de histórico arbitral.";
+  }
+
+  if (teamRecentProfile?.sourceImpact?.shouldLimitConfidence) {
+    verdict = "Análisis limitado por falta de histórico reciente de equipos.";
+  }
+
   return {
     title: "Dictamen del Director Atlas",
     verdict,
@@ -214,8 +238,21 @@ export function buildDirectorAtlasVerdict({
     fiscalLevel: fiscalImpact?.fiscalLevel || "not_applied",
     fiscalLabel: fiscalImpact?.fiscalLabel || "Fiscal no aplicado",
     fiscalPenalty: fiscalImpact?.penalty ?? 0,
-    canRecommend: fiscalImpact?.blocksRecommendation ? false : canRecommend,
-    canUseInParlay: fiscalImpact?.blocksParlay ? false : canUseInParlay,
+    lineContextStatus: marketLineContext?.status || "not_applied",
+    complementaryCoverageStatus:
+      complementarySourceCoverage?.coverageStatus || "not_applied",
+    canRecommend:
+      fiscalImpact?.blocksRecommendation ||
+      marketLineContext?.blocksDecision ||
+      complementarySourceCoverage?.blocksDecision
+        ? false
+        : canRecommend,
+    canUseInParlay:
+      fiscalImpact?.blocksParlay ||
+      marketLineContext?.blocksDecision ||
+      complementarySourceCoverage?.blocksDecision
+        ? false
+        : canUseInParlay,
     mainReasons: buildMainReasons({
       realFixtureLookup,
       realFixtureStatistics,
@@ -238,6 +275,6 @@ export function buildDirectorAtlasVerdict({
       analysisInput,
     }),
     directorNote:
-      "Este dictamen integra los módulos técnicos de Atlas. El respaldo técnico mide calidad del análisis; la probabilidad estimada no garantiza resultado; el nivel operativo define qué acción permite Atlas.",
+      "Este dictamen integra fuente real, cobertura de mercado, perfiles técnicos, línea/cuota, fuentes complementarias, fiscalización y calibración prudente. DirectorAtlas es la voz final; los demás módulos son soporte auditable.",
   };
 }
