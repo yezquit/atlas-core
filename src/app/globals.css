@@ -3381,3 +3381,188 @@ body[data-atlas-view="simple"] .view-mode-panel {
 body[data-atlas-view="simple"] .technical-only-panel {
   display: none !important;
 }
+
+/* ViewMode layout fix — selector estable */
+.view-mode-panel {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 16px !important;
+}
+
+.view-mode-panel > div:first-child {
+  flex: 1 1 auto;
+  text-align: left !important;
+}
+
+.view-mode-buttons {
+  margin-left: auto !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 0 0 auto !important;
+}
+
+.view-mode-buttons button {
+  white-space: nowrap;
+}
+
+body[data-atlas-view="simple"] .view-mode-panel,
+body[data-atlas-view="technical"] .view-mode-panel {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+body[data-atlas-view="simple"] .view-mode-buttons,
+body[data-atlas-view="technical"] .view-mode-buttons {
+  margin-left: auto !important;
+  justify-content: flex-end !important;
+}
+
+/* Vista simple: solo módulos estratégicos, pero cerrados */
+body[data-atlas-view="simple"] .technical-only-panel {
+  display: none !important;
+}
+
+body[data-atlas-view="simple"] .confidence-calibration-panel,
+body[data-atlas-view="simple"] .atlas-answer-panel,
+body[data-atlas-view="simple"] .view-mode-panel,
+body[data-atlas-view="simple"] .director-atlas-panel {
+  display: block;
+}
+
+body[data-atlas-view="simple"] .view-mode-panel {
+  display: flex !important;
+}
+
+/* Acordeón global */
+.atlas-collapsible {
+  overflow: hidden;
+}
+
+.atlas-collapsible > .atlas-accordion-header {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 38px;
+}
+
+.atlas-collapsible > .atlas-accordion-header::after {
+  content: "▾";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.85;
+  font-size: 18px;
+}
+
+.atlas-collapsible.collapsed > .atlas-accordion-header::after {
+  content: "▸";
+}
+
+.atlas-collapsible.collapsed > :not(:first-child) {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .view-mode-panel,
+  body[data-atlas-view="simple"] .view-mode-panel,
+  body[data-atlas-view="technical"] .view-mode-panel {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
+  .view-mode-buttons,
+  body[data-atlas-view="simple"] .view-mode-buttons,
+  body[data-atlas-view="technical"] .view-mode-buttons {
+    margin-left: 0 !important;
+    justify-content: flex-start !important;
+  }
+}
+
+/* Atlas Accordion Global v0.3 */
+.atlas-collapsible {
+  overflow: hidden !important;
+}
+
+.atlas-collapsible > .atlas-accordion-header {
+  cursor: pointer !important;
+  user-select: none !important;
+  position: relative !important;
+  padding-right: 42px !important;
+}
+
+.atlas-collapsible > .atlas-accordion-header::after {
+  content: "▾" !important;
+  position: absolute !important;
+  right: 14px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  opacity: 0.9 !important;
+  font-size: 18px !important;
+}
+
+.atlas-collapsible.collapsed > .atlas-accordion-header::after {
+  content: "▸" !important;
+}
+
+.atlas-collapsible.collapsed > :not(:first-child) {
+  display: none !important;
+}
+
+/* Vista simple: oculta todo lo técnico */
+body[data-atlas-view="simple"] .technical-only-panel {
+  display: none !important;
+}
+
+/* Selector de vista siempre estable */
+.view-mode-panel,
+body[data-atlas-view="simple"] .view-mode-panel,
+body[data-atlas-view="technical"] .view-mode-panel {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 16px !important;
+}
+
+.view-mode-panel > div:first-child {
+  flex: 1 1 auto !important;
+  text-align: left !important;
+}
+
+.view-mode-buttons,
+body[data-atlas-view="simple"] .view-mode-buttons,
+body[data-atlas-view="technical"] .view-mode-buttons {
+  margin-left: auto !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 0 0 auto !important;
+}
+
+.view-mode-buttons button {
+  white-space: nowrap !important;
+}
+
+@media (max-width: 760px) {
+  .view-mode-panel,
+  body[data-atlas-view="simple"] .view-mode-panel,
+  body[data-atlas-view="technical"] .view-mode-panel {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
+  .view-mode-buttons,
+  body[data-atlas-view="simple"] .view-mode-buttons,
+  body[data-atlas-view="technical"] .view-mode-buttons {
+    margin-left: 0 !important;
+    justify-content: flex-start !important;
+  }
+}

@@ -52,39 +52,40 @@ export default function Home() {
   useEffect(() => {
     if (!analysis) return;
 
-    const panelSelectors = [
-      ".referee-profile-panel",
-      ".team-recent-profile-panel",
-      ".fiscal-impact-panel",
-      ".gate-coordinator-panel",
-      ".market-gate-panel",
-      ".market-impact-panel",
-      ".market-coverage-panel",
-      ".focused-stats-panel",
-      ".real-fixture-panel",
-      ".fixture-statistics-panel",
-      ".fixture-impact-panel",
-      ".auditprep-panel",
-      ".case-panel",
-      ".case-detail-panel",
-      ".project-status-panel",
-      ".source-validation-panel",
-      ".source-connector-panel",
-      ".source-confidence-panel",
-      ".fiscal-panel",
-      ".specialists-panel",
-      ".market-evaluator-panel",
-      ".validation-gate-panel"
+    const simpleAllowed = [
+      "director-atlas-panel",
+      "confidence-calibration-panel",
+      "atlas-answer-panel",
+      "case-panel"
     ];
 
-    const panels = document.querySelectorAll(panelSelectors.join(","));
+    const excluded = [
+      "view-mode-panel"
+    ];
+
+    const panels = Array.from(
+      document.querySelectorAll('[class*="-panel"]')
+    ).filter((panel) => {
+      const className = panel.className?.toString() || "";
+      return !excluded.some((name) => className.includes(name));
+    });
 
     panels.forEach((panel) => {
+      const className = panel.className?.toString() || "";
+
       panel.classList.add("atlas-collapsible");
-      panel.classList.add("technical-only-panel");
+
+      const isSimpleAllowed = simpleAllowed.some((name) =>
+        className.includes(name)
+      );
+
+      if (isSimpleAllowed) {
+        panel.classList.remove("technical-only-panel");
+      } else {
+        panel.classList.add("technical-only-panel");
+      }
 
       const header = panel.firstElementChild;
-
       if (!header) return;
 
       header.classList.add("atlas-accordion-header");
@@ -100,6 +101,10 @@ export default function Home() {
       }
     });
   }, [analysis, viewMode]);
+
+
+
+
 
   useEffect(() => {
     const savedHistory = window.localStorage.getItem("atlas_case_history");
