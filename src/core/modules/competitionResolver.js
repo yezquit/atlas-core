@@ -1,4 +1,4 @@
-import { competitions, normalizeText } from "../data/competitions";
+import { competitions, normalizeText } from "../data/competitions.js";
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

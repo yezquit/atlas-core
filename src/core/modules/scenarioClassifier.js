@@ -1,4 +1,4 @@
-import { resolveCompetition } from "./competitionResolver";
+import { resolveCompetition } from "./competitionResolver.js";
 
 function normalizeLocal(value) {
   return (value || "")

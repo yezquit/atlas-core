@@ -2,11 +2,13 @@
   "name": "atlas-core",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test src/core/testing/*.test.js src/core/testing/atlasTrialCases.js"
   },
   "dependencies": {
     "next": "16.2.9",
