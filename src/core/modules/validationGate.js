@@ -1,3 +1,9 @@
+import {
+  PARLAY_STATUS,
+  POLICY_STATUS,
+  createPolicyDecision,
+} from "../contracts/atlasContracts.js";
+
 export function runValidationGate({
   decisionResult,
   fiscalReview,
@@ -13,93 +19,81 @@ export function runValidationGate({
   const fiscalStatus = fiscalReview?.fiscalStatus || "Objeción moderada";
   const decision = decisionResult?.decision || "Análisis inicial";
 
-  let gateStatus = "🔵 Solo análisis inicial";
-  let gateLabel = "Solo análisis inicial";
+  let gateStatus = POLICY_STATUS.LIMITED;
+  let gateLabel = "🔵 Solo análisis inicial";
   let permission = "Atlas puede mostrar estructura, pero no recomendación.";
   let reason =
     "El sistema todavía no tiene suficiente calidad de información para avanzar.";
   let userAction = "Conectar o validar fuentes críticas antes de decidir.";
+  let canAnalyze = true;
   let canRecommend = false;
-  let canUseInParlay = false;
 
   if (criticalPending > 0) {
-    gateStatus = "🔴 No decidir todavía";
-    gateLabel = "No decidir todavía";
+    gateStatus = POLICY_STATUS.BLOCKED;
+    gateLabel = "🔴 No decidir todavía";
     permission = "No emitir recomendación real.";
     reason =
       "Existe al menos un dato crítico pendiente que puede cambiar por completo el análisis.";
     userAction = "Resolver datos críticos antes de considerar una apuesta.";
+    canAnalyze = false;
   } else if (fiscalStatus === "Objeción fuerte") {
-    gateStatus = "🔴 No decidir todavía";
-    gateLabel = "No decidir todavía";
+    gateStatus = POLICY_STATUS.BLOCKED;
+    gateLabel = "🔴 No decidir todavía";
     permission = "No emitir recomendación real.";
     reason = "El Fiscal detectó objeción fuerte.";
     userAction = "Resolver objeciones del Fiscal antes de avanzar.";
+    canAnalyze = false;
   } else if (sourceScore < 25) {
-    gateStatus = "🔵 Solo análisis inicial";
-    gateLabel = "Solo análisis inicial";
+    gateStatus = POLICY_STATUS.LIMITED;
+    gateLabel = "🔵 Solo análisis inicial";
     permission = "Solo lectura estructural del caso.";
     reason = "La calidad de información es muy baja.";
     userAction = "Validar fuentes externas.";
   } else if (sourceScore < 50 || decision === "Esperar validación") {
-    gateStatus = "🟠 Esperar validación";
-    gateLabel = "Esperar validación";
+    gateStatus = POLICY_STATUS.LIMITED;
+    gateLabel = "🟠 Esperar validación";
     permission = "Puede mantenerse como análisis preliminar, sin apuesta.";
     reason = "Faltan fuentes suficientes para elevar confianza.";
-    userAction = "Esperar datos oficiales, estadísticas y líneas reales.";
+    userAction = "Esperar datos oficiales y estadísticas verificables.";
   } else if (sourceScore < 70) {
-    gateStatus = "🟡 Análisis preliminar";
-    gateLabel = "Análisis preliminar";
+    gateStatus = POLICY_STATUS.PRELIMINARY;
+    gateLabel = "🟡 Análisis preliminar";
     permission = "Puede evaluar mercado, pero aún no cerrar decisión.";
-    reason = "La información es parcial, pero ya permite una lectura técnica inicial.";
+    reason =
+      "La información es parcial, pero ya permite una lectura técnica inicial.";
     userAction = "Completar validación antes de apostar.";
   } else {
-    gateStatus = "🟢 Listo para decisión técnica";
-    gateLabel = "Listo para decisión técnica";
-    permission = "Puede pasar a recomendación técnica si mercado y cuota acompañan.";
+    gateStatus = POLICY_STATUS.READY;
+    gateLabel = "🟢 Listo para decisión técnica";
+    permission = "Puede pasar a evaluación técnica final.";
     reason = "La información disponible supera el umbral operativo inicial.";
-    userAction = "Ejecutar evaluación final de mercado, cuota y parlay.";
+    userAction = "Ejecutar la evaluación final del mercado.";
     canRecommend = true;
   }
 
-  if (useCase === "parlay") {
-    if (gateStatus.includes("🟢") && fiscalStatus !== "Objeción fuerte") {
-      canUseInParlay = true;
-    } else {
-      canUseInParlay = false;
-      if (!gateStatus.includes("🔴")) {
-        gateStatus = "🟠 Esperar validación";
-        gateLabel = "Esperar validación para parlay";
-        permission = "No congelar selección en parlay todavía.";
-        reason =
-          "El parlay exige más rigor que una apuesta individual y todavía faltan validaciones.";
-        userAction =
-          "Validar datos críticos y revisar compatibilidad antes de usar en parlay.";
-      }
-    }
-  }
-
-  return {
+  return createPolicyDecision({
+    status: gateStatus,
+    canAnalyze,
+    canRecommend,
+    reason,
+    requiredAction: userAction,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
     gateStatus,
     gateLabel,
     permission,
-    reason,
     userAction,
-    canRecommend,
-    canUseInParlay,
     marketFamily,
     finalMessage: buildFinalMessage({
       gateLabel,
       useCase,
       canRecommend,
-      canUseInParlay,
     }),
-  };
+  });
 }
 
-function buildFinalMessage({ gateLabel, useCase, canRecommend, canUseInParlay }) {
-  if (useCase === "parlay" && !canUseInParlay) {
-    return `Estado: ${gateLabel}. No usar en parlay todavía.`;
+function buildFinalMessage({ gateLabel, useCase, canRecommend }) {
+  if (useCase === "parlay") {
+    return `Estado: ${gateLabel}. Parlay no soportado en la Fase 0.`;
   }
 
   if (!canRecommend) {

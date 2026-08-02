@@ -1,116 +1,152 @@
+import {
+  MARKET_STATUS,
+  PARLAY_STATUS,
+  POLICY_STATUS,
+  createPolicyDecision,
+} from "../contracts/atlasContracts.js";
+
 export function coordinateGates({
   validationGate,
   marketGate,
   sourceConfidence,
-  analysisInput,
 }) {
-  const useCase = analysisInput?.uso || "analisis";
   const informationScore =
     sourceConfidence?.informationScore ??
     sourceConfidence?.score ??
     sourceConfidence?.qualityScore ??
     0;
 
-  if (marketGate?.gateStatus === "blocked") {
-    return {
-      finalStatus: "blocked",
-      finalLabel: "🔴 Mercado bloqueado",
-      operationalPermission: "No decidir",
-      canAnalyze: false,
-      canRecommend: false,
-      canUseInParlay: false,
-      primaryReason:
-        "El mercado solicitado no tiene datos base suficientes en la fuente actual.",
-      requiredAction:
-        "Conectar fuente complementaria o elegir un mercado con cobertura disponible.",
-      informationScore,
-      summary:
-        "Atlas bloquea la operación porque el MarketGate detectó falta de cobertura del mercado.",
-      hierarchy:
-        "MarketGate tiene prioridad sobre ValidationGate cuando el mercado está bloqueado.",
-    };
-  }
+  const validationStatus = validationGate?.gateStatus;
+  const marketStatus = marketGate?.gateStatus;
 
-  if (marketGate?.gateStatus === "limited") {
-    return {
-      finalStatus: "limited",
-      finalLabel: "🟠 Solo análisis inicial",
-      operationalPermission: "Explorar contexto, no recomendar",
-      canAnalyze: true,
-      canRecommend: false,
-      canUseInParlay: false,
-      primaryReason:
-        "El mercado tiene cobertura parcial y requiere validación adicional.",
-      requiredAction:
-        "Completar datos faltantes antes de considerar decisión operativa.",
-      informationScore,
-      summary:
-        "Atlas permite análisis inicial, pero bloquea recomendación y parlay.",
-      hierarchy:
-        "MarketGate limita la operación por cobertura incompleta.",
-    };
-  }
+  if (
+    validationStatus === POLICY_STATUS.BLOCKED ||
+    marketStatus === MARKET_STATUS.BLOCKED
+  ) {
+    const blockedByValidation = validationStatus === POLICY_STATUS.BLOCKED;
+    const primaryReason = blockedByValidation
+      ? validationGate?.reason || "ValidationGate bloqueó la operación."
+      : marketGate?.reason ||
+        "El mercado solicitado no tiene datos base suficientes.";
+    const requiredAction = blockedByValidation
+      ? validationGate?.userAction || "Completar validación crítica."
+      : marketGate?.requiredAction ||
+        "Conectar una fuente complementaria o elegir otro mercado.";
 
-  if (marketGate?.gateStatus === "preliminary") {
-    const isParlay = useCase === "parlay";
-
-    return {
-      finalStatus: isParlay ? "parlay_blocked" : "preliminary",
-      finalLabel: isParlay
-        ? "🟠 No apto para parlay todavía"
-        : "🟡 Análisis preliminar",
-      operationalPermission: isParlay
-        ? "No usar en parlay"
-        : "Análisis técnico preliminar",
-      canAnalyze: true,
-      canRecommend: false,
-      canUseInParlay: false,
-      primaryReason:
-        "El mercado tiene datos estadísticos base, pero aún faltan línea/cuota y validación final.",
-      requiredAction:
-        "Agregar línea de mercado, cuota y comparación contra promedios antes de decidir.",
-      informationScore,
-      summary: isParlay
-        ? "Atlas no permite llevar este mercado a parlay porque todavía falta validación operativa."
-        : "Atlas permite análisis preliminar, pero no recomendación real.",
-      hierarchy:
-        "MarketGate permite análisis, pero ValidationGate mantiene prudencia operativa.",
-    };
-  }
-
-  if (validationGate?.gateStatus === "blocked") {
-    return {
-      finalStatus: "blocked",
+    return buildDecision({
+      status: POLICY_STATUS.BLOCKED,
       finalLabel: "🔴 No decidir todavía",
       operationalPermission: "No decidir",
       canAnalyze: false,
       canRecommend: false,
-      canUseInParlay: false,
-      primaryReason: validationGate?.reason || "ValidationGate bloqueó la operación.",
-      requiredAction: validationGate?.userAction || "Completar validación.",
+      primaryReason,
+      requiredAction,
       informationScore,
       summary:
-        "Atlas bloquea la operación por condiciones generales de validación.",
+        "Atlas bloquea la operación porque al menos un gate detectó una condición crítica.",
       hierarchy:
-        "ValidationGate bloquea cuando faltan condiciones generales críticas.",
-    };
+        "Un bloqueo de ValidationGate o MarketGate tiene precedencia absoluta.",
+    });
   }
 
-  return {
-    finalStatus: "exploratory",
+  if (
+    validationStatus === POLICY_STATUS.LIMITED ||
+    marketStatus === MARKET_STATUS.LIMITED
+  ) {
+    return buildDecision({
+      status: POLICY_STATUS.LIMITED,
+      finalLabel: "🟠 Solo análisis inicial",
+      operationalPermission: "Explorar contexto, no recomendar",
+      canAnalyze: true,
+      canRecommend: false,
+      primaryReason:
+        validationGate?.reason ||
+        marketGate?.reason ||
+        "La cobertura o validación es incompleta.",
+      requiredAction:
+        validationGate?.userAction ||
+        marketGate?.requiredAction ||
+        "Completar datos faltantes.",
+      informationScore,
+      summary:
+        "Atlas permite análisis inicial, pero bloquea la recomendación.",
+      hierarchy: "El estado limited domina cualquier estado preliminar.",
+    });
+  }
+
+  if (
+    validationStatus === POLICY_STATUS.PRELIMINARY ||
+    marketStatus === MARKET_STATUS.PRELIMINARY
+  ) {
+    return buildDecision({
+      status: POLICY_STATUS.PRELIMINARY,
+      finalLabel: "🟡 Análisis preliminar",
+      operationalPermission: "Análisis técnico preliminar",
+      canAnalyze: true,
+      canRecommend: false,
+      primaryReason:
+        marketGate?.reason ||
+        validationGate?.reason ||
+        "La evidencia permite análisis, pero no una recomendación.",
+      requiredAction:
+        marketGate?.requiredAction ||
+        validationGate?.userAction ||
+        "Completar validación final.",
+      informationScore,
+      summary:
+        "Atlas permite análisis preliminar, pero no recomendación real.",
+      hierarchy: "El estado preliminary conserva prudencia operativa.",
+    });
+  }
+
+  if (
+    validationStatus === POLICY_STATUS.READY &&
+    marketStatus === MARKET_STATUS.READY
+  ) {
+    return buildDecision({
+      status: POLICY_STATUS.READY,
+      finalLabel: "🟢 Listo para evaluación final",
+      operationalPermission: "Evaluación final permitida",
+      canAnalyze: true,
+      canRecommend: true,
+      primaryReason: "Ambos gates alcanzaron el estado ready.",
+      requiredAction: "Construir el dictamen final de DirectorAtlas.",
+      informationScore,
+      summary: "Atlas puede pasar a evaluación final.",
+      hierarchy: "Ready exige acuerdo explícito de ambos gates.",
+    });
+  }
+
+  return buildDecision({
+    status: POLICY_STATUS.EXPLORATORY,
     finalLabel: "🔵 Exploración controlada",
     operationalPermission: "Solo análisis exploratorio",
     canAnalyze: true,
     canRecommend: false,
-    canUseInParlay: false,
     primaryReason:
-      "Atlas no encontró bloqueo absoluto, pero todavía no hay condiciones para recomendación real.",
-    requiredAction:
-      "Completar datos de mercado, línea/cuota, fuentes complementarias y validación final.",
+      "Atlas no encontró bloqueo, pero los gates no alcanzaron ready.",
+    requiredAction: "Completar clasificación y validación de datos.",
     informationScore,
     summary:
       "Atlas mantiene el análisis en modo exploratorio hasta completar validación.",
-    hierarchy:
-      "Estado final derivado de MarketGate + ValidationGate + SourceConfidence.",
+    hierarchy: "Exploratory solo aplica cuando ningún gate está bloqueado.",
+  });
+}
+
+function buildDecision({ status, primaryReason, requiredAction, ...details }) {
+  const decision = createPolicyDecision({
+    status,
+    canAnalyze: details.canAnalyze,
+    canRecommend: details.canRecommend,
+    reason: primaryReason,
+    requiredAction,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
+    ...details,
+  });
+
+  return {
+    ...decision,
+    finalStatus: decision.status,
+    primaryReason: decision.reason,
   };
 }

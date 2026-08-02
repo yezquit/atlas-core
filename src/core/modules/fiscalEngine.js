@@ -1,4 +1,6 @@
-export function runFiscalReview({ analysisInput, scenario, specialistReports, parlayStatus }) {
+import { PARLAY_STATUS } from "../contracts/atlasContracts.js";
+
+export function runFiscalReview({ analysisInput, scenario, specialistReports }) {
   const objections = [];
   const warnings = [];
   let fiscalStatus = "Objeción moderada";
@@ -37,9 +39,10 @@ export function runFiscalReview({ analysisInput, scenario, specialistReports, pa
     severityScore += 25;
   }
 
-  if (isParlay && parlayStatus !== "🟢 Apto para parlay") {
-    objections.push("La selección todavía no está madura para entrar a un parlay.");
-    severityScore += 20;
+  if (isParlay) {
+    warnings.push(
+      "Parlay no está soportado en la Fase 0; esta elección no cambia el riesgo intrínseco del mercado."
+    );
   }
 
   if (!scenario?.resolvedCompetition?.resolved) {
@@ -77,5 +80,6 @@ export function runFiscalReview({ analysisInput, scenario, specialistReports, pa
     warnings,
     missingData: uniqueMissingData,
     recommendation,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
   };
 }
