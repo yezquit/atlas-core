@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { buildComplementarySourceCoverage } from "../modules/complementarySourceCoverage.js";
 import { evaluateMarketDataCoverage } from "../modules/marketDataCoverage.js";
 import { buildMarketFocusedStats } from "../modules/marketFocusedStats.js";
+import { applyMarketCoverageToSourceConfidence } from "../modules/marketCoverageImpact.js";
 import { runMarketGate } from "../modules/marketGate.js";
 import { getMockSourceData } from "../modules/sourceConnectorMock.js";
 import { buildSourceValidationPlan } from "../modules/sourceValidation.js";
@@ -120,6 +121,10 @@ function evaluateTrial(trial) {
     sourceConfidence: { informationScore: "60%" },
     analysisInput: trial,
   });
+  const marketCoverageImpact = applyMarketCoverageToSourceConfidence({
+    sourceConfidence: { informationScore: "40%" },
+    marketDataCoverage,
+  });
   const sourceConnector = getMockSourceData({
     scenario: {
       resolvedCompetition: {
@@ -145,6 +150,7 @@ function evaluateTrial(trial) {
     teamRecentProfile,
     complementarySourceCoverage,
     marketGate,
+    marketCoverageImpact,
     sourceConnector,
     sourceValidation,
   };
@@ -174,6 +180,10 @@ for (const trial of atlasTrialCases) {
           source.data.includes("Líneas") && source.status === "Pendiente"
       ),
       false
+    );
+    assert.doesNotMatch(
+      result.marketCoverageImpact.marketCoverageImpact.summary,
+      /falta.*línea|falta.*cuota/i
     );
 
     if (trial.id === "trial-001") {

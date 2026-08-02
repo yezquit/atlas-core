@@ -191,7 +191,7 @@ export function buildTeamRecentProfile({
         reason:
           "El mercado depende de tendencia reciente de equipos, pero Atlas aún no tiene últimos partidos conectados.",
         maxTechnicalSupport: marketNeed.level === "high" ? 58 : 64,
-        maxEstimatedProbability: marketNeed.level === "high" ? 55 : 57,
+        maxEstimatedProbability: null,
       }
     : {
         shouldLimitConfidence: false,

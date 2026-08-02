@@ -229,12 +229,6 @@ export function buildMarketLineContext({
     );
   }
 
-  if (oddsNumber && oddsNumber > 2.1 && estimatedProbability !== null && estimatedProbability < 55) {
-    cautionFlags.push(
-      "Cuota alta con probabilidad estimada baja: posible mercado especulativo."
-    );
-  }
-
   if (lineNumber !== null && family.lineSensitivity === "Alta") {
     cautionFlags.push(
       "La línea pertenece a un mercado sensible; requiere histórico específico antes de acción fuerte."

@@ -28,6 +28,10 @@ export function createCaseRecord({
       partido: analysisInput?.partido || "Partido pendiente",
       competicion: analysisInput?.competicion || "Competición pendiente",
       mercado: analysisInput?.mercado || "Mercado no especificado",
+      lineaMercado: analysisInput?.lineaMercado || null,
+      cuotaMercado: analysisInput?.cuotaMercado || null,
+      fecha: analysisInput?.fecha || null,
+      temporada: analysisInput?.temporada || null,
       uso: analysisInput?.uso || "analisis",
     },
 

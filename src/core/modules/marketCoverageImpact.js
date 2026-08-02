@@ -26,11 +26,15 @@ export function applyMarketCoverageToSourceConfidence({
   let scoreAdded = 0;
   let blocksMarket = false;
   let summary = "No se aplicó impacto de cobertura de mercado.";
+  const hasLineAndOdds = Boolean(
+    marketDataCoverage?.hasLine && marketDataCoverage?.hasOdds
+  );
 
   if (coverageLevel === "covered") {
     scoreAdded = 15;
-    summary =
-      "El mercado tiene datos estadísticos base cubiertos por API-FOOTBALL. Aún falta línea/cuota para decisión real.";
+    summary = hasLineAndOdds
+      ? "El mercado tiene datos estadísticos base y línea/cuota reportadas; los valores aún requieren validación."
+      : "El mercado tiene datos estadísticos base; aún falta reportar línea y/o cuota.";
   }
 
   if (coverageLevel === "partial") {
@@ -58,7 +62,7 @@ export function applyMarketCoverageToSourceConfidence({
       sourceConfidence?.qualityScore
   );
 
-  // Aunque haya fixture + estadísticas, sin línea/cuota real no se permite confianza alta.
+  // La cobertura estadística no basta para elevar la calidad informativa sin validación integral.
   const marketCoverageCap =
     coverageLevel === "covered"
       ? 68

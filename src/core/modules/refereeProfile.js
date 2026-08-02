@@ -128,7 +128,7 @@ export function buildRefereeProfile({
           reason:
             "Mercado sensible al árbitro con nombre detectado, pero sin histórico arbitral suficiente.",
           maxTechnicalSupport: 62,
-          maxEstimatedProbability: 57,
+          maxEstimatedProbability: null,
         }
       : {
           shouldLimitConfidence: false,

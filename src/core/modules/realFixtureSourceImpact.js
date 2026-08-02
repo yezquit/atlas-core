@@ -90,8 +90,8 @@ export function applyRealFixtureToSourceConfidence({
       sourceConfidence?.qualityScore
   );
 
-  // La fuente real confirma identidad del partido, pero no valida aún la línea de mercado.
-  // Por prudencia, el impacto queda limitado hasta conectar estadísticas y líneas reales.
+  // La fuente del fixture confirma identidad, pero no valida por sí sola el mercado.
+  // Por prudencia, el impacto queda limitado hasta completar la evidencia estadística.
   const fixtureOnlyCap = marketFamily === "disciplinario" ? 55 : 50;
   const newScore = Math.min(fixtureOnlyCap, originalScore + scoreAdded);
 
@@ -119,8 +119,8 @@ export function applyRealFixtureToSourceConfidence({
       verified: fixture?.source?.verified === true,
       summary:
         criticalResolvedCount > 0
-          ? "La fuente real confirmó fixture y resolvió al menos un dato crítico. La confianza queda limitada porque aún faltan estadísticas y línea de mercado."
-          : "La fuente real confirmó datos del partido, pero no resolvió datos críticos. La confianza queda limitada porque aún faltan estadísticas y línea de mercado.",
+          ? "La fuente real confirmó fixture y resolvió al menos un dato crítico. La confianza queda limitada hasta completar la evidencia estadística."
+          : "La fuente real confirmó datos del partido, pero no resolvió datos críticos. La confianza queda limitada hasta completar la evidencia estadística.",
       confirmedData,
       resolvedCriticalData,
       scoreAdded,
