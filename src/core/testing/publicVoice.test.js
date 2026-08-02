@@ -28,6 +28,7 @@ test("la UI exige selección explícita y conserva el fixture ID", async () => {
   const source = await readFile(clientPath, "utf8");
 
   assert.match(source, /type="date"/);
+  assert.match(source, /onInput=\{\(event\) => handleDateChange/);
   assert.match(source, /name="fixtureId"/);
   assert.match(source, /function loadFixtures\(\)/);
   assert.match(source, /function analyzeSelectedFixture\(\)/);

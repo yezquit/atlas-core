@@ -235,7 +235,7 @@ export default function AtlasFunctionalClient({ leagues, markets }) {
             <input
               type="date"
               value={date}
-              onChange={(event) => handleDateChange(event.target.value)}
+              onInput={(event) => handleDateChange(event.currentTarget.value)}
             />
           </label>
 
