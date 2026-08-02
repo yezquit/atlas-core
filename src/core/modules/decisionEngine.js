@@ -1,9 +1,10 @@
+import { PARLAY_STATUS } from "../contracts/atlasContracts.js";
+
 export function runDecisionEngine({
   analysisInput,
   scenario,
   specialistReports,
   fiscalReview,
-  parlayStatus,
 }) {
   const market = (analysisInput?.mercado || "").toLowerCase();
   const useCase = analysisInput?.uso || "analisis";
@@ -102,12 +103,9 @@ export function runDecisionEngine({
       "Confirmar alineaciones, estilo táctico, estadísticas recientes y posible guion de partido.";
   }
 
-  if (useCase === "parlay" && parlayStatus !== "🟢 Apto para parlay") {
-    confidence = Math.min(confidence, 15);
-    fragility = "Alta";
-    temporalStatus = "🟠 Esperar validación";
+  if (useCase === "parlay") {
     nextAction =
-      "No congelar para parlay todavía. Validar datos críticos y revisar compatibilidad antes de usar.";
+      "Mantener el análisis individual; parlay no está soportado en Fase 0.";
   }
 
   return {
@@ -120,5 +118,6 @@ export function runDecisionEngine({
     mainRisk,
     invalidationCondition,
     nextAction,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
   };
 }

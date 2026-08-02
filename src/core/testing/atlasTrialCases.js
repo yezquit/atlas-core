@@ -6,6 +6,7 @@ import { evaluateMarketDataCoverage } from "../modules/marketDataCoverage.js";
 import { buildMarketFocusedStats } from "../modules/marketFocusedStats.js";
 import { runMarketGate } from "../modules/marketGate.js";
 import { getMockSourceData } from "../modules/sourceConnectorMock.js";
+import { buildSourceValidationPlan } from "../modules/sourceValidation.js";
 import { buildTeamRecentProfile } from "../modules/teamRecentProfile.js";
 
 export const atlasTrialCases = [
@@ -129,6 +130,14 @@ function evaluateTrial(trial) {
     },
     analysisInput: trial,
   });
+  const sourceValidation = buildSourceValidationPlan({
+    scenario: {
+      resolvedCompetition: { resolved: true },
+    },
+    specialistReports: { reports: [] },
+    marketEvaluation: { marketFamily: "disciplinario" },
+    analysisInput: trial,
+  });
 
   return {
     marketDataCoverage,
@@ -137,6 +146,7 @@ function evaluateTrial(trial) {
     complementarySourceCoverage,
     marketGate,
     sourceConnector,
+    sourceValidation,
   };
 }
 
@@ -157,6 +167,13 @@ for (const trial of atlasTrialCases) {
         (item) => item.data === "Líneas y cuotas"
       ).status,
       /Reportado/
+    );
+    assert.equal(
+      result.sourceValidation.requiredSources.some(
+        (source) =>
+          source.data.includes("Líneas") && source.status === "Pendiente"
+      ),
+      false
     );
 
     if (trial.id === "trial-001") {

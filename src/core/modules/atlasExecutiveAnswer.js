@@ -1,3 +1,5 @@
+import { PARLAY_STATUS } from "../contracts/atlasContracts.js";
+
 export function buildAtlasExecutiveAnswer({
   gateCoordinator,
   marketGate,
@@ -49,8 +51,8 @@ export function buildAtlasExecutiveAnswer({
     );
   }
 
-  if (useCase === "parlay" && !gateCoordinator?.canUseInParlay) {
-    warnings.push("No apto para parlay en el estado actual.");
+  if (useCase === "parlay") {
+    warnings.push("Parlay no está soportado en Fase 0.");
   }
 
   return {
@@ -74,7 +76,8 @@ export function buildAtlasExecutiveAnswer({
       gateCoordinator?.requiredAction || "Completar validación pendiente.",
     canAnalyze: gateCoordinator?.canAnalyze === true,
     canRecommend: gateCoordinator?.canRecommend === true,
-    canUseInParlay: gateCoordinator?.canUseInParlay === true,
+    canUseInParlay: false,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
     keyFacts,
     warnings,
   };

@@ -1,4 +1,4 @@
-export function routeSpecialists({ scenario, mercado, uso }) {
+export function routeSpecialists({ scenario, mercado }) {
   const normalizedMarket = (mercado || "").toLowerCase();
 
   const specialists = [];
@@ -154,14 +154,6 @@ export function routeSpecialists({ scenario, mercado, uso }) {
       "Plantillas",
       "Extremos y laterales titulares pueden modificar la proyección de córners.",
       "Media"
-    );
-  }
-
-  if (uso === "parlay") {
-    addSpecialist(
-      "Parlay",
-      "El usuario indicó uso en parlay, por lo que Atlas debe revisar madurez, compatibilidad y concentración de riesgo.",
-      "Alta"
     );
   }
 

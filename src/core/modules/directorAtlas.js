@@ -1,90 +1,65 @@
+import {
+  PARLAY_STATUS,
+  POLICY_STATUS,
+  PROBABILITY_STATUS,
+  createDirectorVerdict,
+} from "../contracts/atlasContracts.js";
+
+function normalizeText(value = "") {
+  return value
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
 function filterResolvedExternalMissing(items = [], marketLineContext) {
   const hasLine = Boolean(marketLineContext?.lineText);
   const hasOdds = Boolean(marketLineContext?.oddsText);
 
   return items.filter((item) => {
-    const normalized = item
-      .toString()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "");
-
+    const normalized = normalizeText(item);
     if (hasLine && normalized.includes("linea")) return false;
     if (hasOdds && normalized.includes("cuota")) return false;
-
     return true;
   });
 }
 
 function detectUseCaseLabel(useCase = "") {
-  if (useCase === "parlay") return "Parlay";
-  if (useCase === "apuesta_simple") return "Apuesta simple";
-  if (useCase === "simple") return "Apuesta simple";
+  if (useCase === "parlay") return "Parlay (no soportado en Fase 0)";
+  if (["apuesta_simple", "simple"].includes(useCase)) {
+    return "Apuesta simple";
+  }
   return "Solo análisis";
 }
 
-function buildAvoidList({
-  marketGate,
-  marketDataCoverage,
-  marketLineContext,
-  analysisInput,
-}) {
-  const avoid = [];
-
-  if (marketGate?.canUseInParlay === false) {
-    avoid.push("No usar este mercado en parlay en el estado actual.");
-  }
-
-  if (marketGate?.canRecommend === false) {
-    avoid.push("No convertir este análisis en apuesta real todavía.");
-  }
-
-  if (marketDataCoverage?.coverageLevel === "missing") {
-    avoid.push(
-      `No apostar ${analysisInput?.mercado || "este mercado"} sin una fuente complementaria.`
-    );
-  }
-
-  const unresolvedExternalMissing = filterResolvedExternalMissing(
-    marketDataCoverage?.missingExternalData || [],
-    marketLineContext
-  );
-
-  if (unresolvedExternalMissing.length > 0) {
-    avoid.push(
-      `No decidir sin revisar faltantes externos pendientes: ${unresolvedExternalMissing.join(", ")}.`
-    );
-  }
-
-  return avoid;
+function resolvePolicyStatus(gateCoordinator) {
+  const status = gateCoordinator?.status || gateCoordinator?.finalStatus;
+  return Object.values(POLICY_STATUS).includes(status)
+    ? status
+    : POLICY_STATUS.EXPLORATORY;
 }
 
-function buildConditions({
-  marketDataCoverage,
-  marketGate,
-  gateCoordinator,
-  marketLineContext,
-}) {
-  const conditions = [];
-
-  const unresolvedExternalMissing = filterResolvedExternalMissing(
-    marketDataCoverage?.missingExternalData || [],
-    marketLineContext
-  );
-
-  if (unresolvedExternalMissing.length > 0) {
-    conditions.push(...unresolvedExternalMissing);
+function buildActionLevel(policyStatus, canRecommend) {
+  if (policyStatus === POLICY_STATUS.BLOCKED) {
+    return { level: "Bloqueado", label: "No apostar" };
   }
-
-  if (marketGate?.requiredAction) {
-    conditions.push(marketGate.requiredAction);
+  if (policyStatus === POLICY_STATUS.LIMITED) {
+    return { level: "Limitado", label: "Solo análisis inicial" };
   }
-
-  if (gateCoordinator?.requiredAction) {
-    conditions.push(gateCoordinator.requiredAction);
+  if (policyStatus === POLICY_STATUS.PRELIMINARY) {
+    return { level: "Preliminar", label: "Analizar, no apostar" };
   }
-
-  return Array.from(new Set(conditions));
+  if (policyStatus === POLICY_STATUS.READY && !canRecommend) {
+    return {
+      level: "Evaluación incompleta",
+      label: "Modelo deportivo no disponible",
+    };
+  }
+  if (canRecommend) {
+    return { level: "Accionable", label: "Evaluar bajo condiciones" };
+  }
+  return { level: "Exploratorio", label: "No accionable" };
 }
 
 function buildMainReasons({
@@ -95,89 +70,73 @@ function buildMainReasons({
   sourceConfidence,
 }) {
   const reasons = [];
-
   const fixture = realFixtureLookup?.selectedFixture;
 
   if (fixture) {
-    reasons.push("Fixture real confirmado por API-FOOTBALL.");
-
-    if (fixture?.referee?.confirmed) {
-      reasons.push("Árbitro confirmado para el partido.");
-    }
-
-    if (fixture?.venue?.name) {
-      reasons.push("Estadio confirmado.");
-    }
+    reasons.push("La fuente de fixtures devolvió una única coincidencia.");
+    if (fixture?.referee?.confirmed) reasons.push("Árbitro confirmado.");
+    if (fixture?.venue?.name) reasons.push("Sede identificada.");
+  } else if (realFixtureLookup?.status === "ambiguous") {
+    reasons.push(
+      "La coincidencia del fixture es ambigua y no se presenta como confirmada."
+    );
   } else {
-    reasons.push("No hay fixture real confirmado.");
+    reasons.push("No hay fixture confirmado.");
   }
 
   if (realFixtureStatistics?.statistics?.qualityFlags?.hasStatistics) {
-    reasons.push("Estadísticas reales disponibles para el fixture.");
+    reasons.push("Hay estadísticas normalizadas para el fixture.");
   }
-
   if (marketDataCoverage?.coverageStatus) {
     reasons.push(`Cobertura del mercado: ${marketDataCoverage.coverageStatus}.`);
   }
-
-  if (marketGate?.summary) {
-    reasons.push(marketGate.summary);
+  if (marketGate?.summary) reasons.push(marketGate.summary);
+  if (sourceConfidence?.informationQuality) {
+    reasons.push(
+      `Calidad informativa actual: ${sourceConfidence.informationQuality}.`
+    );
   }
 
-  if (sourceConfidence?.qualityLabel) {
-    reasons.push(`Calidad informativa actual: ${sourceConfidence.qualityLabel}.`);
-  }
-
-  return reasons;
+  return Array.from(new Set(reasons));
 }
 
-function buildActionLevel(gateCoordinator) {
-  if (!gateCoordinator) {
-    return {
-      level: "Indeterminado",
-      label: "Sin dictamen operativo",
-    };
+function buildConditions({
+  marketDataCoverage,
+  marketGate,
+  gateCoordinator,
+  marketLineContext,
+}) {
+  const conditions = filterResolvedExternalMissing(
+    marketDataCoverage?.missingExternalData || [],
+    marketLineContext
+  );
+  if (marketGate?.requiredAction) conditions.push(marketGate.requiredAction);
+  if (gateCoordinator?.requiredAction) {
+    conditions.push(gateCoordinator.requiredAction);
   }
+  conditions.push(
+    "Validar un modelo deportivo antes de estimar probabilidad o autorizar una recomendación."
+  );
+  return Array.from(new Set(conditions));
+}
 
-  if (gateCoordinator.finalStatus === "blocked") {
-    return {
-      level: "Bloqueado",
-      label: "No apostar",
-    };
+function buildAvoidList({ marketGate, marketDataCoverage, analysisInput }) {
+  const avoid = ["No usar parlay: capacidad no soportada en Fase 0."];
+  if (marketGate?.canRecommend === false) {
+    avoid.push("No convertir este análisis en apuesta real todavía.");
   }
-
-  if (gateCoordinator.finalStatus === "limited") {
-    return {
-      level: "Exploratorio",
-      label: "Solo análisis inicial",
-    };
+  if (marketDataCoverage?.coverageLevel === "missing") {
+    avoid.push(
+      `No apostar ${analysisInput?.mercado || "este mercado"} sin evidencia estadística suficiente.`
+    );
   }
-
-  if (gateCoordinator.finalStatus === "preliminary") {
-    return {
-      level: "Preliminar",
-      label: "Analizar, pero no apostar todavía",
-    };
-  }
-
-  if (gateCoordinator.finalStatus === "parlay_blocked") {
-    return {
-      level: "Parlay bloqueado",
-      label: "No usar en parlay",
-    };
-  }
-
-  return {
-    level: "Exploratorio",
-    label: "No accionable todavía",
-  };
+  return Array.from(new Set(avoid));
 }
 
 export function buildDirectorAtlasVerdict({
   gateCoordinator,
   marketGate,
   marketDataCoverage,
-  marketFocusedStats,
   realFixtureLookup,
   realFixtureStatistics,
   sourceConfidence,
@@ -190,98 +149,111 @@ export function buildDirectorAtlasVerdict({
   analysisInput,
 }) {
   const market = analysisInput?.mercado || "Mercado no especificado";
-  const useCase = analysisInput?.uso || "analisis";
+  const policyStatus = resolvePolicyStatus(gateCoordinator);
+  const probabilityStatus = PROBABILITY_STATUS.UNAVAILABLE;
+  const hasOperationalBlock = Boolean(
+    fiscalImpact?.blocksRecommendation ||
+      marketLineContext?.blocksDecision ||
+      complementarySourceCoverage?.blocksDecision ||
+      realFixtureLookup?.status === "ambiguous"
+  );
+  const canRecommend = Boolean(
+    gateCoordinator?.canRecommend === true &&
+      confidenceCalibration?.canRecommend === true &&
+      !hasOperationalBlock
+  );
+  const actionLevel = buildActionLevel(policyStatus, canRecommend);
+  const mainReasons = buildMainReasons({
+    realFixtureLookup,
+    realFixtureStatistics,
+    marketDataCoverage,
+    marketGate,
+    sourceConfidence,
+  });
+  const requiredConditions = buildConditions({
+    marketDataCoverage,
+    marketGate,
+    gateCoordinator,
+    marketLineContext,
+  });
+  const unresolvedExternalMissing = filterResolvedExternalMissing(
+    marketDataCoverage?.missingExternalData || [],
+    marketLineContext
+  );
 
-  const actionLevel = buildActionLevel(gateCoordinator);
-
-  const canRecommend = gateCoordinator?.canRecommend === true;
-  const canUseInParlay = gateCoordinator?.canUseInParlay === true;
-
-  let verdict = "No apostar todavía.";
-  let candidateSelection = "Sin selección accionable todavía.";
-  let minimumAcceptableOdds = "Pendiente de línea/cuota real.";
+  let verdict =
+    "No apostar todavía: Atlas no dispone de un modelo deportivo validado.";
   let preferredMarket = market;
+  let candidateSelection = "Sin selección accionable en Fase 0.";
 
+  if (policyStatus === POLICY_STATUS.BLOCKED) {
+    verdict = "No apostar: una validación crítica bloqueó el análisis.";
+  }
   if (marketGate?.gateStatus === "blocked") {
-    verdict = "Mercado descartado por falta de cobertura.";
-    candidateSelection = "No seleccionar este mercado con la fuente actual.";
-    preferredMarket = "Buscar mercado alternativo con datos disponibles.";
-  } else if (marketGate?.gateStatus === "preliminary") {
-    verdict = "Mercado viable para análisis preliminar, pero no accionable todavía.";
-    candidateSelection = "Pendiente hasta conocer línea y cuota.";
-    preferredMarket = marketDataCoverage?.marketLabel || market;
-  } else if (marketGate?.gateStatus === "limited") {
-    verdict = "Mercado limitado: revisar solo como contexto.";
-    candidateSelection = "No usar como selección principal.";
+    verdict = "Mercado descartado por falta de cobertura estadística.";
+    preferredMarket = "Ningún mercado alternativo evaluado";
   }
-
-  if (canRecommend) {
-    verdict = "Apuesta candidata aceptable bajo condiciones.";
-    candidateSelection = "Pendiente de selección específica según línea disponible.";
+  if (realFixtureLookup?.status === "ambiguous") {
+    verdict = "No apostar: el fixture es ambiguo y no está confirmado.";
   }
-
   if (fiscalImpact?.fiscalLevel === "strong") {
-    verdict = "No apostar todavía por objeción fuerte del Fiscal.";
-    candidateSelection = "Sin selección accionable hasta resolver objeciones fiscales.";
-  } else if (fiscalImpact?.fiscalLevel === "medium") {
-    verdict = "Análisis limitado por objeciones del Fiscal.";
-    candidateSelection = "No convertir en apuesta real hasta resolver riesgos detectados.";
-  } else if (fiscalImpact?.fiscalLevel === "low" && !canRecommend) {
-    verdict = "Mercado observable, pero con advertencia fiscal.";
+    verdict = "No apostar: el Fiscal mantiene una objeción fuerte.";
   }
-
   if (complementarySourceCoverage?.blocksDecision) {
-    verdict = "No apostar todavía: falta cobertura de fuente suficiente.";
+    verdict = "No apostar: la cobertura de evidencia es insuficiente.";
+  }
+  if (marketLineContext?.status !== "available") {
     candidateSelection =
-      "Sin selección accionable hasta completar fuentes requeridas.";
-  }
-
-  if (marketLineContext?.status === "available") {
-    minimumAcceptableOdds = `Cuota informada: ${
-      marketLineContext.oddsText || "informada"
-    }. No implica aceptación automática.`;
-  }
-
-  if (marketLineContext?.status && marketLineContext.status !== "available") {
-    verdict = "No convertir en apuesta real: línea/cuota insuficiente o no validada.";
+      "Sin selección accionable hasta completar línea y cuota.";
+  } else {
     candidateSelection =
-      "Mantener como análisis técnico hasta validar línea y cuota.";
+      "Línea y cuota conservadas como datos reportados; selección no autorizada.";
   }
 
-  if (refereeProfile?.sourceImpact?.shouldLimitConfidence && market.includes("tarjeta")) {
-    verdict = "Análisis disciplinario limitado por falta de histórico arbitral.";
-    candidateSelection =
-      "Mantener como análisis técnico hasta conectar histórico arbitral verificable.";
-  }
+  const lineAndOdds =
+    marketLineContext?.status === "available"
+      ? `Línea reportada: ${marketLineContext.lineText}. Cuota reportada: ${marketLineContext.oddsText}. Pendientes de validación.`
+      : "Línea y/o cuota no reportadas por completo.";
+  const risks = [
+    gateCoordinator?.primaryReason,
+    ...unresolvedExternalMissing,
+    ...(refereeProfile?.sourceImpact?.shouldLimitConfidence
+      ? [refereeProfile.sourceImpact.reason]
+      : []),
+    ...(teamRecentProfile?.sourceImpact?.shouldLimitConfidence
+      ? [teamRecentProfile.sourceImpact.reason]
+      : []),
+  ].filter(Boolean);
 
-  if (teamRecentProfile?.sourceImpact?.shouldLimitConfidence) {
-    verdict = "Análisis limitado por falta de histórico reciente de equipos.";
-    candidateSelection =
-      "Mantener como análisis técnico hasta conectar histórico reciente de equipos.";
-  }
-
-  return {
-    title: "Dictamen del Director Atlas",
+  return createDirectorVerdict({
     verdict,
-    actionLevel,
     market,
+    technicalSupport:
+      fiscalImpact?.adjustedTechnicalSupport ??
+      confidenceCalibration?.technicalSupport ??
+      null,
+    estimatedProbability: null,
+    probabilityStatus,
+    policyStatus,
+    canRecommend,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
+    reasons: mainReasons,
+    risks: Array.from(new Set(risks)),
+    missingData: requiredConditions,
+    avoid: buildAvoidList({ marketGate, marketDataCoverage, analysisInput }),
+    nextAction:
+      requiredConditions[0] || "Mantener el caso como análisis no accionable.",
+    title: "Dictamen del Director Atlas",
+    actionLevel,
     preferredMarket,
-    useCase: detectUseCaseLabel(useCase),
+    useCase: detectUseCaseLabel(analysisInput?.uso),
     candidateSelection,
-    minimumAcceptableOdds,
+    minimumAcceptableOdds: lineAndOdds,
     informationScore:
       sourceConfidence?.informationScore ??
       sourceConfidence?.score ??
       sourceConfidence?.qualityScore ??
       0,
-    technicalSupport:
-      fiscalImpact?.adjustedTechnicalSupport ??
-      confidenceCalibration?.technicalSupport ??
-      null,
-    estimatedProbability:
-      fiscalImpact?.adjustedEstimatedProbability ??
-      confidenceCalibration?.estimatedProbability ??
-      null,
     operationalLevel: confidenceCalibration?.operationalLevel || null,
     fiscalLevel: fiscalImpact?.fiscalLevel || "not_applied",
     fiscalLabel: fiscalImpact?.fiscalLabel || "Fiscal no aplicado",
@@ -289,42 +261,9 @@ export function buildDirectorAtlasVerdict({
     lineContextStatus: marketLineContext?.status || "not_applied",
     complementaryCoverageStatus:
       complementarySourceCoverage?.coverageStatus || "not_applied",
-    canRecommend:
-      fiscalImpact?.blocksRecommendation ||
-      marketLineContext?.blocksDecision ||
-      complementarySourceCoverage?.blocksDecision
-        ? false
-        : canRecommend,
-    canUseInParlay:
-      fiscalImpact?.blocksParlay ||
-      marketLineContext?.blocksDecision ||
-      complementarySourceCoverage?.blocksDecision
-        ? false
-        : canUseInParlay,
-    mainReasons: buildMainReasons({
-      realFixtureLookup,
-      realFixtureStatistics,
-      marketDataCoverage,
-      marketGate,
-      sourceConfidence,
-    }),
-    risks: [
-      gateCoordinator?.primaryReason,
-      ...(marketDataCoverage?.missingExternalData || []),
-    ].filter(Boolean),
-    requiredConditions: buildConditions({
-      marketDataCoverage,
-      marketGate,
-      gateCoordinator,
-      marketLineContext,
-    }),
-    avoid: buildAvoidList({
-      marketGate,
-      marketDataCoverage,
-      marketLineContext,
-      analysisInput,
-    }),
+    mainReasons,
+    requiredConditions,
     directorNote:
-      "Este dictamen integra fuente real, cobertura de mercado, perfiles técnicos, línea/cuota, fuentes complementarias, fiscalización y calibración prudente. DirectorAtlas es la voz final; los demás módulos son soporte auditable.",
-  };
+      "DirectorAtlas integra la evidencia y es la única voz pública. Los demás módulos permanecen como soporte técnico auditable.",
+  });
 }
