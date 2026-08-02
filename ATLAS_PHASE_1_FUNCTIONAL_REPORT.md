@@ -1,7 +1,7 @@
 # Atlas Core — Informe de rescate Fase 1 funcional
 
-Fecha: 2026-08-01  
-Rama: `rescue/atlas-core-v0.2`  
+Fecha: 2026-08-01
+Rama: `rescue/atlas-core-v0.2`
 Alcance: únicamente Fase 1 funcional; sin Supabase, Vercel, autenticación, scraping, APIs adicionales, probabilidades deportivas ni parlays.
 
 ## 1. Resultado ejecutivo

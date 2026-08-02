@@ -1,6 +1,6 @@
 # Evidencia de resolución de elementos no versionados
 
-Fecha: 2026-08-01  
+Fecha: 2026-08-01
 Rama: `rescue/atlas-core-v0.2`
 
 ## Residuos eliminados
