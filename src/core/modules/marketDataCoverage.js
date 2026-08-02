@@ -1,3 +1,11 @@
+import {
+  EVIDENCE_STATUS,
+  MARKET_STATUS,
+  PROBABILITY_STATUS,
+  createEvidenceItem,
+  createMarketAssessment,
+} from "../contracts/atlasContracts.js";
+
 function normalizeText(value = "") {
   return value
     .toString()
@@ -134,6 +142,142 @@ function statLabel(key) {
   };
 
   return labels[key] || key;
+}
+
+export const FUNCTIONAL_MARKETS = Object.freeze([
+  { id: "goals", label: "Goles" },
+  { id: "total_shots", label: "Remates" },
+  { id: "shots_on_goal", label: "Remates a puerta" },
+  { id: "cards", label: "Tarjetas" },
+]);
+
+const FUNCTIONAL_MARKET_RULES = Object.freeze({
+  goals: {
+    label: "Goles",
+    currentRequirements: ["score.goals"],
+    historyRequirements: [
+      "Histórico reciente de goles de ambos equipos",
+      "Desempeño local y visitante",
+    ],
+  },
+  total_shots: {
+    label: "Remates",
+    currentRequirements: ["total_shots"],
+    historyRequirements: [
+      "Histórico reciente de remates de ambos equipos",
+      "Desempeño local y visitante",
+    ],
+  },
+  shots_on_goal: {
+    label: "Remates a puerta",
+    currentRequirements: ["shots_on_goal"],
+    historyRequirements: [
+      "Histórico reciente de remates a puerta de ambos equipos",
+      "Desempeño local y visitante",
+    ],
+  },
+  cards: {
+    label: "Tarjetas",
+    currentRequirements: ["yellow_cards", "red_cards"],
+    historyRequirements: [
+      "Histórico disciplinario reciente de ambos equipos",
+      "Histórico verificable del árbitro",
+    ],
+  },
+});
+
+export function getFunctionalMarketRule(marketId) {
+  return FUNCTIONAL_MARKET_RULES[marketId] || null;
+}
+
+export function evaluateFunctionalMarketCoverage({
+  marketId,
+  fixture,
+  fixtureStatisticsResult,
+}) {
+  const rule = getFunctionalMarketRule(marketId);
+  if (!rule) {
+    return createMarketAssessment({
+      status: MARKET_STATUS.BLOCKED,
+      market: marketId || "unknown",
+      marketLabel: "Mercado no soportado",
+      coverage: "unsupported",
+      technicalSupport: 0,
+      estimatedProbability: null,
+      probabilityStatus: PROBABILITY_STATUS.UNAVAILABLE,
+      missingData: ["Mercado fuera del alcance funcional de Fase 1"],
+      verifiedData: [],
+      evidence: [],
+      actionable: false,
+      safeClaim: false,
+      historicalSampleSize: 0,
+    });
+  }
+
+  const availableStats =
+    fixtureStatisticsResult?.statistics?.availableStats || [];
+  const hasVerifiedScore = Boolean(
+    (fixture?.status?.isFinished || fixture?.status?.isLive) &&
+      fixture?.score?.goals?.home !== null &&
+      fixture?.score?.goals?.away !== null
+  );
+  const currentAvailability = rule.currentRequirements.map((requirement) => ({
+    requirement,
+    available:
+      requirement === "score.goals"
+        ? hasVerifiedScore
+        : availableStats.includes(requirement),
+  }));
+  const verifiedData = currentAvailability
+    .filter((item) => item.available)
+    .map((item) => item.requirement);
+  const missingCurrentData = currentAvailability
+    .filter((item) => !item.available)
+    .map((item) => item.requirement);
+  const missingData = [...missingCurrentData, ...rule.historyRequirements];
+  const currentCoverage =
+    verifiedData.length / Math.max(1, rule.currentRequirements.length);
+
+  return createMarketAssessment({
+    status:
+      verifiedData.length === rule.currentRequirements.length
+        ? MARKET_STATUS.PRELIMINARY
+        : MARKET_STATUS.LIMITED,
+    market: marketId,
+    marketLabel: rule.label,
+    coverage:
+      verifiedData.length === rule.currentRequirements.length
+        ? "current_fixture_complete"
+        : verifiedData.length > 0
+          ? "current_fixture_partial"
+          : "current_fixture_missing",
+    technicalSupport: Math.round(currentCoverage * 50),
+    estimatedProbability: null,
+    probabilityStatus: PROBABILITY_STATUS.UNAVAILABLE,
+    requiredCurrentData: rule.currentRequirements,
+    verifiedData,
+    missingData,
+    evidence: currentAvailability.map((item) =>
+      createEvidenceItem({
+        id: `market:${marketId}:${item.requirement}`,
+        type: "market_requirement",
+        status: item.available
+          ? EVIDENCE_STATUS.VERIFIED
+          : EVIDENCE_STATUS.MISSING,
+        source: "api-football",
+        value: item.available ? item.requirement : null,
+        observedAt: fixture?.date?.utc || null,
+        quality: { scope: "single_fixture", historical: false },
+      })
+    ),
+    actionable: false,
+    safeClaim: false,
+    historicalSampleSize: 0,
+    summary:
+      verifiedData.length > 0
+        ? "Hay datos verificados del fixture seleccionado, pero no constituyen forma reciente ni respaldan un pick."
+        : "No hay datos suficientes del fixture para evaluar este mercado.",
+  });
 }
 
 function hasReportedValue(value) {

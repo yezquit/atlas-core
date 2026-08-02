@@ -1,4 +1,6 @@
 import {
+  DATA_LOAD_STATUS,
+  DIRECTOR_STATUS,
   PARLAY_STATUS,
   POLICY_STATUS,
   PROBABILITY_STATUS,
@@ -265,5 +267,131 @@ export function buildDirectorAtlasVerdict({
     requiredConditions,
     directorNote:
       "DirectorAtlas integra la evidencia y es la única voz pública. Los demás módulos permanecen como soporte técnico auditable.",
+  });
+}
+
+export function buildPhaseOneDirectorVerdict({
+  dataStatus,
+  dataErrorCode = null,
+  fixture = null,
+  statisticsResult = null,
+  marketAssessment = null,
+  evidence = [],
+}) {
+  const market = marketAssessment?.marketLabel || "Mercado no evaluado";
+  const blockingCodes = new Set([
+    "invalid_fixture_id",
+    "fixture_selection_mismatch",
+    "ambiguous_fixture_id",
+    "unsupported_market",
+  ]);
+  const allRequiredEvidenceVerified = Boolean(
+    marketAssessment?.actionable === true &&
+      marketAssessment?.historicalSampleSize > 0 &&
+      marketAssessment?.missingData?.length === 0 &&
+      marketAssessment?.evidence?.length > 0 &&
+      marketAssessment.evidence.every((item) => item.status === "verified")
+  );
+  const currentVerifiedCount = marketAssessment?.verifiedData?.length || 0;
+
+  let status = DIRECTOR_STATUS.INSUFFICIENT_DATA;
+  let policyStatus = POLICY_STATUS.LIMITED;
+  let verdict =
+    "Datos insuficientes para una evaluación deportiva responsable.";
+  let nextAction =
+    "Esperar datos históricos verificables antes de considerar este mercado.";
+
+  if (blockingCodes.has(dataErrorCode) || dataStatus === DATA_LOAD_STATUS.AMBIGUOUS) {
+    status = DIRECTOR_STATUS.BLOCKED;
+    policyStatus = POLICY_STATUS.BLOCKED;
+    verdict =
+      "Análisis bloqueado: el fixture o mercado no cumple el contrato de selección.";
+    nextAction = "Corregir la selección explícita antes de volver a analizar.";
+  } else if (
+    [DATA_LOAD_STATUS.UNAVAILABLE, DATA_LOAD_STATUS.PROVIDER_ERROR].includes(
+      dataStatus
+    )
+  ) {
+    status = DIRECTOR_STATUS.UNAVAILABLE;
+    policyStatus = POLICY_STATUS.LIMITED;
+    verdict =
+      "Análisis no disponible por una limitación real de datos o del proveedor.";
+    nextAction =
+      "Revisar la limitación informada o intentar con una temporada disponible.";
+  } else if (allRequiredEvidenceVerified) {
+    status = DIRECTOR_STATUS.VIABLE_WITH_CAUTION;
+    policyStatus = POLICY_STATUS.READY;
+    verdict =
+      "Mercado viable con cautela por cobertura verificada, sin probabilidad estimada.";
+    nextAction = "Mantener cautela y revisar el expediente técnico completo.";
+  } else if (fixture && currentVerifiedCount > 0) {
+    status = DIRECTOR_STATUS.ANALYZABLE_NOT_ACTIONABLE;
+    policyStatus = POLICY_STATUS.PRELIMINARY;
+    verdict =
+      "El fixture es analizable, pero no existe respaldo histórico para un pick accionable.";
+  }
+
+  const reasons = [];
+  if (fixture) {
+    reasons.push(
+      `Fixture ${fixture.fixtureId} verificado por ID, fecha, liga y temporada.`
+    );
+  }
+  if (
+    statisticsResult?.loadStatus === DATA_LOAD_STATUS.SUCCESS ||
+    statisticsResult?.status === "available"
+  ) {
+    reasons.push(
+      "Las estadísticas disponibles pertenecen únicamente al fixture seleccionado."
+    );
+  }
+  if (currentVerifiedCount > 0) {
+    reasons.push(
+      `${currentVerifiedCount} requisito(s) actual(es) del mercado tienen evidencia verificada.`
+    );
+  }
+  reasons.push(
+    "Atlas no interpreta un único partido como forma reciente de los equipos."
+  );
+
+  const missingData = Array.from(
+    new Set(marketAssessment?.missingData || ["Evidencia de mercado verificable"])
+  );
+  const risks = [
+    ...missingData,
+    "No existe un modelo deportivo validado para estimar probabilidad.",
+  ];
+
+  return createDirectorVerdict({
+    status,
+    verdict,
+    market,
+    technicalSupport: marketAssessment?.technicalSupport ?? 0,
+    estimatedProbability: null,
+    probabilityStatus: PROBABILITY_STATUS.UNAVAILABLE,
+    policyStatus,
+    canRecommend: false,
+    parlayStatus: PARLAY_STATUS.UNSUPPORTED,
+    reasons,
+    risks,
+    missingData,
+    avoid: [
+      "No presentar este mercado como seguro.",
+      "No generar un pick accionable sin histórico suficiente.",
+      "No usar parlay: capacidad no soportada.",
+    ],
+    nextAction,
+    title: "Dictamen del Director Atlas",
+    actionLevel: {
+      level: status,
+      label: status.replaceAll("_", " "),
+    },
+    candidateSelection: "Sin pick accionable en Fase 1.",
+    selectedFixtureId: fixture?.fixtureId || null,
+    dataStatus,
+    dataErrorCode,
+    evidenceRefs: evidence.map((item) => item.id).filter(Boolean),
+    directorNote:
+      "DirectorAtlas es la única voz pública; la evidencia técnica no constituye recomendación.",
   });
 }

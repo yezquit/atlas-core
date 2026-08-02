@@ -49,6 +49,23 @@ export const PROBABILITY_STATUS = Object.freeze({
   MODELED: "modeled",
 });
 
+export const DATA_LOAD_STATUS = Object.freeze({
+  LOADING: "loading",
+  SUCCESS: "success",
+  EMPTY: "empty",
+  AMBIGUOUS: "ambiguous",
+  PROVIDER_ERROR: "provider_error",
+  UNAVAILABLE: "unavailable",
+});
+
+export const DIRECTOR_STATUS = Object.freeze({
+  UNAVAILABLE: "unavailable",
+  INSUFFICIENT_DATA: "insufficient_data",
+  ANALYZABLE_NOT_ACTIONABLE: "analyzable_not_actionable",
+  VIABLE_WITH_CAUTION: "viable_with_caution",
+  BLOCKED: "blocked",
+});
+
 function optionalText(value) {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim();
@@ -88,6 +105,34 @@ export function createAnalysisRequest(input = {}) {
     fecha: optionalText(input.fecha ?? input.date),
     temporada: optionalText(input.temporada ?? input.season),
     uso: optionalText(input.uso) || "analisis",
+  };
+}
+
+/** @returns {object} FixtureCatalogResult */
+export function createFixtureCatalogResult({
+  status,
+  query = null,
+  fixtures = [],
+  evidence = [],
+  message = "",
+  errorCode = null,
+  ...details
+}) {
+  assertStatus(status, DATA_LOAD_STATUS, "FixtureCatalogResult");
+
+  const safeFixtures = Array.isArray(fixtures) ? fixtures : [];
+
+  return {
+    contract: "FixtureCatalogResult",
+    version: CONTRACT_VERSION,
+    status,
+    query,
+    count: safeFixtures.length,
+    fixtures: safeFixtures,
+    evidence,
+    message,
+    errorCode,
+    ...details,
   };
 }
 
@@ -241,6 +286,7 @@ export function createPolicyDecision({
 
 /** @returns {object} DirectorVerdict */
 export function createDirectorVerdict({
+  status = DIRECTOR_STATUS.INSUFFICIENT_DATA,
   verdict,
   market,
   technicalSupport = null,
@@ -256,6 +302,7 @@ export function createDirectorVerdict({
   nextAction = "",
   ...details
 }) {
+  assertStatus(status, DIRECTOR_STATUS, "DirectorVerdict");
   assertStatus(policyStatus, POLICY_STATUS, "DirectorVerdict");
   assertStatus(probabilityStatus, PROBABILITY_STATUS, "DirectorVerdict");
   assertStatus(parlayStatus, PARLAY_STATUS, "DirectorVerdict");
@@ -267,6 +314,7 @@ export function createDirectorVerdict({
   return {
     contract: "DirectorVerdict",
     version: CONTRACT_VERSION,
+    status,
     verdict,
     market,
     technicalSupport,

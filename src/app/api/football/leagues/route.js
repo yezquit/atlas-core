@@ -1,47 +1,27 @@
-export async function GET(request) {
-  const apiKey = process.env.API_FOOTBALL_KEY;
-  const baseUrl = process.env.API_FOOTBALL_BASE_URL;
+import { listApiFootballLeagues } from "@/core/data/apiFootballLeagues";
 
-  const { searchParams } = new URL(request.url);
-  const country = searchParams.get("country") || "Colombia";
+export const dynamic = "force-static";
 
-  if (!apiKey || apiKey === "PEGA_AQUI_TU_API_KEY") {
-    return Response.json(
-      {
-        ok: false,
-        message: "API_FOOTBALL_KEY no está configurada en .env.local.",
-      },
-      { status: 500 }
-    );
-  }
+export async function GET() {
+  const leagues = listApiFootballLeagues();
 
-  try {
-    const url = `${baseUrl}/leagues?country=${encodeURIComponent(country)}`;
-
-    const response = await fetch(url, {
+  return Response.json(
+    {
+      contract: "LeagueCatalogResult",
+      version: 1,
+      status: leagues.length > 0 ? "success" : "empty",
+      count: leagues.length,
+      leagues,
+      message:
+        leagues.length > 0
+          ? "Catálogo autorizado de ligas disponible."
+          : "No hay ligas configuradas.",
+    },
+    {
       headers: {
-        "x-apisports-key": apiKey,
+        "Cache-Control":
+          "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600",
       },
-      cache: "no-store",
-    });
-
-    const data = await response.json();
-
-    return Response.json({
-      ok: response.ok,
-      status: response.status,
-      country,
-      count: data?.response?.length || 0,
-      data,
-    });
-  } catch (error) {
-    return Response.json(
-      {
-        ok: false,
-        message: "No se pudo consultar ligas en API-FOOTBALL.",
-        error: error.message,
-      },
-      { status: 500 }
-    );
-  }
+    }
+  );
 }

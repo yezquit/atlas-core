@@ -1,63 +1,27 @@
-import { normalizeFixtureStatistics } from "@/core/modules/footballStatisticsNormalizer";
+import { DATA_LOAD_STATUS } from "@/core/contracts/atlasContracts";
+import { loadFixtureStatisticsFromServer } from "@/core/services/apiFootballServer";
+
+function httpStatusFor(result) {
+  if ([DATA_LOAD_STATUS.SUCCESS, DATA_LOAD_STATUS.EMPTY].includes(result.status)) {
+    return 200;
+  }
+  if (result.errorCode === "invalid_fixture_id") return 400;
+  if (result.errorCode === "provider_timeout") return 504;
+  if (result.status === DATA_LOAD_STATUS.PROVIDER_ERROR) return 502;
+  return 503;
+}
 
 export async function GET(request) {
-  const apiKey = process.env.API_FOOTBALL_KEY;
-  const baseUrl = process.env.API_FOOTBALL_BASE_URL;
-
   const { searchParams } = new URL(request.url);
-  const fixtureId = searchParams.get("fixtureId");
+  const result = await loadFixtureStatisticsFromServer(
+    searchParams.get("fixtureId") || ""
+  );
 
-  if (!apiKey || apiKey === "PEGA_AQUI_TU_API_KEY") {
-    return Response.json(
-      {
-        ok: false,
-        message: "API_FOOTBALL_KEY no está configurada en .env.local.",
-      },
-      { status: 500 }
-    );
-  }
-
-  if (!fixtureId) {
-    return Response.json(
-      {
-        ok: false,
-        message: "Debes enviar fixtureId.",
-        example: "/api/football/fixture-statistics?fixtureId=1153068",
-      },
-      { status: 400 }
-    );
-  }
-
-  try {
-    const url = `${baseUrl}/fixtures/statistics?fixture=${encodeURIComponent(
-      fixtureId
-    )}`;
-
-    const response = await fetch(url, {
-      headers: {
-        "x-apisports-key": apiKey,
-      },
-      cache: "no-store",
-    });
-
-    const data = await response.json();
-    const statistics = normalizeFixtureStatistics(data?.response || []);
-
-    return Response.json({
-      ok: response.ok,
-      status: response.status,
-      fixtureId,
-      statistics,
-      rawErrors: data?.errors || [],
-    });
-  } catch (error) {
-    return Response.json(
-      {
-        ok: false,
-        message: "No se pudieron consultar estadísticas del fixture.",
-        error: error.message,
-      },
-      { status: 500 }
-    );
-  }
+  return Response.json(result, {
+    status: httpStatusFor(result),
+    headers: {
+      "Cache-Control":
+        "public, max-age=0, s-maxage=120, stale-while-revalidate=60",
+    },
+  });
 }
