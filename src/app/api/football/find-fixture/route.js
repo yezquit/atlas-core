@@ -11,6 +11,7 @@ export async function GET(request) {
   const countryKey = searchParams.get("countryKey") || "colombia";
   const leagueKey = searchParams.get("leagueKey") || "primeraA";
   const seasonParam = searchParams.get("season");
+  const date = searchParams.get("date") || "";
 
   const home = searchParams.get("home") || "";
   const away = searchParams.get("away") || "";
@@ -51,10 +52,15 @@ export async function GET(request) {
     );
   }
 
-  const season = seasonParam || league.developmentSeason || league.currentSeason;
+  const season = seasonParam || league.currentSeason;
 
   try {
-    const url = `${baseUrl}/fixtures?league=${league.id}&season=${season}`;
+    const providerParams = new URLSearchParams({
+      league: String(league.id),
+      season: String(season),
+    });
+    if (date) providerParams.set("date", date);
+    const url = `${baseUrl}/fixtures?${providerParams.toString()}`;
 
     const response = await fetch(url, {
       headers: {
@@ -70,6 +76,8 @@ export async function GET(request) {
       home,
       away,
       team,
+      date,
+      season,
     });
 
     return Response.json({
@@ -84,6 +92,7 @@ export async function GET(request) {
         home,
         away,
         team,
+        date: date || null,
       },
       count: matches.length,
       matches,

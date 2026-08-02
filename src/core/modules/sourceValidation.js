@@ -6,6 +6,14 @@ export function buildSourceValidationPlan({
 }) {
   const marketFamily = marketEvaluation?.marketFamily || "general";
   const market = (analysisInput?.mercado || "").toLowerCase();
+  const hasLine = Boolean(analysisInput?.lineaMercado?.trim());
+  const hasOdds = Boolean(analysisInput?.cuotaMercado?.trim());
+  const marketDataStatus =
+    hasLine && hasOdds
+      ? "Reportado, falta validar"
+      : hasLine || hasOdds
+        ? "Parcialmente reportado"
+        : "Pendiente";
 
   const missingData = Array.from(
     new Set(
@@ -115,6 +123,7 @@ export function buildSourceValidationPlan({
       sourceType: "Casa de apuestas / API de odds",
       reason:
         "Atlas debe comparar el mercado técnico con la línea disponible antes de decidir.",
+      status: marketDataStatus,
     });
   }
 
@@ -130,6 +139,7 @@ export function buildSourceValidationPlan({
       sourceType: "Casa de apuestas / API de odds",
       reason:
         "Atlas necesita línea y cuota para evaluar si el mercado compensa el riesgo.",
+      status: marketDataStatus,
     });
   }
 
@@ -140,6 +150,7 @@ export function buildSourceValidationPlan({
       sourceType: "Casa de apuestas / API de odds",
       reason:
         "Mercados de pases requieren línea exacta para determinar si hay valor operativo.",
+      status: marketDataStatus,
     });
   }
 

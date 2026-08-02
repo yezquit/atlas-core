@@ -1,48 +1,67 @@
+import {
+  FIXTURE_STATISTICS_STATUS,
+  createFixtureStatisticsResult,
+} from "../contracts/atlasContracts.js";
+
 export async function lookupFixtureStatistics(realFixtureLookup) {
   const fixtureId = realFixtureLookup?.selectedFixture?.fixtureId;
 
   if (!fixtureId) {
-    return {
-      attempted: false,
-      connected: false,
-      status: "Sin fixture para consultar estadísticas",
+    return createFixtureStatisticsResult({
+      status: FIXTURE_STATISTICS_STATUS.NOT_REQUESTED,
       reason: "No existe fixtureId confirmado.",
       fixtureId: null,
-      statistics: null,
-    };
+      statusLabel: "Sin fixture para consultar estadísticas",
+    });
   }
 
   try {
     const response = await fetch(
       `/api/football/fixture-statistics?fixtureId=${encodeURIComponent(fixtureId)}`,
-      {
-        cache: "no-store",
-      }
+      { cache: "no-store" }
+    );
+    const data = await response.json();
+    const hasStatistics = Boolean(
+      data?.statistics?.qualityFlags?.hasStatistics
     );
 
-    const data = await response.json();
+    if (!response.ok || !data?.ok) {
+      return createFixtureStatisticsResult({
+        status: FIXTURE_STATISTICS_STATUS.ERROR,
+        attempted: true,
+        connected: false,
+        reason:
+          data?.message || "La fuente de estadísticas respondió con error.",
+        fixtureId,
+        rawErrors: data?.rawErrors || null,
+        statusLabel: "Error consultando estadísticas",
+      });
+    }
 
-    return {
+    return createFixtureStatisticsResult({
+      status: hasStatistics
+        ? FIXTURE_STATISTICS_STATUS.AVAILABLE
+        : FIXTURE_STATISTICS_STATUS.UNAVAILABLE,
       attempted: true,
-      connected: response.ok && data?.ok,
-      status: data?.statistics?.qualityFlags?.hasStatistics
-        ? "Estadísticas reales encontradas"
-        : "Sin estadísticas disponibles",
-      reason: data?.statistics?.qualityFlags?.hasStatistics
-        ? "Atlas encontró estadísticas del fixture en API-FOOTBALL."
-        : "La API respondió, pero no entregó estadísticas para este fixture.",
+      connected: true,
+      reason: hasStatistics
+        ? "Atlas encontró estadísticas normalizadas del fixture."
+        : "La fuente respondió, pero no entregó estadísticas para este fixture.",
       fixtureId,
       statistics: data?.statistics || null,
       rawErrors: data?.rawErrors || null,
-    };
+      statusLabel: hasStatistics
+        ? "Estadísticas reales encontradas"
+        : "Sin estadísticas disponibles",
+    });
   } catch (error) {
-    return {
+    return createFixtureStatisticsResult({
+      status: FIXTURE_STATISTICS_STATUS.ERROR,
       attempted: true,
       connected: false,
-      status: "Error consultando estadísticas",
       reason: error.message,
       fixtureId,
-      statistics: null,
-    };
+      statusLabel: "Error consultando estadísticas",
+    });
   }
 }

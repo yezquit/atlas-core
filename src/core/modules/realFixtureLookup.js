@@ -1,3 +1,8 @@
+import {
+  FIXTURE_STATUS,
+  createFixtureResult,
+} from "../contracts/atlasContracts.js";
+
 function normalizeText(value = "") {
   return value
     .toString()
@@ -9,7 +14,6 @@ function normalizeText(value = "") {
 
 export function parseMatchTeams(matchText = "") {
   const text = matchText.trim();
-
   const separators = [
     " vs ",
     " VS ",
@@ -26,30 +30,19 @@ export function parseMatchTeams(matchText = "") {
       const [home, away] = text.split(separator).map((part) => part.trim());
 
       if (home && away) {
-        return {
-          home,
-          away,
-          mode: "home-away",
-        };
+        return { home, away, mode: "home-away" };
       }
     }
   }
 
-  if (text) {
-    return {
-      team: text,
-      mode: "single-team",
-    };
-  }
-
-  return {
-    mode: "empty",
-  };
+  if (text) return { team: text, mode: "single-team" };
+  return { mode: "empty" };
 }
 
 export function inferApiLeagueKey({ resolvedCompetition, competitionText }) {
   const combined = normalizeText(
     [
+      resolvedCompetition?.competitionName,
       resolvedCompetition?.name,
       resolvedCompetition?.division,
       resolvedCompetition?.country,
@@ -66,48 +59,34 @@ export function inferApiLeagueKey({ resolvedCompetition, competitionText }) {
   ) {
     return "primeraB";
   }
-
-  if (
-    combined.includes("copa colombia") ||
-    combined.includes("copa")
-  ) {
+  if (combined.includes("copa colombia") || combined.includes("copa")) {
     return "copaColombia";
   }
-
-  if (
-    combined.includes("superliga")
-  ) {
-    return "superliga";
-  }
-
-  if (
-    combined.includes("femenina")
-  ) {
-    return "ligaFemenina";
-  }
-
+  if (combined.includes("superliga")) return "superliga";
+  if (combined.includes("femenina")) return "ligaFemenina";
   return "primeraA";
 }
 
 export function selectBestFixture(matches = []) {
-  if (!matches.length) return null;
+  if (matches.length === 0) {
+    return { status: FIXTURE_STATUS.NOT_FOUND, selectedFixture: null };
+  }
 
-  const finishedWithReferee = matches.find(
-    (match) => match?.status?.isFinished && match?.referee?.confirmed
-  );
+  if (matches.length > 1) {
+    return { status: FIXTURE_STATUS.AMBIGUOUS, selectedFixture: null };
+  }
 
-  if (finishedWithReferee) return finishedWithReferee;
-
-  const withReferee = matches.find((match) => match?.referee?.confirmed);
-  if (withReferee) return withReferee;
-
-  return matches[0];
+  return {
+    status: FIXTURE_STATUS.CONFIRMED,
+    selectedFixture: matches[0],
+  };
 }
 
 export async function lookupRealFixture({
   matchText,
   resolvedCompetition,
   competitionText,
+  date,
   season,
 }) {
   const parsed = parseMatchTeams(matchText);
@@ -117,16 +96,13 @@ export async function lookupRealFixture({
   });
 
   if (parsed.mode === "empty") {
-    return {
-      attempted: false,
-      connected: false,
-      status: "Sin partido para consultar",
+    return createFixtureResult({
+      status: FIXTURE_STATUS.NOT_REQUESTED,
       reason: "No hay texto de partido.",
       parsed,
       leagueKey,
-      matches: [],
-      selectedFixture: null,
-    };
+      statusLabel: "Sin partido para consultar",
+    });
   }
 
   const params = new URLSearchParams({
@@ -134,55 +110,74 @@ export async function lookupRealFixture({
     leagueKey,
   });
 
-  if (season) {
-    params.set("season", season);
-  }
+  if (season) params.set("season", season);
+  if (date) params.set("date", date);
 
   if (parsed.mode === "home-away") {
     params.set("home", parsed.home);
     params.set("away", parsed.away);
-  }
-
-  if (parsed.mode === "single-team") {
+  } else {
     params.set("team", parsed.team);
   }
 
   try {
-    const response = await fetch(`/api/football/find-fixture?${params.toString()}`, {
-      cache: "no-store",
-    });
-
+    const response = await fetch(
+      `/api/football/find-fixture?${params.toString()}`,
+      { cache: "no-store" }
+    );
     const data = await response.json();
     const matches = data?.matches || [];
-    const selectedFixture = selectBestFixture(matches);
 
-    return {
+    if (!response.ok || !data?.ok) {
+      return createFixtureResult({
+        status: FIXTURE_STATUS.ERROR,
+        attempted: true,
+        connected: false,
+        reason: data?.message || "La fuente de fixtures respondió con error.",
+        parsed,
+        leagueKey,
+        apiQuery: data?.query || null,
+        matches,
+        rawErrors: data?.rawErrors || null,
+        statusLabel: "Error consultando fuente de fixtures",
+      });
+    }
+
+    const selection = selectBestFixture(matches);
+    const isConfirmed = selection.status === FIXTURE_STATUS.CONFIRMED;
+    const isAmbiguous = selection.status === FIXTURE_STATUS.AMBIGUOUS;
+
+    return createFixtureResult({
+      status: selection.status,
       attempted: true,
-      connected: response.ok && data?.ok,
-      status: selectedFixture
-        ? "Fixture real encontrado"
-        : "Sin fixture coincidente",
-      reason: selectedFixture
-        ? "Atlas encontró coincidencia en API-FOOTBALL."
-        : "La API respondió, pero no encontró partido con esos equipos.",
+      connected: true,
+      reason: isConfirmed
+        ? "Atlas encontró una única coincidencia."
+        : isAmbiguous
+          ? "La consulta devolvió varias coincidencias; se requiere fecha o temporada para resolverlas."
+          : "La fuente respondió, pero no encontró un partido coincidente.",
       parsed,
       leagueKey,
       apiQuery: data?.query || null,
-      count: data?.count || 0,
+      count: matches.length,
       matches,
-      selectedFixture,
+      selectedFixture: selection.selectedFixture,
       rawErrors: data?.rawErrors || null,
-    };
+      statusLabel: isConfirmed
+        ? "Fixture real confirmado"
+        : isAmbiguous
+          ? "Fixture ambiguo"
+          : "Sin fixture coincidente",
+    });
   } catch (error) {
-    return {
+    return createFixtureResult({
+      status: FIXTURE_STATUS.ERROR,
       attempted: true,
       connected: false,
-      status: "Error consultando fuente real",
       reason: error.message,
       parsed,
       leagueKey,
-      matches: [],
-      selectedFixture: null,
-    };
+      statusLabel: "Error consultando fuente de fixtures",
+    });
   }
 }

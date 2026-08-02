@@ -112,7 +112,8 @@ function extractTeamStats(marketFocusedStats) {
   const rows = marketFocusedStats?.teamRows || [];
 
   return rows.map((row) => ({
-    teamName: row.teamName || row.name || "Equipo no identificado",
+    teamName:
+      row.team?.name || row.teamName || row.name || "Equipo no identificado",
     primaryStats: row.primaryStats || [],
     supportStats: row.supportStats || [],
   }));
@@ -141,7 +142,9 @@ export function buildTeamRecentProfile({
 
   const hasFixture = Boolean(fixture?.fixtureId || fixture?.id);
   const hasTeams = Boolean(homeTeam && awayTeam);
-  const hasCurrentMatchStats = Boolean(realFixtureStatistics?.availableStats?.length);
+  const hasCurrentMatchStats = Boolean(
+    realFixtureStatistics?.statistics?.availableStats?.length
+  );
 
   const marketNeed = detectTeamMarketNeed(marketText);
   const currentTeamStats = extractTeamStats(marketFocusedStats);

@@ -34,7 +34,7 @@ export async function GET(request) {
     );
   }
 
-  const season = seasonParam || league.developmentSeason || league.currentSeason;
+  const season = seasonParam || league.currentSeason;
 
   try {
     const url = `${baseUrl}/fixtures?league=${league.id}&season=${season}`;
@@ -61,7 +61,10 @@ export async function GET(request) {
         season,
         currentSeason: league.currentSeason,
         developmentSeason: league.developmentSeason || null,
-        mode: season === String(league.currentSeason) ? "current" : "development-sandbox",
+        mode:
+          String(season) === String(league.currentSeason)
+            ? "current"
+            : "explicit-season",
       },
       count: fixtures.length,
       fixtures,

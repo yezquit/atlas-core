@@ -1,66 +1,189 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { buildComplementarySourceCoverage } from "../modules/complementarySourceCoverage.js";
+import { evaluateMarketDataCoverage } from "../modules/marketDataCoverage.js";
+import { buildMarketFocusedStats } from "../modules/marketFocusedStats.js";
+import { runMarketGate } from "../modules/marketGate.js";
+import { getMockSourceData } from "../modules/sourceConnectorMock.js";
+import { buildTeamRecentProfile } from "../modules/teamRecentProfile.js";
+
 export const atlasTrialCases = [
   {
     id: "trial-001",
-    title: "Mercado disciplinario con árbitro detectado",
-    partido: "Patriotas vs Jaguares",
-    competicion: "Colombia Primera A",
+    title: "Mercado disciplinario con línea y cuota reportadas",
     mercado: "tarjetas",
     lineaMercado: "Más de 4.5 tarjetas",
     cuotaMercado: "1.85",
     uso: "analisis",
-    expectedBehavior: [
-      "Debe detectar fixture real.",
-      "Debe detectar árbitro si está disponible.",
-      "Debe marcar sensibilidad arbitral alta.",
-      "Debe limitar confianza por falta de histórico arbitral.",
-      "No debe emitir apuesta fuerte.",
-    ],
   },
   {
     id: "trial-002",
-    title: "Mercado de remates con cobertura parcial",
-    partido: "Patriotas vs Jaguares",
-    competicion: "Colombia Primera A",
+    title: "Mercado de remates con estadísticas normalizadas",
     mercado: "remates a arco",
     lineaMercado: "Más de 7.5 remates a arco",
     cuotaMercado: "1.85",
     uso: "analisis",
-    expectedBehavior: [
-      "Debe detectar estadísticas de remates si están disponibles.",
-      "Debe marcar necesidad alta de histórico reciente de equipos.",
-      "Debe permitir análisis técnico, pero limitar decisión.",
-      "No debe venderlo como pick accionable.",
-    ],
   },
   {
     id: "trial-003",
-    title: "Mercado no cubierto por API-FOOTBALL",
-    partido: "Patriotas vs Jaguares",
-    competicion: "Colombia Primera A",
+    title: "Mercado sin estadística base disponible",
     mercado: "saques de banda",
     lineaMercado: "Más de 35.5 saques de banda",
     cuotaMercado: "1.85",
     uso: "analisis",
-    expectedBehavior: [
-      "Debe detectar que API-FOOTBALL no cubre saques de banda.",
-      "ComplementarySourceCoverage debe bloquear decisión.",
-      "DirectorAtlas debe decir no apostar todavía.",
-      "No debe generar selección accionable.",
-    ],
   },
   {
     id: "trial-004",
-    title: "Caso parlay con mercado limitado",
-    partido: "Patriotas vs Jaguares",
-    competicion: "Colombia Primera A",
+    title: "Parlay marcado como capacidad no soportada",
     mercado: "tarjetas",
     lineaMercado: "Más de 4.5 tarjetas",
     cuotaMercado: "1.85",
     uso: "parlay",
-    expectedBehavior: [
-      "Debe ser más estricto que en solo análisis.",
-      "Debe bloquear uso en parlay si faltan históricos.",
-      "DirectorAtlas debe evitar recomendar parlay.",
-    ],
   },
 ];
+
+const realFixtureLookup = {
+  selectedFixture: {
+    fixtureId: 101,
+    teams: {
+      home: { name: "Patriotas" },
+      away: { name: "Jaguares" },
+    },
+  },
+};
+
+const realFixtureStatistics = {
+  statistics: {
+    availableStats: [
+      "yellow_cards",
+      "red_cards",
+      "fouls",
+      "shots_on_goal",
+      "total_shots",
+    ],
+    qualityFlags: { hasStatistics: true },
+    teams: [
+      {
+        team: { name: "Patriotas" },
+        statistics: {
+          yellow_cards: { value: 2 },
+          red_cards: { value: 0 },
+          fouls: { value: 11 },
+          shots_on_goal: { value: 5 },
+          total_shots: { value: 12 },
+        },
+      },
+      {
+        team: { name: "Jaguares" },
+        statistics: {
+          yellow_cards: { value: 3 },
+          red_cards: { value: 0 },
+          fouls: { value: 14 },
+          shots_on_goal: { value: 3 },
+          total_shots: { value: 9 },
+        },
+      },
+    ],
+  },
+};
+
+function evaluateTrial(trial) {
+  const marketDataCoverage = evaluateMarketDataCoverage({
+    marketText: trial.mercado,
+    fixtureStatistics: realFixtureStatistics,
+    lineText: trial.lineaMercado,
+    oddsText: trial.cuotaMercado,
+  });
+  const marketFocusedStats = buildMarketFocusedStats({
+    marketText: trial.mercado,
+    fixtureStatistics: realFixtureStatistics,
+  });
+  const teamRecentProfile = buildTeamRecentProfile({
+    realFixtureLookup,
+    realFixtureStatistics,
+    marketFocusedStats,
+    marketText: trial.mercado,
+  });
+  const complementarySourceCoverage = buildComplementarySourceCoverage({
+    marketText: trial.mercado,
+    realFixtureStatistics,
+    marketDataCoverage,
+    refereeProfile: { sourceImpact: { shouldLimitConfidence: false } },
+    teamRecentProfile,
+    marketLineContext: { status: "available" },
+  });
+  const marketGate = runMarketGate({
+    marketDataCoverage,
+    marketFocusedStats,
+    sourceConfidence: { informationScore: "60%" },
+    analysisInput: trial,
+  });
+  const sourceConnector = getMockSourceData({
+    scenario: {
+      resolvedCompetition: {
+        resolved: true,
+        competitionName: "Liga BetPlay",
+        division: "Primera A",
+      },
+    },
+    analysisInput: trial,
+  });
+
+  return {
+    marketDataCoverage,
+    marketFocusedStats,
+    teamRecentProfile,
+    complementarySourceCoverage,
+    marketGate,
+    sourceConnector,
+  };
+}
+
+for (const trial of atlasTrialCases) {
+  test(`${trial.id}: ${trial.title}`, () => {
+    const result = evaluateTrial(trial);
+
+    assert.equal(result.marketDataCoverage.hasLine, true);
+    assert.equal(result.marketDataCoverage.hasOdds, true);
+    assert.equal(
+      result.marketDataCoverage.missingExternalData.some((item) =>
+        /línea|linea|cuota/i.test(item)
+      ),
+      false
+    );
+    assert.match(
+      result.sourceConnector.sourceData.find(
+        (item) => item.data === "Líneas y cuotas"
+      ).status,
+      /Reportado/
+    );
+
+    if (trial.id === "trial-001") {
+      assert.equal(result.marketDataCoverage.coverageLevel, "covered");
+      assert.deepEqual(
+        result.teamRecentProfile.currentTeamStats.map((row) => row.teamName),
+        ["Patriotas", "Jaguares"]
+      );
+    }
+
+    if (trial.id === "trial-002") {
+      assert.equal(result.teamRecentProfile.hasCurrentMatchStats, true);
+      assert.equal(
+        result.marketFocusedStats.primaryAvailable.includes("shots_on_goal"),
+        true
+      );
+    }
+
+    if (trial.id === "trial-003") {
+      assert.equal(result.marketDataCoverage.coverageLevel, "missing");
+      assert.equal(result.complementarySourceCoverage.blocksDecision, true);
+      assert.equal(result.marketGate.gateStatus, "blocked");
+    }
+
+    if (trial.id === "trial-004") {
+      assert.equal(result.marketGate.parlayStatus, "unsupported");
+      assert.equal(result.marketGate.canUseInParlay, false);
+    }
+  });
+}

@@ -1,6 +1,10 @@
 export function getMockSourceData({ scenario, analysisInput }) {
   const competition = scenario?.resolvedCompetition;
   const market = (analysisInput?.mercado || "").toLowerCase();
+  const line = analysisInput?.lineaMercado?.trim() || null;
+  const odds = analysisInput?.cuotaMercado?.trim() || null;
+  const hasLineAndOdds = Boolean(line && odds);
+  const hasReportedMarketData = Boolean(line || odds);
 
   const sourceData = [
     {
@@ -43,12 +47,22 @@ export function getMockSourceData({ scenario, analysisInput }) {
     },
     {
       data: "Líneas y cuotas",
-      value: market ? `Pendiente para mercado: ${market}` : "Pendiente",
-      source: "No conectado",
-      sourceLevel: "Pendiente",
-      status: "Pendiente",
-      confidence: "Baja",
-      note: "Atlas necesita línea exacta antes de evaluar valor operativo.",
+      value: hasReportedMarketData
+        ? `Línea: ${line || "no reportada"} · Cuota: ${odds || "no reportada"}`
+        : market
+          ? `Pendiente para mercado: ${market}`
+          : "Pendiente",
+      source: hasReportedMarketData ? "Usuario" : "No conectado",
+      sourceLevel: hasReportedMarketData ? "Dato reportado" : "Pendiente",
+      status: hasLineAndOdds
+        ? "Reportado, falta validar"
+        : hasReportedMarketData
+          ? "Parcialmente reportado"
+          : "Pendiente",
+      confidence: hasReportedMarketData ? "Sin verificar" : "Baja",
+      note: hasLineAndOdds
+        ? "Atlas conserva los valores reportados, pero debe validarlos contra una fuente verificable."
+        : "Atlas necesita los valores que aún falten antes de evaluar el contexto de mercado.",
     },
     {
       data: "Consenso de fuentes",
@@ -66,6 +80,9 @@ export function getMockSourceData({ scenario, analysisInput }) {
   ).length;
 
   const pendingCount = sourceData.length - connectedCount;
+  const reportedCount = sourceData.filter((item) =>
+    item.status.toLowerCase().includes("reportado")
+  ).length;
 
   return {
     status:
@@ -74,6 +91,7 @@ export function getMockSourceData({ scenario, analysisInput }) {
         : "Fuentes parcialmente conectadas",
     connectedCount,
     pendingCount,
+    reportedCount,
     sourceData,
     summary:
       "Atlas todavía opera con datos internos e inferencias iniciales. Falta conectar fuentes externas confiables para elevar la decisión.",

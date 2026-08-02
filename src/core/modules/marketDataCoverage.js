@@ -136,9 +136,33 @@ function statLabel(key) {
   return labels[key] || key;
 }
 
-export function evaluateMarketDataCoverage({ marketText, fixtureStatistics }) {
+function hasReportedValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function isLineRequirement(item) {
+  return normalizeText(item).includes("linea");
+}
+
+function isOddsRequirement(item) {
+  return normalizeText(item).includes("cuota");
+}
+
+export function evaluateMarketDataCoverage({
+  marketText,
+  fixtureStatistics,
+  lineText,
+  oddsText,
+}) {
   const rule = detectMarketRule(marketText);
   const availableStats = fixtureStatistics?.statistics?.availableStats || [];
+  const hasLine = hasReportedValue(lineText);
+  const hasOdds = hasReportedValue(oddsText);
+  const missingExternalData = rule.missingExternalData.filter((item) => {
+    if (hasLine && isLineRequirement(item)) return false;
+    if (hasOdds && isOddsRequirement(item)) return false;
+    return true;
+  });
 
   const coveredRequiredStats = rule.requiredStats.filter((stat) =>
     availableStats.includes(stat)
@@ -187,14 +211,20 @@ export function evaluateMarketDataCoverage({ marketText, fixtureStatistics }) {
     coveredRequiredStats,
     missingRequiredStats,
     coveredUsefulStats,
-    missingExternalData: rule.missingExternalData,
+    missingExternalData,
+    hasLine,
+    hasOdds,
+    reportedLine: hasLine ? String(lineText).trim() : null,
+    reportedOdds: hasOdds ? String(oddsText).trim() : null,
     availableStats: availableStats.map((stat) => ({
       key: stat,
       label: statLabel(stat),
     })),
     summary:
       coverageLevel === "covered"
-        ? "API-FOOTBALL entrega los datos estadísticos base para este mercado. Aún falta línea/cuota para decisión real."
+        ? hasLine && hasOdds
+          ? "La fuente estadística cubre los datos base y la línea/cuota fueron reportadas; aún deben validarse."
+          : "La fuente estadística cubre los datos base; aún falta reportar línea y/o cuota."
         : coverageLevel === "partial"
           ? "API-FOOTBALL entrega parte de los datos necesarios, pero el mercado sigue incompleto."
           : coverageLevel === "missing"

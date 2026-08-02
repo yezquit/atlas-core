@@ -120,7 +120,7 @@ function detectRequiredSourceProfile(marketText = "") {
 }
 
 function getAvailableStats(realFixtureStatistics) {
-  return realFixtureStatistics?.availableStats || [];
+  return realFixtureStatistics?.statistics?.availableStats || [];
 }
 
 export function buildComplementarySourceCoverage({

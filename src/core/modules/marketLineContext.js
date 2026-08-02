@@ -121,7 +121,7 @@ function classifyOdds(oddsNumber) {
       status: "standard",
       label: "Cuota media",
       interpretation:
-        "Rango operativo común. Debe compararse contra probabilidad estimada y calidad de datos.",
+        "Rango operativo común. Debe conservarse como contexto hasta disponer de un modelo deportivo validado.",
     };
   }
 
@@ -171,7 +171,9 @@ export function buildMarketLineContext({
   if (!hasLine) missingData.push("Línea exacta del mercado");
   if (!hasOdds) missingData.push("Cuota real de la casa");
   if (!technicalSupport) missingData.push("Respaldo técnico calibrado");
-  if (!estimatedProbability) missingData.push("Probabilidad estimada calibrada");
+  if (estimatedProbability === null) {
+    missingData.push("Modelo deportivo validado no disponible en Fase 0");
+  }
 
   if (refereeProfile?.sourceImpact?.shouldLimitConfidence) {
     missingData.push("Histórico arbitral suficiente para validar la línea");
@@ -251,6 +253,8 @@ export function buildMarketLineContext({
     oddsProfile,
     technicalSupport,
     estimatedProbability,
+    probabilityStatus:
+      confidenceCalibration?.probabilityStatus || "unavailable",
     valueRead,
     operationalEffect,
     blocksDecision,
