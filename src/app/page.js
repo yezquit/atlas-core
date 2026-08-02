@@ -31,6 +31,10 @@ import { buildRefereeProfile } from "@/core/modules/refereeProfile";
 import { buildTeamRecentProfile } from "@/core/modules/teamRecentProfile";
 import { buildMarketLineContext } from "@/core/modules/marketLineContext";
 import { buildComplementarySourceCoverage } from "@/core/modules/complementarySourceCoverage";
+import {
+  PARLAY_STATUS,
+  createAnalysisRequest,
+} from "@/core/contracts/atlasContracts";
 
 export default function Home() {
   const [mode, setMode] = useState("partido");
@@ -40,6 +44,8 @@ export default function Home() {
     mercado: "",
     lineaMercado: "",
     cuotaMercado: "",
+    fecha: "",
+    temporada: "",
     uso: "analisis",
   });
   const [analysis, setAnalysis] = useState(null);
@@ -58,8 +64,6 @@ export default function Home() {
 
     const simpleAllowed = [
       "director-atlas-panel",
-      "confidence-calibration-panel",
-      "atlas-answer-panel",
       "case-panel"
     ];
 
@@ -111,15 +115,20 @@ export default function Home() {
 
 
   useEffect(() => {
-    const savedHistory = window.localStorage.getItem("atlas_case_history");
+    const timeoutId = window.setTimeout(() => {
+      const savedHistory = window.localStorage.getItem("atlas_case_history");
 
-    if (savedHistory) {
-      try {
-        setCaseHistory(JSON.parse(savedHistory));
-      } catch {
-        setCaseHistory([]);
+      if (savedHistory) {
+        try {
+          setCaseHistory(JSON.parse(savedHistory));
+        } catch {
+          setCaseHistory([]);
+        }
       }
-    }
+
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   function saveCaseToHistory(caseRecord) {
@@ -158,6 +167,10 @@ export default function Home() {
       partido: "",
       competicion: "",
       mercado: "",
+      lineaMercado: "",
+      cuotaMercado: "",
+      fecha: "",
+      temporada: "",
       uso: "analisis",
     });
     setAnalysis(null);
@@ -168,6 +181,13 @@ export default function Home() {
     const partido = form.partido.trim() || "Partido pendiente";
     const competicion = form.competicion.trim() || "Competición pendiente";
     const mercado = form.mercado.trim();
+    const analysisInput = createAnalysisRequest({
+      ...form,
+      mode,
+      partido,
+      competicion,
+      mercado,
+    });
 
     const scenario = classifyScenario({
       mode,
@@ -187,31 +207,22 @@ export default function Home() {
     const specialistRoute = routeSpecialists({
       scenario,
       mercado,
-      uso: form.uso,
+      uso: analysisInput.uso,
     });
 
     const specialistReports = generateSpecialistReports({
       specialistRoute,
       scenario,
       mercado,
-      uso: form.uso,
+      uso: analysisInput.uso,
     });
 
-    const parlayStatus =
-      form.uso === "parlay"
-        ? "🟠 Esperar validación"
-        : "No aplica";
+    const parlayStatus = PARLAY_STATUS.UNSUPPORTED;
 
     const fiscalReview = runFiscalReview({
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
       scenario,
       specialistReports,
-      parlayStatus,
     });
 
     const marketEvaluation = evaluateMarkets({
@@ -225,22 +236,12 @@ export default function Home() {
       scenario,
       specialistReports,
       marketEvaluation,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     const sourceConnector = getMockSourceData({
       scenario,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     let sourceConfidence = calculateSourceConfidence({
@@ -249,12 +250,7 @@ export default function Home() {
     });
 
     const decisionResult = runDecisionEngine({
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
       scenario,
       specialistReports,
       fiscalReview,
@@ -266,21 +262,11 @@ export default function Home() {
       fiscalReview,
       sourceConfidence,
       marketEvaluation,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     let auditPrep = prepareAuditPlan({
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
       scenario,
       marketEvaluation,
       fiscalReview,
@@ -289,9 +275,11 @@ export default function Home() {
     });
 
     const realFixtureLookup = await lookupRealFixture({
-      matchText: partido,
+      matchText: form.partido.trim(),
       resolvedCompetition: scenario?.resolvedCompetition || scenario?.competition || null,
       competitionText: competicion,
+      date: analysisInput.fecha,
+      season: analysisInput.temporada,
     });
 
     sourceConfidence = applyRealFixtureToSourceConfidence({
@@ -305,6 +293,8 @@ export default function Home() {
     const marketDataCoverage = evaluateMarketDataCoverage({
       marketText: mercado,
       fixtureStatistics: realFixtureStatistics,
+      lineText: analysisInput.lineaMercado,
+      oddsText: analysisInput.cuotaMercado,
     });
 
     const marketFocusedStats = buildMarketFocusedStats({
@@ -321,12 +311,7 @@ export default function Home() {
       marketDataCoverage,
       marketFocusedStats,
       sourceConfidence,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     validationGate = runValidationGate({
@@ -334,21 +319,11 @@ export default function Home() {
       fiscalReview,
       sourceConfidence,
       marketEvaluation,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     auditPrep = prepareAuditPlan({
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
       scenario,
       marketEvaluation,
       fiscalReview,
@@ -360,12 +335,7 @@ export default function Home() {
       validationGate,
       marketGate,
       sourceConfidence,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     const technicalConfidence = buildTechnicalConfidence({
@@ -393,12 +363,6 @@ export default function Home() {
       fiscalReview,
       confidenceCalibration,
       gateCoordinator,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
     });
 
     const refereeProfile = buildRefereeProfile({
@@ -416,8 +380,8 @@ export default function Home() {
 
     const marketLineContext = buildMarketLineContext({
       marketText: mercado,
-      lineText: form.lineaMercado || "",
-      oddsText: form.cuotaMercado || "",
+      lineText: analysisInput.lineaMercado || "",
+      oddsText: analysisInput.cuotaMercado || "",
       confidenceCalibration,
       marketGate,
       refereeProfile,
@@ -440,12 +404,7 @@ export default function Home() {
       realFixtureLookup,
       realFixtureStatistics,
       sourceConfidence,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     const directorAtlas = buildDirectorAtlasVerdict({
@@ -462,12 +421,7 @@ export default function Home() {
       teamRecentProfile,
       marketLineContext,
       complementarySourceCoverage,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     validationGate = runValidationGate({
@@ -475,21 +429,11 @@ export default function Home() {
       fiscalReview,
       sourceConfidence,
       marketEvaluation,
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
     });
 
     auditPrep = prepareAuditPlan({
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
       scenario,
       marketEvaluation,
       fiscalReview,
@@ -498,12 +442,7 @@ export default function Home() {
     });
 
     const caseRecord = createCaseRecord({
-      analysisInput: {
-        partido,
-        competicion,
-        mercado,
-        uso: form.uso,
-      },
+      analysisInput,
       scenario,
       specialistRoute,
       specialistReports,
@@ -515,6 +454,7 @@ export default function Home() {
     saveCaseToHistory(caseRecord);
 
     setAnalysis({
+      analysisRequest: analysisInput,
       partido,
       competicion: resolvedCompetitionLabel,
       scenarioType,
@@ -623,6 +563,29 @@ export default function Home() {
             />
           </label>
 
+          <div className="line-market-grid">
+            <label>
+              Fecha opcional
+              <input
+                type="date"
+                value={form.fecha}
+                onChange={(event) => updateField("fecha", event.target.value)}
+              />
+            </label>
+
+            <label>
+              Temporada opcional
+              <input
+                inputMode="numeric"
+                value={form.temporada}
+                onChange={(event) =>
+                  updateField("temporada", event.target.value)
+                }
+                placeholder="Ej: 2026"
+              />
+            </label>
+          </div>
+
           <label>
             Mercado opcional
             <input
@@ -709,14 +672,19 @@ export default function Home() {
                 <h2>{analysis.partido}</h2>
               </div>
               <div className="result-actions">
-                <span className="pill">{analysis.temporalStatus}</span>
+                <span className="pill">
+                  {viewMode === "simple"
+                    ? analysis.directorAtlas.actionLevel.label
+                    : analysis.temporalStatus}
+                </span>
                 <button type="button" className="secondary-button" onClick={resetSearch}>
                   ↻ Nueva búsqueda
                 </button>
               </div>
             </div>
 
-            <div className="result-grid">
+            {viewMode === "technical" && (
+              <div className="result-grid">
               <div>
                 <strong>Competición</strong>
                 <p>{analysis.competicion}</p>
@@ -756,7 +724,8 @@ export default function Home() {
                 <strong>Fragilidad</strong>
                 <p>{analysis.fragility}</p>
               </div>
-            </div>
+              </div>
+            )}
 
             <div className="specialists-panel">
               <strong>Especialistas activados</strong>
@@ -1017,7 +986,10 @@ export default function Home() {
             <div className="real-fixture-panel">
               <div className="real-fixture-header">
                 <strong>Fuente real API-FOOTBALL</strong>
-                <span>{analysis.realFixtureLookup.status}</span>
+                <span>
+                  {analysis.realFixtureLookup.statusLabel ||
+                    analysis.realFixtureLookup.status}
+                </span>
               </div>
 
               <p>{analysis.realFixtureLookup.reason}</p>
@@ -1113,7 +1085,10 @@ export default function Home() {
               <div className="fixture-statistics-panel">
                 <div className="fixture-statistics-header">
                   <strong>Estadísticas reales del fixture</strong>
-                  <span>{analysis.realFixtureStatistics.status}</span>
+                <span>
+                  {analysis.realFixtureStatistics.statusLabel ||
+                    analysis.realFixtureStatistics.status}
+                </span>
                 </div>
 
                 <p>{analysis.realFixtureStatistics.reason}</p>
@@ -1744,11 +1719,7 @@ export default function Home() {
 
                   <div>
                     <small>Probabilidad estimada</small>
-                    <p>
-                      {analysis.fiscalImpact.originalEstimatedProbability}%
-                      {" → "}
-                      {analysis.fiscalImpact.adjustedEstimatedProbability}%
-                    </p>
+                    <p>No disponible</p>
                   </div>
 
                   <div>
@@ -1758,7 +1729,7 @@ export default function Home() {
 
                   <div>
                     <small>Parlay</small>
-                    <p>{analysis.fiscalImpact.blocksParlay ? "No apto" : "No bloqueado"}</p>
+                    <p>{analysis.fiscalImpact.parlayStatus}</p>
                   </div>
 
                   <div>
@@ -1807,7 +1778,7 @@ export default function Home() {
 
                   <div>
                     <small>Probabilidad estimada</small>
-                    <p>{analysis.confidenceCalibration.estimatedProbability}%</p>
+                    <p>No disponible</p>
                   </div>
 
                   <div>
@@ -1827,7 +1798,7 @@ export default function Home() {
 
                   <div>
                     <small>Tope probabilidad</small>
-                    <p>{analysis.confidenceCalibration.maxEstimatedProbability}%</p>
+                    <p>No disponible</p>
                   </div>
                 </div>
 
@@ -1982,7 +1953,7 @@ export default function Home() {
                     <p>
                       {analysis.directorAtlas.estimatedProbability !== null
                         ? `${analysis.directorAtlas.estimatedProbability}%`
-                        : "No calibrada"}
+                        : "No disponible"}
                     </p>
                   </div>
 
@@ -2010,7 +1981,7 @@ export default function Home() {
 
                   <div>
                     <small>Parlay</small>
-                    <p>{analysis.directorAtlas.canUseInParlay ? "Apto" : "No apto"}</p>
+                    <p>{analysis.directorAtlas.parlayStatus}</p>
                   </div>
 
                   <div>
@@ -2065,7 +2036,7 @@ export default function Home() {
               </div>
             )}
 
-            {analysis.atlasExecutiveAnswer && (
+            {viewMode === "technical" && analysis.atlasExecutiveAnswer && (
               <div className="atlas-answer-panel">
                 <div className="atlas-answer-header">
                   <strong>{analysis.atlasExecutiveAnswer.title}</strong>
