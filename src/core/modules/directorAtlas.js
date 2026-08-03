@@ -395,3 +395,121 @@ export function buildPhaseOneDirectorVerdict({
       "DirectorAtlas es la única voz pública; la evidencia técnica no constituye recomendación.",
   });
 }
+
+const PHASE_TWO_DISPLAY_STATUS = Object.freeze({
+  [DIRECTOR_STATUS.UNAVAILABLE]: "Datos no disponibles",
+  [DIRECTOR_STATUS.INSUFFICIENT_DATA]: "Información insuficiente",
+  [DIRECTOR_STATUS.ANALYZABLE_NOT_ACTIONABLE]:
+    "Analizable, pero aún no accionable",
+  [DIRECTOR_STATUS.CANDIDATE_FOR_MARKET_REVIEW]:
+    "Candidato para revisar línea y cuota",
+  [DIRECTOR_STATUS.VIABLE_WITH_CAUTION]: "Viable con cautela",
+  [DIRECTOR_STATUS.BLOCKED]: "Análisis bloqueado",
+});
+
+export function buildPhaseTwoDirectorVerdict({
+  dataStatus,
+  dataErrorCode = null,
+  fixture = null,
+  competition = null,
+  marketAssessment = null,
+  evidenceRefs = [],
+  engineVersion = "atlas-sports-v2",
+}) {
+  const blockingCodes = new Set([
+    "invalid_fixture_id",
+    "fixture_selection_mismatch",
+    "ambiguous_fixture_id",
+    "request_budget_exhausted",
+  ]);
+  let status = DIRECTOR_STATUS.INSUFFICIENT_DATA;
+  let verdict = "Atlas no dispone todavía de una muestra suficiente para este partido.";
+  let operationalLevel = "observe_only";
+
+  if (blockingCodes.has(dataErrorCode) || dataStatus === DATA_LOAD_STATUS.BLOCKED) {
+    status = DIRECTOR_STATUS.BLOCKED;
+    verdict = "El análisis se detuvo por una regla crítica de identidad o presupuesto.";
+    operationalLevel = "blocked";
+  } else if (
+    [DATA_LOAD_STATUS.UNAVAILABLE, DATA_LOAD_STATUS.PROVIDER_ERROR].includes(dataStatus)
+  ) {
+    status = DIRECTOR_STATUS.UNAVAILABLE;
+    verdict = "Los datos necesarios no están disponibles de forma verificable.";
+    operationalLevel = "unavailable";
+  } else if (marketAssessment?.candidate) {
+    const hasLineAndOdds = Boolean(marketAssessment.line && marketAssessment.odds);
+    status = hasLineAndOdds
+      ? DIRECTOR_STATUS.VIABLE_WITH_CAUTION
+      : DIRECTOR_STATUS.CANDIDATE_FOR_MARKET_REVIEW;
+    verdict = hasLineAndOdds
+      ? "La evidencia permite revisar la línea y cuota con cautela; no autoriza una apuesta."
+      : "El mercado tiene respaldo suficiente para revisar una línea y cuota verificables.";
+    operationalLevel = "market_review_only";
+  } else if (fixture && marketAssessment?.available_evidence?.length > 0) {
+    status = DIRECTOR_STATUS.ANALYZABLE_NOT_ACTIONABLE;
+    verdict = "El partido es analizable, pero el mercado aún no cumple todos los requisitos.";
+    operationalLevel = "analysis_only";
+  }
+
+  const reasons = [
+    ...(fixture
+      ? [`Fixture ${fixture.fixtureId} conservado y verificado por ID.`]
+      : []),
+    ...(marketAssessment?.available_evidence || []).map(
+      (item) => item.requirement
+    ),
+  ];
+  const missingData = marketAssessment?.missing_evidence || [
+    "Histórico deportivo verificable",
+  ];
+  const risks = [
+    ...(marketAssessment?.risk_flags || []),
+    ...missingData,
+    "No existe un modelo deportivo validado para estimar probabilidad.",
+  ];
+
+  return {
+    contract: "DirectorVerdict",
+    version: 2,
+    status,
+    verdict,
+    display_status: PHASE_TWO_DISPLAY_STATUS[status],
+    fixture: fixture
+      ? {
+          fixture_id: fixture.fixtureId,
+          home_team: fixture.teams?.home?.name || null,
+          away_team: fixture.teams?.away?.name || null,
+          kickoff: fixture.date?.utc || null,
+          competition: competition?.localName || fixture.competition?.name || null,
+          season: fixture.competition?.season || null,
+        }
+      : null,
+    market_evaluated: marketAssessment
+      ? {
+          family: marketAssessment.market_family,
+          label: marketAssessment.market_label,
+        }
+      : null,
+    technical_support: marketAssessment?.technical_support_score ?? 0,
+    estimated_probability: null,
+    probability_status: PROBABILITY_STATUS.UNAVAILABLE,
+    operational_level: operationalLevel,
+    reasons: [...new Set(reasons)],
+    risks: [...new Set(risks)],
+    missing_data: [...new Set(missingData)],
+    avoid: [
+      "No presentar el mercado como seguro.",
+      "No interpretar respaldo técnico como probabilidad.",
+      "No usar parlay: capacidad no soportada.",
+    ],
+    parlay_authorization: PARLAY_STATUS.UNSUPPORTED,
+    next_action:
+      marketAssessment?.next_action ||
+      "Completar la principal evidencia faltante antes de revisar el mercado.",
+    evidence_refs: [...new Set(evidenceRefs)].filter(Boolean),
+    engine_version: engineVersion,
+    can_recommend: false,
+    data_status: dataStatus,
+    data_error_code: dataErrorCode,
+  };
+}

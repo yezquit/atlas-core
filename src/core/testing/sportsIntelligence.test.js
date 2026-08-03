@@ -3,9 +3,16 @@ import assert from "node:assert/strict";
 
 import { QUALITY_STATUS, WEATHER_STATUS } from "../contracts/sportsIntelligenceContracts.js";
 import { buildLeagueIntelligence } from "../intelligence/leagueIntelligence.js";
+import {
+  evaluateSportsMarket,
+  evaluateSportsMarkets,
+  selectBestSupportedMarket,
+} from "../intelligence/marketEngine.js";
 import { buildRefereeIntelligence } from "../intelligence/refereeIntelligence.js";
 import { buildTeamRecentIntelligence } from "../intelligence/teamRecentIntelligence.js";
 import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js";
+import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
+import { DATA_LOAD_STATUS, DIRECTOR_STATUS } from "../contracts/atlasContracts.js";
 
 const competition = {
   id: 239,
@@ -294,4 +301,133 @@ test("sede y altitud conservan procedencia", () => {
   assert.equal(context.altitude, 2_600);
   assert.ok(context.risk_flags.includes("high_altitude"));
   assert.ok(context.source_refs.includes("venue:verified:1"));
+});
+
+function completeMarketContext() {
+  const leagueProfile = buildLeagueIntelligence({
+    competition,
+    season: 2026,
+    fixtures,
+    statisticsByFixture,
+  });
+  const homeTeamProfile = buildTeamRecentIntelligence({
+    teamId: 10,
+    teamName: "Local",
+    season: 2026,
+    targetDate: "2026-08-01T00:00:00Z",
+    fixtures,
+    statisticsByFixture,
+  });
+  const awayTeamProfile = buildTeamRecentIntelligence({
+    teamId: 20,
+    teamName: "Visitante",
+    season: 2026,
+    targetDate: "2026-08-01T00:00:00Z",
+    fixtures,
+    statisticsByFixture,
+  });
+  const refereeProfile = buildRefereeIntelligence({
+    fixture: fixtures[0],
+    historicalFixtures: fixtures,
+    statisticsByFixture,
+    leagueProfile,
+  });
+  return {
+    leagueProfile,
+    homeTeamProfile,
+    awayTeamProfile,
+    refereeProfile,
+    venueWeatherContext: buildVenueWeatherContext({ fixture: fixtures[0] }),
+  };
+}
+
+for (const [marketId, label] of [
+  ["goals", "mercado de goles"],
+  ["total_shots", "mercado de remates"],
+  ["shots_on_goal", "mercado de remates a puerta"],
+  ["cards", "mercado de tarjetas"],
+  ["corners", "mercado de córners"],
+]) {
+  test(`${label} usa respaldo técnico y no probabilidad`, () => {
+    const assessment = evaluateSportsMarket({
+      ...completeMarketContext(),
+      marketId,
+    });
+
+    assert.equal(assessment.market_family, marketId);
+    assert.equal(assessment.candidate, true);
+    assert.equal(assessment.actionable, false);
+    assert.equal(assessment.estimatedProbability, null);
+    assert.equal(assessment.probabilityStatus, "unavailable");
+  });
+}
+
+test("fixture sin histórico no genera mercado candidato", () => {
+  const assessment = evaluateSportsMarket({
+    marketId: "goals",
+    leagueProfile: null,
+    homeTeamProfile: null,
+    awayTeamProfile: null,
+    refereeProfile: null,
+    venueWeatherContext: null,
+  });
+
+  assert.equal(assessment.candidate, false);
+  assert.ok(assessment.missing_evidence.length >= 3);
+});
+
+test("tarjetas quedan limitadas sin histórico arbitral", () => {
+  const context = completeMarketContext();
+  const assessment = evaluateSportsMarket({
+    ...context,
+    marketId: "cards",
+    refereeProfile: {
+      status: "confirmed",
+      quality_status: QUALITY_STATUS.INSUFFICIENT_SAMPLE,
+    },
+  });
+
+  assert.equal(assessment.candidate, false);
+  assert.ok(assessment.risk_flags.includes("referee_sample_insufficient"));
+});
+
+test("viento afecta solo mercados relevantes", () => {
+  const context = {
+    ...completeMarketContext(),
+    venueWeatherContext: { weather_status: "forecast", risk_flags: ["strong_wind"] },
+  };
+  const goals = evaluateSportsMarket({ ...context, marketId: "goals" });
+  const cards = evaluateSportsMarket({ ...context, marketId: "cards" });
+
+  assert.ok(goals.risk_flags.includes("strong_wind"));
+  assert.equal(cards.risk_flags.includes("strong_wind"), false);
+});
+
+test("el mejor mercado se ordena por soporte, muestra y no probabilidad", () => {
+  const assessments = evaluateSportsMarkets(completeMarketContext());
+  const best = selectBestSupportedMarket(assessments, "open");
+
+  assert.ok(best);
+  assert.equal(best.estimatedProbability, null);
+  assert.equal(best.candidate, true);
+});
+
+test("DirectorAtlas Fase 2 no inventa probabilidad y mantiene parlay unsupported", () => {
+  const marketAssessment = evaluateSportsMarket({
+    ...completeMarketContext(),
+    marketId: "goals",
+  });
+  const director = buildPhaseTwoDirectorVerdict({
+    dataStatus: DATA_LOAD_STATUS.SUCCESS,
+    fixture: fixtures[0],
+    competition,
+    marketAssessment,
+    evidenceRefs: ["fixture:1000"],
+  });
+
+  assert.equal(director.status, DIRECTOR_STATUS.CANDIDATE_FOR_MARKET_REVIEW);
+  assert.equal(director.estimated_probability, null);
+  assert.equal(director.probability_status, "unavailable");
+  assert.equal(director.parlay_authorization, "unsupported");
+  assert.equal(director.can_recommend, false);
 });
