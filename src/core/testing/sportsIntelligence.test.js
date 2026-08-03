@@ -13,12 +13,26 @@ import { buildTeamRecentIntelligence } from "../intelligence/teamRecentIntellige
 import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { DATA_LOAD_STATUS, DIRECTOR_STATUS } from "../contracts/atlasContracts.js";
+import { API_FOOTBALL_COMPETITIONS } from "../data/apiFootballLeagues.js";
 
 const competition = {
   id: 239,
   name: "Primera A",
   localName: "Colombia Primera A",
 };
+
+test("el catálogo administrado conserva 17 IDs verificados y únicos", () => {
+  assert.equal(API_FOOTBALL_COMPETITIONS.length, 17);
+  assert.equal(
+    new Set(API_FOOTBALL_COMPETITIONS.map((item) => item.id)).size,
+    17
+  );
+  for (const item of API_FOOTBALL_COMPETITIONS) {
+    assert.equal(item.verificationStatus, "verified");
+    assert.equal(item.verificationSource, "api-football:/leagues?id");
+    assert.equal(item.verifiedAt, "2026-08-02");
+  }
+});
 
 function fixture(index, overrides = {}) {
   const home = index % 2 === 0 ? 10 : 20;

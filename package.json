@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test src/core/testing/*.test.js src/core/testing/atlasTrialCases.js"
+    "test": "node --test src/core/testing/*.test.js src/core/testing/atlasTrialCases.js",
+    "verify:phase2": "node scripts/verify-phase-2.mjs"
   },
   "dependencies": {
     "next": "16.2.12",

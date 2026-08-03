@@ -236,11 +236,20 @@ const COMPETITIONS = [
   },
 ];
 
+const PHASE_TWO_VERIFIED_IDS = new Set([
+  2, 3, 11, 13, 39, 61, 71, 72, 78, 128, 129, 135, 140, 239, 240, 262,
+  263,
+]);
+
 function withDefaults(competition) {
+  const phaseTwoVerified = PHASE_TWO_VERIFIED_IDS.has(competition.id);
   return Object.freeze({
-    verificationStatus: "experimental",
-    verificationNote:
-      "El ID configurado debe coincidir con los metadatos reales del proveedor antes de usarse.",
+    verificationStatus: phaseTwoVerified ? "verified" : "experimental",
+    verificationNote: phaseTwoVerified
+      ? "ID y temporada 2026 verificados mediante metadatos de API-FOOTBALL el 2026-08-02; la cobertura se valida por temporada en tiempo de ejecución."
+      : "El ID configurado debe coincidir con los metadatos reales del proveedor antes de usarse.",
+    verifiedAt: phaseTwoVerified ? "2026-08-02" : null,
+    verificationSource: phaseTwoVerified ? "api-football:/leagues?id" : null,
     ...competition,
     legacyKeys: competition.legacyKeys || [],
   });

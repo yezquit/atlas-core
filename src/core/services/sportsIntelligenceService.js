@@ -9,7 +9,10 @@ import {
   evaluateSportsMarkets,
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
-import { buildRefereeIntelligence } from "../intelligence/refereeIntelligence.js";
+import {
+  buildRefereeIntelligence,
+  normalizeRefereeName,
+} from "../intelligence/refereeIntelligence.js";
 import { buildTeamRecentIntelligence } from "../intelligence/teamRecentIntelligence.js";
 import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
@@ -17,6 +20,7 @@ import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
 
 const PROFILE_WINDOW_DAYS = 120;
 const PROFILE_FIXTURE_LIMIT = 10;
+const REFEREE_FIXTURE_LIMIT = 10;
 const SUPPORTED_MARKET_IDS = new Set(SPORTS_MARKETS.map((market) => market.id));
 
 function dateShift(date, days) {
@@ -140,17 +144,29 @@ export async function analyzeSportsFixture(input, gateway) {
     gateway.loadTeamRecent({ teamId: fixture.teams.home.id, season }),
     gateway.loadTeamRecent({ teamId: fixture.teams.away.id, season }),
   ]);
-  const leagueFixtures = (leagueWindow.fixtures || [])
-    .sort((left, right) => Date.parse(right.date.utc) - Date.parse(left.date.utc))
-    .slice(0, PROFILE_FIXTURE_LIMIT);
+  const leagueHistory = (leagueWindow.fixtures || []).sort(
+    (left, right) => Date.parse(right.date.utc) - Date.parse(left.date.utc)
+  );
+  const leagueFixtures = leagueHistory.slice(0, PROFILE_FIXTURE_LIMIT);
   const homeFixtures = homeRecent.fixtures || [];
   const awayFixtures = awayRecent.fixtures || [];
+  const normalizedReferee = normalizeRefereeName(fixture?.referee?.name || "");
+  const refereeFixtures = normalizedReferee
+    ? leagueHistory
+        .filter(
+          (item) =>
+            normalizeRefereeName(item?.referee?.name || "") === normalizedReferee
+        )
+        .slice(0, REFEREE_FIXTURE_LIMIT)
+    : [];
   const historicalFixtures = [
     ...new Map(
-      [...leagueFixtures, ...homeFixtures, ...awayFixtures].map((item) => [
-        item.fixtureId,
-        item,
-      ])
+      [
+        ...leagueFixtures,
+        ...homeFixtures,
+        ...awayFixtures,
+        ...refereeFixtures,
+      ].map((item) => [item.fixtureId, item])
     ).values(),
   ];
   const statisticsByFixture = await loadStatisticsMap(
@@ -184,7 +200,7 @@ export async function analyzeSportsFixture(input, gateway) {
   });
   const refereeProfile = buildRefereeIntelligence({
     fixture,
-    historicalFixtures: leagueFixtures,
+    historicalFixtures: leagueHistory,
     statisticsByFixture,
     leagueProfile,
   });
