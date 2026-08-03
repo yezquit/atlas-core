@@ -1,22 +1,26 @@
 import AtlasFunctionalClient from "./atlas-functional-client";
-import { listApiFootballLeagues } from "@/core/data/apiFootballLeagues";
-import { FUNCTIONAL_MARKETS } from "@/core/modules/marketDataCoverage";
+import { groupApiFootballCompetitions } from "@/core/data/apiFootballLeagues";
+import { SPORTS_MARKETS } from "@/core/intelligence/marketEngine";
 
 export default function Home() {
-  const leagues = listApiFootballLeagues();
+  const competitionGroups = groupApiFootballCompetitions();
 
   return (
     <main className="atlas-page">
       <section className="hero-card functional-shell">
-        <p className="eyebrow">Atlas Core · Fase 1</p>
+        <p className="eyebrow">Atlas Sports Intelligence · Fase 2</p>
         <h1>ATLAS</h1>
         <p className="subtitle">Comprender antes de decidir.</p>
         <p className="functional-intro">
-          Elige fecha y liga, carga los partidos disponibles y selecciona un
-          fixture por su ID. Atlas solo analizará esa selección explícita.
+          Explora una jornada o estudia un partido exacto con evidencia
+          verificable. Atlas explica respaldo, límites y faltantes; no promete
+          ganancias ni inventa probabilidades.
         </p>
 
-        <AtlasFunctionalClient leagues={leagues} markets={FUNCTIONAL_MARKETS} />
+        <AtlasFunctionalClient
+          competitionGroups={competitionGroups}
+          markets={SPORTS_MARKETS}
+        />
       </section>
     </main>
   );

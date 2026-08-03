@@ -17,18 +17,22 @@ test("DirectorAtlas queda como única voz pública del flujo funcional", async (
 
   assert.doesNotMatch(pageSource, /^"use client"/);
   assert.match(pageSource, /<AtlasFunctionalClient/);
-  assert.match(clientSource, /className="director-atlas-panel functional-director"/);
+  assert.match(
+    clientSource,
+    /className="director-atlas-panel functional-director p2-director"/
+  );
   assert.doesNotMatch(clientSource, /atlasExecutiveAnswer/);
   assert.doesNotMatch(clientSource, /decisionEngine/);
-  assert.doesNotMatch(clientSource, /estimatedProbability/);
-  assert.match(clientSource, /analysis\.director\.probabilityStatus/);
+  assert.match(clientSource, /analysis\.director/);
+  assert.match(clientSource, /director\.estimated_probability/);
+  assert.match(clientSource, /director\.probability_status === "unavailable"/);
 });
 
 test("la UI exige selección explícita y conserva el fixture ID", async () => {
   const source = await readFile(clientPath, "utf8");
 
   assert.match(source, /type="date"/);
-  assert.match(source, /onInput=\{\(event\) => handleDateChange/);
+  assert.match(source, /onChange=\{\(event\) => changeDate/);
   assert.match(source, /name="fixtureId"/);
   assert.match(source, /function loadFixtures\(\)/);
   assert.match(source, /function analyzeSelectedFixture\(\)/);
@@ -37,6 +41,57 @@ test("la UI exige selección explícita y conserva el fixture ID", async () => {
     /Number\(result\?\.selectedFixtureId\) !== requestedFixtureId/
   );
   assert.doesNotMatch(source, /setSelectedFixtureId\(String\(result/);
+});
+
+test("el modo sencillo muestra DirectorAtlas y separa la trazabilidad experta", async () => {
+  const source = await readFile(clientPath, "utf8");
+
+  assert.match(source, /mode === "simple"/);
+  assert.match(source, /<DirectorResult analysis=\{analysis\}/);
+  assert.match(source, /<ExpertResult analysis=\{analysis\}/);
+  assert.match(source, /data-result-mode="simple"/);
+  assert.match(source, /data-result-mode="expert"/);
+});
+
+test("el modo experto agrupa toda la evidencia solicitada", async () => {
+  const source = await readFile(clientPath, "utf8");
+
+  for (const id of [
+    "expert-identity",
+    "expert-quality",
+    "expert-league",
+    "expert-home",
+    "expert-away",
+    "expert-referee",
+    "expert-venue",
+    "expert-markets",
+    "expert-telemetry",
+    "expert-rules",
+  ]) {
+    assert.match(source, new RegExp(`id="${id}"`));
+  }
+});
+
+test("los acordeones son botones accesibles controlados por React", async () => {
+  const source = await readFile(clientPath, "utf8");
+
+  assert.match(source, /function Accordion/);
+  assert.match(source, /type="button"/);
+  assert.match(source, /aria-expanded=\{open\}/);
+  assert.match(source, /aria-controls=\{`\$\{id\}-content`\}/);
+  assert.match(source, /onClick=\{\(\) => setOpen/);
+  assert.doesNotMatch(source, /document\.(querySelector|getElementById)/);
+});
+
+test("los cambios de filtros invalidan resultados previos", async () => {
+  const source = await readFile(clientPath, "utf8");
+
+  assert.match(source, /function invalidateJourney/);
+  assert.match(source, /setJourney\(null\)/);
+  assert.match(source, /function invalidateAnalysis/);
+  assert.match(source, /setAnalysis\(null\)/);
+  assert.match(source, /toggleJourneyCompetition[\s\S]*invalidateJourney\(\)/);
+  assert.match(source, /changeCompetition[\s\S]*invalidateAnalysis/);
 });
 
 test("el layout no depende de Google Fonts", async () => {

@@ -5,6 +5,7 @@ import {
 } from "../data/apiFootballLeagues.js";
 import { buildLeagueIntelligence } from "../intelligence/leagueIntelligence.js";
 import {
+  SPORTS_MARKETS,
   evaluateSportsMarkets,
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
@@ -16,6 +17,7 @@ import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
 
 const PROFILE_WINDOW_DAYS = 120;
 const PROFILE_FIXTURE_LIMIT = 10;
+const SUPPORTED_MARKET_IDS = new Set(SPORTS_MARKETS.map((market) => market.id));
 
 function dateShift(date, days) {
   const value = new Date(`${date}T00:00:00Z`);
@@ -68,6 +70,16 @@ export function validateSportsAnalysisInput(input = {}) {
   const fixtureValidation = validateFixtureId(input.fixtureId);
   if (fixtureValidation.status !== DATA_LOAD_STATUS.SUCCESS) {
     return { errorCode: fixtureValidation.errorCode, message: fixtureValidation.message };
+  }
+  if (
+    input.marketId &&
+    input.marketId !== "open" &&
+    !SUPPORTED_MARKET_IDS.has(input.marketId)
+  ) {
+    return {
+      errorCode: "invalid_market",
+      message: "El mercado no pertenece al catálogo de Fase 2.",
+    };
   }
   return { competition, season, fixtureId: fixtureValidation.fixtureId };
 }
@@ -186,9 +198,17 @@ export async function analyzeSportsFixture(input, gateway) {
     line: input.line || null,
     odds: input.odds || null,
   });
+  const requestedMarketIds = Array.isArray(input.marketIds)
+    ? new Set(input.marketIds)
+    : null;
+  const eligibleAssessments = requestedMarketIds?.size
+    ? marketAssessments.filter((assessment) =>
+        requestedMarketIds.has(assessment.market_family)
+      )
+    : marketAssessments;
   const requestedMarket = input.marketId || "open";
   const selectedMarket = selectBestSupportedMarket(
-    marketAssessments,
+    eligibleAssessments,
     requestedMarket
   );
   const evidenceRefs = [
@@ -250,7 +270,26 @@ export async function scanSportsJourney(input, gateway) {
       telemetry: gateway.runtime.snapshot(),
     };
   }
-  const competitionKeys = [...new Set(input.competitionKeys || [])].slice(0, 5);
+  const requestedMarketIds = [
+    ...new Set(
+      Array.isArray(input.marketIds)
+        ? input.marketIds
+        : SPORTS_MARKETS.map((market) => market.id)
+    ),
+  ];
+  if (
+    requestedMarketIds.length === 0 ||
+    requestedMarketIds.some((marketId) => !SUPPORTED_MARKET_IDS.has(marketId))
+  ) {
+    return {
+      status: DATA_LOAD_STATUS.UNAVAILABLE,
+      errorCode: "invalid_market",
+      message: "Selecciona al menos un mercado válido.",
+      candidates: [],
+      telemetry: gateway.runtime.snapshot(),
+    };
+  }
+  const competitionKeys = [...new Set(input.competitionKeys || [])];
   const competitions = competitionKeys
     .map(getApiFootballCompetitionByKey)
     .filter(Boolean);
@@ -296,8 +335,8 @@ export async function scanSportsJourney(input, gateway) {
         competitionKey: item.competition.key,
         season: item.season,
         fixtureId: item.fixture.fixtureId,
-        marketId:
-          input.marketIds?.length === 1 ? input.marketIds[0] : "open",
+        marketId: requestedMarketIds.length === 1 ? requestedMarketIds[0] : "open",
+        marketIds: requestedMarketIds,
       },
       gateway
     );
