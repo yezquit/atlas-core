@@ -4,7 +4,10 @@ import {
   createEvidenceItem,
   createFixtureCatalogResult,
 } from "../contracts/atlasContracts.js";
-import { getApiFootballLeagueByKey } from "../data/apiFootballLeagues.js";
+import {
+  expectedSeasonForDate,
+  getApiFootballCompetitionByKey,
+} from "../data/apiFootballLeagues.js";
 import { normalizeFootballFixtures } from "../modules/footballFixtureNormalizer.js";
 import { normalizeFixtureStatistics } from "../modules/footballStatisticsNormalizer.js";
 
@@ -65,8 +68,7 @@ export function validateSeason(value, { date, league } = {}) {
 
   if (
     date &&
-    league?.seasonFormat === "calendar_year" &&
-    Number(String(date).slice(0, 4)) !== season
+    expectedSeasonForDate(league, date) !== season
   ) {
     return unavailable(
       "season_date_mismatch",
@@ -85,7 +87,7 @@ export function validateFixtureQuery({ date, leagueKey, season }) {
     );
   }
 
-  const league = getApiFootballLeagueByKey("colombia", leagueKey);
+  const league = getApiFootballCompetitionByKey(leagueKey);
   if (!league) {
     return unavailable(
       "invalid_league",

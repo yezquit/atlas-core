@@ -56,12 +56,14 @@ export const DATA_LOAD_STATUS = Object.freeze({
   AMBIGUOUS: "ambiguous",
   PROVIDER_ERROR: "provider_error",
   UNAVAILABLE: "unavailable",
+  BLOCKED: "blocked",
 });
 
 export const DIRECTOR_STATUS = Object.freeze({
   UNAVAILABLE: "unavailable",
   INSUFFICIENT_DATA: "insufficient_data",
   ANALYZABLE_NOT_ACTIONABLE: "analyzable_not_actionable",
+  CANDIDATE_FOR_MARKET_REVIEW: "candidate_for_market_review",
   VIABLE_WITH_CAUTION: "viable_with_caution",
   BLOCKED: "blocked",
 });
