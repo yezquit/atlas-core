@@ -84,6 +84,7 @@ export function createProviderRuntime({
   const configuredBudget = Math.max(1, Math.min(150, Number(budget) || 40));
   const metrics = {
     requestsUsed: 0,
+    budgetStops: 0,
     cacheHits: 0,
     cacheMisses: 0,
     deduplicated: 0,
@@ -113,7 +114,7 @@ export function createProviderRuntime({
       ...metrics,
       configuredBudget,
       configuredBudgetRemaining: Math.max(0, configuredBudget - metrics.requestsUsed),
-      budgetExhausted: metrics.requestsUsed >= configuredBudget,
+      budgetExhausted: metrics.budgetStops > 0,
       finishedAt: new Date(now()).toISOString(),
     };
   }
@@ -137,6 +138,7 @@ export function createProviderRuntime({
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       if (metrics.requestsUsed >= configuredBudget) {
+        metrics.budgetStops += 1;
         return providerFailure(
           DATA_LOAD_STATUS.BLOCKED,
           "request_budget_exhausted",

@@ -77,6 +77,22 @@ test("el presupuesto detiene nuevas llamadas", async () => {
   assert.equal(blocked.status, DATA_LOAD_STATUS.BLOCKED);
   assert.equal(blocked.errorCode, "request_budget_exhausted");
   assert.equal(runtime.snapshot().requestsUsed, 1);
+  assert.equal(runtime.snapshot().budgetStops, 1);
+  assert.equal(runtime.snapshot().budgetExhausted, true);
+});
+
+test("consumir exactamente el presupuesto no bloquea un resultado exitoso", async () => {
+  const runtime = createProviderRuntime({
+    ...runtimeConfig,
+    budget: 1,
+    fetchImpl: async () => response({ response: [], errors: [] }),
+  });
+
+  const result = await runtime.request({ pathname: "/fixtures", query: { id: 1 } });
+
+  assert.equal(result.status, DATA_LOAD_STATUS.SUCCESS);
+  assert.equal(runtime.snapshot().configuredBudgetRemaining, 0);
+  assert.equal(runtime.snapshot().budgetExhausted, false);
 });
 
 test("el límite de concurrencia se respeta", async () => {
