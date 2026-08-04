@@ -4,8 +4,16 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createMemoryOperationalHistory } from "./operationalHistory.js";
 
-export function createFileOperationalHistory({ directory = path.join(".atlas-data", "v1"), filename = "operational-history.ndjson" } = {}) {
-  const file = path.join(directory, filename);
+const HISTORY_DIRECTORY = path.join(
+  /* turbopackIgnore: true */ process.cwd(),
+  ".atlas-data",
+  "v1"
+);
+const HISTORY_FILE = path.join(HISTORY_DIRECTORY, "operational-history.ndjson");
+
+export function createFileOperationalHistory() {
+  const directory = HISTORY_DIRECTORY;
+  const file = HISTORY_FILE;
   let writeChain = Promise.resolve();
   async function readEvents() {
     try {

@@ -1,0 +1,141 @@
+import { API_FOOTBALL_COMPETITIONS } from "../src/core/data/apiFootballLeagues.js";
+import { createMemoryCache } from "../src/core/infrastructure/cacheStore.js";
+import { createProviderRuntime } from "../src/core/infrastructure/providerRuntime.js";
+import { createSportsDataGateway } from "../src/core/services/sportsDataGateway.js";
+import { analyzeOperationalFixture } from "../src/core/services/operationalAnalysisService.js";
+
+const HARD_REQUEST_LIMIT = 120;
+const HARD_FIXTURE_LIMIT = 2;
+const DEFAULT_DATE = "2026-08-08";
+
+function argument(name, fallback) {
+  const prefix = `--${name}=`;
+  return process.argv.find((item) => item.startsWith(prefix))?.slice(prefix.length) || fallback;
+}
+
+function loadEnvironment() {
+  try {
+    process.loadEnvFile(".env.local");
+  } catch {
+    // También acepta variables exportadas por el usuario.
+  }
+}
+
+function publicTelemetry(runtime) {
+  const value = runtime.snapshot();
+  return {
+    requestsUsed: value.requestsUsed,
+    configuredBudget: value.configuredBudget,
+    configuredBudgetRemaining: value.configuredBudgetRemaining,
+    cacheHits: value.cacheHits,
+    cacheMisses: value.cacheMisses,
+    deduplicated: value.deduplicated,
+    retries: value.retries,
+    budgetStops: value.budgetStops,
+    providerDailyLimit: value.providerDailyLimit,
+    providerDailyRemaining: value.providerDailyRemaining,
+    quotaStatus: value.quotaStatus,
+  };
+}
+
+function summary(result) {
+  return {
+    fixtureId: result.selectedFixtureId,
+    fixture: result.fixture ? `${result.fixture.teams.home.name} vs ${result.fixture.teams.away.name}` : null,
+    status: result.status,
+    odds: {
+      status: result.odds?.status,
+      quotes: result.odds?.quotes?.length || 0,
+      selected: result.selectedOdds ? {
+        bookmaker: result.selectedOdds.bookmaker_name,
+        market: result.selectedOdds.market_family,
+        selection: result.selectedOdds.selection,
+        line: result.selectedOdds.line,
+        decimalOdds: result.selectedOdds.decimal_odds,
+        verificationStatus: result.selectedOdds.verification_status,
+        freshness: result.selectedOdds.freshness,
+      } : null,
+    },
+    lineups: result.preMatchContext?.lineups?.status,
+    injuries: result.preMatchContext?.injuries?.status,
+    standings: result.preMatchContext?.standings?.status,
+    confidence: result.confidence?.analysis_confidence_score,
+    probabilityStatus: result.director?.probability_status,
+    suitability: result.director?.market_suitability,
+    parlay: result.parlay?.status,
+    prompt: result.gemini?.prompt || null,
+    syntheticGemini: result.gemini?.context ? {
+      markedAsTest: true,
+      verificationStatus: result.gemini.context.verification_status,
+      validForReanalysis: result.gemini.context.valid_for_reanalysis,
+      sourceClassifications: result.gemini.context.items.flatMap((item) => item.source_classifications),
+    } : null,
+  };
+}
+
+async function main() {
+  loadEnvironment();
+  const date = argument("date", DEFAULT_DATE);
+  const requestedMaximum = Number(argument("max-fixtures", HARD_FIXTURE_LIMIT));
+  const maximumFixtures = Math.max(1, Math.min(HARD_FIXTURE_LIMIT, Number.isFinite(requestedMaximum) ? requestedMaximum : HARD_FIXTURE_LIMIT));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Usa --date=YYYY-MM-DD.");
+  if (!process.env.API_FOOTBALL_KEY || !process.env.API_FOOTBALL_BASE_URL) {
+    console.log(JSON.stringify({
+      contract: "AtlasFinalControlledVerification",
+      status: "unavailable",
+      reason: "API-FOOTBALL no está configurado en este entorno.",
+      reproducibleCommand: "npm run verify:operational -- --date=2026-08-08 --max-fixtures=2",
+      hardRequestLimit: HARD_REQUEST_LIMIT,
+      hardFixtureLimit: HARD_FIXTURE_LIMIT,
+      geminiApiUsed: false,
+    }, null, 2));
+    process.exitCode = 2;
+    return;
+  }
+  const runtime = createProviderRuntime({ apiKey: process.env.API_FOOTBALL_KEY, baseUrl: process.env.API_FOOTBALL_BASE_URL, budget: HARD_REQUEST_LIMIT, concurrency: 3, timeoutMs: 8_000, maxRetries: 1, cache: createMemoryCache() });
+  const gateway = createSportsDataGateway(runtime);
+  const competition = API_FOOTBALL_COMPETITIONS.find((item) => item.key === "colombiaPrimeraA");
+  const fixtureLoad = await gateway.loadFixturesForDate({ competition, season: 2026, date });
+  const fixtures = (fixtureLoad.fixtures || []).slice(0, maximumFixtures);
+  const results = [];
+  for (const selected of fixtures) {
+    const result = await analyzeOperationalFixture({ date, competitionKey: competition.key, season: 2026, fixtureId: selected.fixtureId, marketId: "open" }, gateway, { idFactory: () => `controlled-${selected.fixtureId}-1` });
+    results.push(summary(result));
+  }
+  let syntheticReanalysis = null;
+  if (fixtures[0] && !runtime.snapshot().budgetExhausted) {
+    const selected = fixtures[0];
+    const syntheticFixtureText = [
+      "HECHOS CONFIRMADOS",
+      `- FIXTURE SINTÉTICO DE PRUEBA; no es una fuente real. Fixture ${selected.fixtureId}: ${selected.teams.home.name} vs ${selected.teams.away.name}. https://example.invalid/atlas-fixture-test ${date}`,
+      "DATOS NO ENCONTRADOS",
+      "- Este texto de prueba no aporta lesiones, alineaciones ni noticias reales.",
+    ].join("\n");
+    const result = await analyzeOperationalFixture({ date, competitionKey: competition.key, season: 2026, fixtureId: selected.fixtureId, marketId: "open", geminiResponse: syntheticFixtureText, reanalysis: true }, gateway, { idFactory: () => `controlled-${selected.fixtureId}-2` });
+    syntheticReanalysis = summary(result);
+  }
+  const telemetry = publicTelemetry(runtime);
+  if (telemetry.requestsUsed > HARD_REQUEST_LIMIT) throw new Error("Se excedió el límite duro de 120 solicitudes.");
+  console.log(JSON.stringify({
+    contract: "AtlasFinalControlledVerification",
+    version: 1,
+    status: fixtures.length ? "success" : fixtureLoad.status,
+    competition: competition.localName,
+    season: 2026,
+    date,
+    fixturesFound: fixtureLoad.fixtures?.length || 0,
+    fixturesAnalyzed: results.length,
+    analyses: results,
+    syntheticReanalysis,
+    telemetry,
+    hardRequestLimit: HARD_REQUEST_LIMIT,
+    hardFixtureLimit: HARD_FIXTURE_LIMIT,
+    geminiApiUsed: false,
+    scannedCompetitionCount: 1,
+  }, null, 2));
+}
+
+main().catch((error) => {
+  console.error(JSON.stringify({ status: "provider_error", reason: error?.message || "La verificación no pudo completarse.", hardRequestLimit: HARD_REQUEST_LIMIT, geminiApiUsed: false }, null, 2));
+  process.exitCode = 1;
+});
