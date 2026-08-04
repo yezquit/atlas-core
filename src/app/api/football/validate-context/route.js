@@ -1,6 +1,8 @@
 import { parseGeminiResponse, selectGeminiItems } from "@/core/intelligence/geminiManualContext";
+import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
 
 export async function POST(request) {
+  if (!isLocalRequest(request)) return localAccessDeniedResponse();
   let input;
   try {
     input = await request.json();

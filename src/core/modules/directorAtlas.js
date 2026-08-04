@@ -584,6 +584,7 @@ export function buildOperationalDirectorVerdict({
     probability_status: "unavailable",
     market_suitability: suitabilityStatus,
     apt_for_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
+    authorizes_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
     reasons: [...new Set(reasons)],
     supporting_evidence: [...new Set(supportingEvidence)],
     opposing_evidence: [...new Set(opposingEvidence)],

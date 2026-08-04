@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { createPersistencePort } from "../contracts/platformContracts.js";
 import { createFileOperationalHistory } from "../infrastructure/operationalHistoryServer.js";
 import { createServerSportsGateway } from "./sportsIntelligenceServer.js";
 import { analyzeOperationalFixture } from "./operationalAnalysisService.js";
@@ -8,7 +9,7 @@ import { analyzeOperationalFixture } from "./operationalAnalysisService.js";
 const historyStore = createFileOperationalHistory();
 
 export async function analyzeOperationalFixtureOnServer(input, { reanalysis = false } = {}) {
-  const repository = await historyStore.repository();
+  const repository = createPersistencePort(await historyStore.repository());
   const previousVersion = input?.fixtureId
     ? await repository.latestForFixture(input.fixtureId)
     : null;
@@ -22,5 +23,5 @@ export async function analyzeOperationalFixtureOnServer(input, { reanalysis = fa
 }
 
 export async function getOperationalHistoryRepository() {
-  return historyStore.repository();
+  return createPersistencePort(await historyStore.repository());
 }

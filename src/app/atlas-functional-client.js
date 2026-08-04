@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { buildConservativeParlays } from "@/core/intelligence/parlayPolicy";
 
 const LOAD_STATES = new Set([
   "loading",
@@ -534,6 +535,7 @@ function HistoryView() {
   const [history, setHistory] = useState([]);
   const [historyState, setHistoryState] = useState(state("Carga el historial operativo almacenado en el servidor."));
   const [selected, setSelected] = useState([]);
+  const [parlayAssessment, setParlayAssessment] = useState(null);
 
   async function loadHistory() {
     setHistoryState(state("Cargando versiones inmutables…", "loading"));
@@ -553,6 +555,28 @@ function HistoryView() {
     setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 2 ? [...current, id] : [current[1], id]);
   }
 
+  async function deleteSelectedVersion() {
+    if (selected.length !== 1) return;
+    const confirmed = window.confirm("¿Eliminar esta versión de la vista? El registro append-only conservará una marca auditable de la eliminación.");
+    if (!confirmed) return;
+    const response = await fetch("/api/operational-history", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ analysisId: selected[0], confirmation: "DELETE" }) });
+    if (response.ok) await loadHistory();
+  }
+
+  function evaluateParlays() {
+    const candidates = history.map((item) => ({
+      fixture_id: item.fixture_id,
+      market_family: item.director?.market_evaluated?.family,
+      selection: item.director?.selection,
+      line: item.director?.line,
+      decimal_odds: item.director?.odds,
+      odds_source_status: item.director?.odds_source_status,
+      freshness: item.odds?.find((quote) => quote.decimal_odds === item.director?.odds)?.freshness,
+      market_suitability: item.director?.market_suitability,
+    }));
+    setParlayAssessment(buildConservativeParlays(candidates));
+  }
+
   const compared = selected.map((id) => history.find((item) => item.analysis_id === id)).filter(Boolean);
   return (
     <section className="p2-mode" aria-labelledby="history-title">
@@ -569,6 +593,8 @@ function HistoryView() {
       <div className="p2-inline-actions">
         <button type="button" className="primary-button p2-primary" onClick={loadHistory}>Buscar historial</button>
         <a className="secondary-button p2-download" href="/api/operational-history?format=json">Exportar JSON</a>
+        <button type="button" className="secondary-button" onClick={deleteSelectedVersion} disabled={selected.length !== 1}>Eliminar versión seleccionada</button>
+        <button type="button" className="secondary-button" onClick={evaluateParlays} disabled={!history.length}>Evaluar parlays conservadores</button>
       </div>
       <StatusNotice value={historyState} />
       <div className="p2-history-list">
@@ -589,6 +615,9 @@ function HistoryView() {
           ["Aptitud anterior", displayStatus(compared[0].director?.market_suitability)],
           ["Aptitud posterior", displayStatus(compared[1].director?.market_suitability)],
         ]} /></section>
+      ) : null}
+      {parlayAssessment ? (
+        <section className="p2-history-compare"><h3>Política de parlays</h3><DefinitionGrid entries={[["Estado", displayStatus(parlayAssessment.status)], ["Combinaciones", parlayAssessment.parlays?.length], ["La cuota combinada es probabilidad real", parlayAssessment.combined_odds_is_probability]]} /><ListBlock title="Razones" items={parlayAssessment.reasons} />{(parlayAssessment.parlays || []).map((parlay) => <article key={parlay.type}><h4>{displayStatus(parlay.type)}</h4><p>Cuota decimal combinada: {parlay.combined_decimal_odds}. No representa probabilidad real.</p></article>)}</section>
       ) : null}
     </section>
   );

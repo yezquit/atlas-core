@@ -187,6 +187,23 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     engineVersion: OPERATIONAL_ENGINE_VERSION,
   }, { idFactory, now: () => analyzedAt });
   const changes = previousVersion ? compareAnalysisVersions(previousVersion, version) : null;
+  const individualPick = {
+    contract: "IndividualPickAssessment",
+    version: 1,
+    fixture_id: base.fixture.fixtureId,
+    market: director.market_evaluated,
+    selection: director.selection,
+    line: director.line,
+    decimal_odds: director.odds,
+    odds_source_status: director.odds_source_status,
+    market_suitability: director.market_suitability,
+    analysis_confidence_score: director.analysis_confidence_score,
+    status: director.authorizes_consideration ? "apt_for_consideration" : director.market_suitability,
+    conditions: director.conditions,
+    reasons: director.reasons,
+    risks: director.risks,
+    directive_to_bet: false,
+  };
   return {
     ...base,
     contract: "AtlasOperationalAnalysis",
@@ -200,6 +217,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     confidence,
     suitability,
     parlay,
+    individualPick,
     director,
     analysisVersion: version,
     changesSincePrevious: changes,

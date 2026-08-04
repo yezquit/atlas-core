@@ -153,3 +153,28 @@ test("los errores del proveedor nunca filtran la API key", async () => {
   assert.equal(result.status, DATA_LOAD_STATUS.PROVIDER_ERROR);
   assert.equal(JSON.stringify(result).includes(runtimeConfig.apiKey), false);
 });
+
+test("la cuota diaria advierte por debajo de 15 por ciento", async () => {
+  const runtime = createProviderRuntime({
+    ...runtimeConfig,
+    fetchImpl: async () => response({ response: [], errors: [] }, { headers: { "x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "14" } }),
+  });
+  await runtime.request({ pathname: "/fixtures", query: { id: 10 } });
+  assert.equal(runtime.snapshot().quotaStatus, "warning");
+});
+
+test("la cuota diaria bloquea preventivamente por debajo de 5 por ciento", async () => {
+  let calls = 0;
+  const runtime = createProviderRuntime({
+    ...runtimeConfig,
+    fetchImpl: async () => {
+      calls += 1;
+      return response({ response: [], errors: [] }, { headers: { "x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "4" } });
+    },
+  });
+  await runtime.request({ pathname: "/fixtures", query: { id: 11 } });
+  const blocked = await runtime.request({ pathname: "/fixtures", query: { id: 12 } });
+  assert.equal(blocked.status, DATA_LOAD_STATUS.BLOCKED);
+  assert.equal(blocked.errorCode, "provider_quota_preventive_block");
+  assert.equal(calls, 1);
+});

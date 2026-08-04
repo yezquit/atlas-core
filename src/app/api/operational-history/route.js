@@ -1,10 +1,12 @@
 import { getOperationalHistoryRepository } from "@/core/services/operationalAnalysisServer";
+import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
 
 function filters(url) {
   return Object.fromEntries([...url.searchParams.entries()].filter(([, value]) => value));
 }
 
 export async function GET(request) {
+  if (!isLocalRequest(request)) return localAccessDeniedResponse();
   const url = new URL(request.url);
   const repository = await getOperationalHistoryRepository();
   if (url.searchParams.get("format") === "json") {
@@ -16,6 +18,7 @@ export async function GET(request) {
 }
 
 export async function DELETE(request) {
+  if (!isLocalRequest(request)) return localAccessDeniedResponse();
   let input;
   try {
     input = await request.json();
