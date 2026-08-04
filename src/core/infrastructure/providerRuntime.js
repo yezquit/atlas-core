@@ -80,6 +80,8 @@ export function createProviderRuntime({
   fetchImpl = fetch,
   cache = createMemoryCache(),
   now = () => Date.now(),
+  quotaWarningRatio = 0.15,
+  quotaBlockRatio = 0.05,
 } = {}) {
   const configuredBudget = Math.max(1, Math.min(150, Number(budget) || 40));
   const metrics = {
@@ -110,11 +112,23 @@ export function createProviderRuntime({
   }
 
   function snapshot() {
+    const dailyRatio = metrics.providerDailyLimit > 0 && metrics.providerDailyRemaining !== null
+      ? metrics.providerDailyRemaining / metrics.providerDailyLimit
+      : null;
     return {
       ...metrics,
       configuredBudget,
       configuredBudgetRemaining: Math.max(0, configuredBudget - metrics.requestsUsed),
       budgetExhausted: metrics.budgetStops > 0,
+      quotaStatus:
+        dailyRatio === null
+          ? "unknown"
+          : dailyRatio < quotaBlockRatio
+            ? "preventive_block"
+            : dailyRatio < quotaWarningRatio
+              ? "warning"
+              : "available",
+      quotaRemainingRatio: dailyRatio,
       finishedAt: new Date(now()).toISOString(),
     };
   }
@@ -126,6 +140,17 @@ export function createProviderRuntime({
         DATA_LOAD_STATUS.UNAVAILABLE,
         "provider_unconfigured",
         "La integración deportiva no está disponible en este entorno."
+      );
+    }
+
+    if (
+      metrics.providerDailyLimit > 0 &&
+      metrics.providerDailyRemaining / metrics.providerDailyLimit < quotaBlockRatio
+    ) {
+      return providerFailure(
+        DATA_LOAD_STATUS.BLOCKED,
+        "provider_quota_preventive_block",
+        "La consulta se detuvo para preservar la cuota diaria configurada."
       );
     }
 

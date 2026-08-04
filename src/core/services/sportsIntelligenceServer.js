@@ -12,6 +12,7 @@ export const SPORTS_REQUEST_BUDGETS = Object.freeze({
   individual: 45,
   journey: 90,
   profile: 30,
+  reanalysis: 60,
 });
 
 const persistentCache = createPersistentFileCache();
@@ -36,6 +37,8 @@ export function createServerSportsGateway(kind = "individual") {
     timeoutMs: 8_000,
     maxRetries: 1,
     cache: persistentCache,
+    quotaWarningRatio: Math.max(0, Math.min(1, Number(process.env.ATLAS_QUOTA_WARNING_PERCENT || 15) / 100)),
+    quotaBlockRatio: Math.max(0, Math.min(1, Number(process.env.ATLAS_QUOTA_BLOCK_PERCENT || 5) / 100)),
   });
   return createSportsDataGateway(runtime);
 }

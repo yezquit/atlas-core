@@ -6,6 +6,7 @@ import {
   PROBABILITY_STATUS,
   createDirectorVerdict,
 } from "../contracts/atlasContracts.js";
+import { MARKET_SUITABILITY } from "../contracts/operationalContracts.js";
 
 function normalizeText(value = "") {
   return value
@@ -511,5 +512,90 @@ export function buildPhaseTwoDirectorVerdict({
     can_recommend: false,
     data_status: dataStatus,
     data_error_code: dataErrorCode,
+  };
+}
+
+export function buildOperationalDirectorVerdict({
+  fixture,
+  competition,
+  analyzedAt,
+  phase,
+  marketAssessment,
+  oddsQuote,
+  confidence,
+  suitability,
+  supportingEvidence = [],
+  opposingEvidence = [],
+  contradictions = [],
+  missingData = [],
+  risks = [],
+  evidenceRefs = [],
+  parlayAuthorization = "unsupported",
+  engineVersion = "atlas-operational-v1",
+}) {
+  const suitabilityStatus = suitability?.status || MARKET_SUITABILITY.INSUFFICIENT_DATA;
+  const displayStatuses = {
+    blocked: "Análisis bloqueado",
+    not_viable: "Mercado no viable",
+    insufficient_data: "Información insuficiente",
+    review_only: "Solo revisión",
+    viable_with_caution: "Viable con cautela",
+    suitable_under_conditions: "Apto para consideración bajo condiciones",
+  };
+  const verdicts = {
+    blocked: "No es posible considerar este mercado mientras exista un bloqueo crítico.",
+    not_viable: "No veo este mercado viable con la evidencia actual.",
+    insufficient_data: "No hay información suficiente para emitir una conclusión responsable.",
+    review_only: "Los datos permiten revisar el mercado, pero todavía no cumple las condiciones mínimas.",
+    viable_with_caution: "Este mercado es viable únicamente para revisión cautelosa; aún requiere verificación adicional.",
+    suitable_under_conditions: "Este mercado es apto para consideración a la línea indicada, sujeto a las condiciones informadas.",
+  };
+  const conditions = suitability?.conditions || [];
+  const reasons = [
+    `Confianza del análisis: ${confidence?.analysis_confidence_score || 0}%, ${String(confidence?.confidence_label || "baja").replaceAll("_", " ")}. Este porcentaje mide calidad y coherencia de evidencia, no probabilidad de acierto.`,
+    ...supportingEvidence,
+  ];
+  return {
+    contract: "DirectorVerdict",
+    version: 3,
+    verdict: verdicts[suitabilityStatus],
+    display_status: displayStatuses[suitabilityStatus],
+    fixture: fixture ? {
+      fixture_id: fixture.fixtureId,
+      home_team: fixture.teams?.home?.name || null,
+      away_team: fixture.teams?.away?.name || null,
+      kickoff: fixture.date?.utc || null,
+      competition: competition?.localName || fixture.competition?.name || null,
+      season: fixture.competition?.season || null,
+    } : null,
+    analyzed_at: analyzedAt,
+    analysis_phase: phase,
+    market_evaluated: marketAssessment ? { family: marketAssessment.market_family, label: marketAssessment.market_label } : null,
+    selection: oddsQuote?.selection || null,
+    line: oddsQuote?.line || marketAssessment?.line || null,
+    odds: oddsQuote?.decimal_odds || (marketAssessment?.odds ? Number(marketAssessment.odds) : null),
+    odds_source_status: oddsQuote?.verification_status || "unavailable",
+    implied_probability: oddsQuote?.implied_probability ?? null,
+    implied_probability_label: oddsQuote ? "Probabilidad implícita de la cuota" : null,
+    analysis_confidence_score: confidence?.analysis_confidence_score || 0,
+    confidence_label: confidence?.confidence_label || "baja",
+    confidence_is_probability: false,
+    estimated_probability: null,
+    probability_status: "unavailable",
+    market_suitability: suitabilityStatus,
+    apt_for_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
+    reasons: [...new Set(reasons)],
+    supporting_evidence: [...new Set(supportingEvidence)],
+    opposing_evidence: [...new Set(opposingEvidence)],
+    contradictions: [...new Set(contradictions)],
+    risks: [...new Set(risks)],
+    missing_data: [...new Set(missingData)],
+    avoid: ["No presentar el mercado como seguro.", "No confundir probabilidad implícita con probabilidad estimada.", "No perseguir pérdidas ni asumir rentabilidad."],
+    conditions: [...new Set(conditions)],
+    parlay_authorization: parlayAuthorization,
+    next_action: conditions[0] || "La decisión final corresponde al usuario; revisar el contexto antes del inicio.",
+    evidence_refs: [...new Set(evidenceRefs)].filter(Boolean),
+    engine_version: engineVersion,
+    can_recommend: false,
   };
 }

@@ -211,6 +211,79 @@ export function createSportsDataGateway(runtime) {
     };
   }
 
+  async function loadFixtureOdds(fixtureId) {
+    const result = await runtime.request({
+      pathname: "/odds",
+      query: { fixture: fixtureId },
+      ttlSeconds: 60,
+      tags: [`fixture:${fixtureId}`, "resource:odds"],
+      externalIds: { fixtureId },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const exact = result.response.filter(
+      (item) => Number(item?.fixture?.id) === Number(fixtureId)
+    );
+    return {
+      status: exact.length ? DATA_LOAD_STATUS.SUCCESS : DATA_LOAD_STATUS.EMPTY,
+      response: exact,
+      fixtureId: Number(fixtureId),
+      warnings: exact.length === result.response.length ? [] : ["provider_fixture_mismatch"],
+      requestMeta: result.requestMeta,
+    };
+  }
+
+  async function loadFixtureLineups(fixtureId) {
+    const result = await runtime.request({
+      pathname: "/fixtures/lineups",
+      query: { fixture: fixtureId },
+      ttlSeconds: 120,
+      tags: [`fixture:${fixtureId}`, "resource:lineups"],
+      externalIds: { fixtureId },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    return { ...result, fixtureId: Number(fixtureId) };
+  }
+
+  async function loadFixtureInjuries(fixtureId) {
+    const result = await runtime.request({
+      pathname: "/injuries",
+      query: { fixture: fixtureId },
+      ttlSeconds: 300,
+      tags: [`fixture:${fixtureId}`, "resource:injuries"],
+      externalIds: { fixtureId },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const exact = result.response.filter(
+      (item) => Number(item?.fixture?.id) === Number(fixtureId)
+    );
+    return {
+      status: DATA_LOAD_STATUS.SUCCESS,
+      response: exact,
+      fixtureId: Number(fixtureId),
+      warnings: exact.length === result.response.length ? [] : ["provider_fixture_mismatch"],
+      requestMeta: result.requestMeta,
+    };
+  }
+
+  async function loadStandings({ competition, season }) {
+    const result = await runtime.request({
+      pathname: "/standings",
+      query: { league: competition.id, season },
+      ttlSeconds: 1_800,
+      tags: [`competition:${competition.id}`, `season:${season}`, "resource:standings"],
+      externalIds: { competitionId: competition.id },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const exact = result.response.filter(
+      (item) => Number(item?.league?.id) === Number(competition.id)
+    );
+    return {
+      status: exact.length ? DATA_LOAD_STATUS.SUCCESS : DATA_LOAD_STATUS.EMPTY,
+      response: exact,
+      requestMeta: result.requestMeta,
+    };
+  }
+
   return {
     runtime,
     loadCompetitionMetadata,
@@ -219,5 +292,9 @@ export function createSportsDataGateway(runtime) {
     loadLeagueWindow,
     loadTeamRecent,
     loadFixtureStatistics,
+    loadFixtureOdds,
+    loadFixtureLineups,
+    loadFixtureInjuries,
+    loadStandings,
   };
 }

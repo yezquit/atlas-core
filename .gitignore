@@ -15,6 +15,7 @@
 
 # Atlas development server cache
 /.atlas-cache/
+/.atlas-data/
 
 # next.js
 /.next/
