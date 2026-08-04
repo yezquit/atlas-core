@@ -33,6 +33,15 @@ const STATUS_LABELS = Object.freeze({
   probable: "Probable",
   missing: "No informado",
   unsupported: "No soportado",
+  insufficient_candidates: "Candidatos insuficientes",
+  not_viable: "No viable",
+  review_only: "Solo revisión",
+  suitable_under_conditions: "Apto bajo condiciones",
+  user_reported: "Reportado por el usuario",
+  stale: "Vencido",
+  verified_provider: "Verificado por proveedor",
+  endpoint_unavailable: "Endpoint no disponible",
+  no_reports: "Sin reportes disponibles",
   observe_only: "Solo observar",
   analysis_only: "Solo análisis",
   market_review_only: "Solo revisar mercado",
@@ -245,28 +254,37 @@ function DirectorResult({ analysis }) {
     >
       <div className="director-atlas-panel functional-director p2-director">
         <div className="p2-director-heading">
-          <span className={`p2-chip p2-chip-${director.status}`}>{director.display_status}</span>
+          <span className={`p2-chip p2-chip-${director.status || director.market_suitability}`}>{director.display_status}</span>
           <p>{director.verdict}</p>
         </div>
         <DefinitionGrid entries={[
           ["Partido", director.fixture ? `${director.fixture.home_team} vs ${director.fixture.away_team}` : null],
           ["Competición", director.fixture?.competition],
           ["Mercado mejor respaldado", director.market_evaluated?.label],
-          ["Respaldo técnico", `${director.technical_support}/100`],
+          ["Selección", director.selection],
+          ["Línea", director.line],
+          ["Cuota", director.odds],
+          ["Fuente de cuota", displayStatus(director.odds_source_status)],
+          ["Probabilidad implícita de la cuota", director.implied_probability === null || director.implied_probability === undefined ? null : `${(director.implied_probability * 100).toFixed(2)}%`],
+          ["Confianza del análisis", director.analysis_confidence_score === undefined ? `${director.technical_support}/100` : `${director.analysis_confidence_score}% · ${displayStatus(director.confidence_label)}`],
           ["Probabilidad", director.probability_status === "unavailable" ? "No disponible" : director.estimated_probability],
-          ["Nivel operativo", displayStatus(director.operational_level)],
+          ["Aptitud del mercado", displayStatus(director.market_suitability || director.operational_level)],
+          ["Fase", displayStatus(director.analysis_phase)],
           ["Parlay", displayStatus(director.parlay_authorization)],
         ]} />
+        {director.analysis_confidence_score !== undefined ? <p className="p2-confidence-note">La confianza mide calidad y coherencia de los datos; no es una probabilidad de acierto.</p> : null}
         <div className="p2-four-columns">
           <ListBlock title="Razones principales" items={director.reasons} />
           <ListBlock title="Riesgos" items={director.risks} />
           <ListBlock title="Datos faltantes" items={director.missing_data} />
           <ListBlock title="Qué evitar" items={director.avoid} />
         </div>
+        <ListBlock title="Condiciones" items={director.conditions} />
         <div className="p2-next-action">
           <small>Próxima acción</small>
           <strong>{director.next_action}</strong>
         </div>
+        <p className="p2-user-decision">Atlas informa; la decisión final corresponde al usuario.</p>
       </div>
     </Accordion>
   );
@@ -391,6 +409,53 @@ function ExpertResult({ analysis }) {
         </div>
       </Accordion>
 
+      <Accordion id="expert-odds" title="Líneas, cuotas y bookmakers" summary={`${analysis.odds?.quotes?.length || 0} cotizaciones disponibles`}>
+        <DefinitionGrid entries={[
+          ["Mejor cuota comparable", analysis.bestComparableOdds?.decimal_odds],
+          ["Selección", analysis.selectedOdds?.selection],
+          ["Línea", analysis.selectedOdds?.line],
+          ["Estado", displayStatus(analysis.selectedOdds?.verification_status)],
+          ["Actualizada", formatDate(analysis.selectedOdds?.updated_at)],
+        ]} />
+        <details className="p2-source-details"><summary>Ver cuotas normalizadas</summary><pre>{JSON.stringify(analysis.odds?.quotes || [], null, 2)}</pre></details>
+      </Accordion>
+
+      <Accordion id="expert-context" title="Alineaciones, lesiones y contexto" summary="Cobertura prepartido trazable">
+        <DefinitionGrid entries={[
+          ["Alineaciones", displayStatus(analysis.preMatchContext?.lineups?.status)],
+          ["Lesiones", displayStatus(analysis.preMatchContext?.injuries?.status)],
+          ["Sidelined", displayStatus(analysis.preMatchContext?.sidelined?.status)],
+          ["Tabla", displayStatus(analysis.preMatchContext?.standings?.status)],
+          ["Corte prepartido respetado", analysis.preMatchContext?.pre_match_cutoff_respected],
+        ]} />
+      </Accordion>
+
+      <Accordion id="expert-gemini" title="Contexto Gemini manual" summary={`${analysis.gemini?.applied_items?.length || 0} elementos aplicados`}>
+        <DefinitionGrid entries={[
+          ["Procedencia", analysis.gemini?.context?.source],
+          ["Verificación", displayStatus(analysis.gemini?.context?.verification_status)],
+          ["Válido para reanálisis", analysis.gemini?.context?.valid_for_reanalysis],
+          ["URLs", analysis.gemini?.context?.urls?.length],
+        ]} />
+        <ListBlock title="Contradicciones" items={analysis.director?.contradictions} />
+      </Accordion>
+
+      <Accordion id="expert-confidence" title="Fórmula de confianza" summary={`${analysis.confidence?.analysis_confidence_score || 0}% · no es probabilidad`}>
+        <p>{analysis.confidence?.formula}</p>
+        <details className="p2-source-details"><summary>Ver componentes</summary><pre>{JSON.stringify(analysis.confidence?.components || [], null, 2)}</pre></details>
+      </Accordion>
+
+      <Accordion id="expert-version-diff" title="Versión temporal y cambios" summary={analysis.analysisVersion?.phase || "Sin versión"}>
+        <DefinitionGrid entries={[
+          ["Analysis ID", analysis.analysisVersion?.analysis_id],
+          ["Creado", formatDate(analysis.analysisVersion?.created_at)],
+          ["Fase", displayStatus(analysis.analysisVersion?.phase)],
+          ["Distancia al kickoff", analysis.analysisVersion?.kickoff_distance_minutes],
+          ["Motor", analysis.analysisVersion?.engine_version],
+        ]} />
+        <p>{analysis.changesSincePrevious?.explanation || "Esta es la primera versión conservada para el fixture."}</p>
+      </Accordion>
+
       <Accordion id="expert-telemetry" title="Consumo de API y caché" summary={`${telemetry?.requestsUsed || 0} solicitudes utilizadas`}>
         <DefinitionGrid entries={[
           ["Solicitudes utilizadas", telemetry?.requestsUsed],
@@ -416,6 +481,116 @@ function ExpertResult({ analysis }) {
         <ListBlock title="Riesgos" items={analysis.director?.risks} />
       </Accordion>
     </div>
+  );
+}
+
+function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleItem, onValidate, onReanalyze, status }) {
+  if (!analysis?.gemini?.prompt) return null;
+  async function copyPrompt() {
+    await navigator.clipboard.writeText(analysis.gemini.prompt);
+  }
+  return (
+    <section className="p2-gemini-flow" aria-labelledby="gemini-title">
+      <p className="eyebrow">Investigación complementaria manual</p>
+      <h3 id="gemini-title">Gemini, sin conexión automática</h3>
+      <p>Atlas prepara la solicitud. La respuesta pegada empieza como información reportada por el usuario y nunca sustituye al fixture, línea o cuota.</p>
+      <button type="button" className="secondary-button" onClick={copyPrompt}>Copiar solicitud para Gemini</button>
+      <details className="p2-source-details"><summary>Revisar solicitud completa</summary><pre>{analysis.gemini.prompt}</pre></details>
+      <label className="p2-textarea-label">
+        <span>Pegar respuesta de Gemini</span>
+        <textarea value={text} onChange={(event) => setText(event.target.value)} rows="12" placeholder="Pega aquí la respuesta obtenida manualmente…" />
+      </label>
+      <div className="p2-inline-actions">
+        <button type="button" className="secondary-button" onClick={onValidate} disabled={!text.trim() || status.status === "loading"}>Validar contexto</button>
+        <button type="button" className="primary-button p2-primary" onClick={onReanalyze} disabled={!context?.valid_for_reanalysis || selectedIds.length === 0 || status.status === "loading"}>Reanalizar con contexto</button>
+      </div>
+      <StatusNotice value={status} />
+      {context ? (
+        <div className="p2-context-review">
+          <DefinitionGrid entries={[
+            ["Fixture válido", context.valid_for_reanalysis],
+            ["Procedencia", displayStatus(context.verification_status)],
+            ["Fuentes encontradas", context.urls?.length],
+            ["Recibido", formatDate(context.received_at)],
+          ]} />
+          <ListBlock title="Alertas de validación" items={[...(context.validation_errors || []), ...(context.warnings || [])]} empty="Sin alertas estructurales." />
+          <fieldset>
+            <legend>Selecciona qué elementos reportados se usarán</legend>
+            {(context.items || []).map((item) => (
+              <label key={item.id}>
+                <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleItem(item.id)} />
+                <span><strong>{displayStatus(item.kind)}</strong> {item.text}<small>{displayStatus(item.verification_status)} · {item.domains?.join(", ") || "sin URL"}</small></span>
+              </label>
+            ))}
+          </fieldset>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function HistoryView() {
+  const [filters, setFilters] = useState({ date: "", competition: "", team: "", fixtureId: "", status: "", market: "", phase: "" });
+  const [history, setHistory] = useState([]);
+  const [historyState, setHistoryState] = useState(state("Carga el historial operativo almacenado en el servidor."));
+  const [selected, setSelected] = useState([]);
+
+  async function loadHistory() {
+    setHistoryState(state("Cargando versiones inmutables…", "loading"));
+    const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+    try {
+      const response = await fetch(`/api/operational-history?${params}`);
+      const result = await response.json();
+      setHistory(result.analyses || []);
+      setHistoryState(state(`${result.count || 0} versión(es) encontrada(s).`, "success"));
+      setSelected([]);
+    } catch {
+      setHistoryState(state("No fue posible cargar el historial.", "provider_error"));
+    }
+  }
+
+  function toggleVersion(id) {
+    setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 2 ? [...current, id] : [current[1], id]);
+  }
+
+  const compared = selected.map((id) => history.find((item) => item.analysis_id === id)).filter(Boolean);
+  return (
+    <section className="p2-mode" aria-labelledby="history-title">
+      <div className="p2-mode-heading"><p className="eyebrow">Persistencia local de servidor</p><h2 id="history-title">Historial</h2><p>Busca expedientes y compara dos versiones del mismo partido. Los análisis finalizados se registran en un log append-only.</p></div>
+      <div className="p2-history-filters">
+        <label><span>Fecha</span><input type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value })} /></label>
+        <label><span>Competición</span><input value={filters.competition} onChange={(event) => setFilters({ ...filters, competition: event.target.value })} /></label>
+        <label><span>Equipo</span><input value={filters.team} onChange={(event) => setFilters({ ...filters, team: event.target.value })} /></label>
+        <label><span>Fixture ID</span><input inputMode="numeric" value={filters.fixtureId} onChange={(event) => setFilters({ ...filters, fixtureId: event.target.value })} /></label>
+        <label><span>Estado</span><input value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} /></label>
+        <label><span>Mercado</span><input value={filters.market} onChange={(event) => setFilters({ ...filters, market: event.target.value })} /></label>
+        <label><span>Fase</span><input value={filters.phase} onChange={(event) => setFilters({ ...filters, phase: event.target.value })} /></label>
+      </div>
+      <div className="p2-inline-actions">
+        <button type="button" className="primary-button p2-primary" onClick={loadHistory}>Buscar historial</button>
+        <a className="secondary-button p2-download" href="/api/operational-history?format=json">Exportar JSON</a>
+      </div>
+      <StatusNotice value={historyState} />
+      <div className="p2-history-list">
+        {history.map((item) => (
+          <label key={item.analysis_id}>
+            <input type="checkbox" checked={selected.includes(item.analysis_id)} onChange={() => toggleVersion(item.analysis_id)} />
+            <span><strong>{item.director?.fixture?.home_team} vs {item.director?.fixture?.away_team}</strong><small>{formatDate(item.created_at)} · {displayStatus(item.phase)} · {displayStatus(item.director?.market_suitability)}</small><small>Analysis ID {item.analysis_id}</small></span>
+          </label>
+        ))}
+      </div>
+      {compared.length === 2 ? (
+        <section className="p2-history-compare"><h3>Comparación seleccionada</h3><DefinitionGrid entries={[
+          ["Mismo fixture", compared[0].fixture_id === compared[1].fixture_id],
+          ["Confianza anterior", `${compared[0].analysis_confidence?.analysis_confidence_score || 0}%`],
+          ["Confianza posterior", `${compared[1].analysis_confidence?.analysis_confidence_score || 0}%`],
+          ["Cuota anterior", compared[0].director?.odds],
+          ["Cuota posterior", compared[1].director?.odds],
+          ["Aptitud anterior", displayStatus(compared[0].director?.market_suitability)],
+          ["Aptitud posterior", displayStatus(compared[1].director?.market_suitability)],
+        ]} /></section>
+      ) : null}
+    </section>
   );
 }
 
@@ -467,8 +642,14 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
   const [marketId, setMarketId] = useState("open");
   const [line, setLine] = useState("");
   const [odds, setOdds] = useState("");
+  const [bookmaker, setBookmaker] = useState("");
+  const [selection, setSelection] = useState("");
   const [analysisState, setAnalysisState] = useState(state("Selecciona un partido; Atlas nunca ejecuta el análisis automáticamente."));
   const [analysis, setAnalysis] = useState(null);
+  const [geminiText, setGeminiText] = useState("");
+  const [geminiContext, setGeminiContext] = useState(null);
+  const [selectedGeminiIds, setSelectedGeminiIds] = useState([]);
+  const [geminiState, setGeminiState] = useState(state("La investigación Gemini es opcional y manual."));
   const fixturesRequest = useRef(null);
   const analysisRequest = useRef(null);
 
@@ -486,6 +667,9 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
     analysisRequest.current?.abort();
     setAnalysis(null);
     setAnalysisState(state(message));
+    setGeminiContext(null);
+    setSelectedGeminiIds([]);
+    setGeminiState(state("La investigación Gemini es opcional y manual."));
     if (clearFixture) setSelectedFixtureId("");
   }
 
@@ -586,7 +770,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
     invalidateAnalysis(`Partido seleccionado. Pulsa “Analizar partido” para continuar.`);
   }
 
-  async function analyzeSelectedFixture() {
+  async function runOperationalAnalysis({ reanalysis = false } = {}) {
     analysisRequest.current?.abort();
     setAnalysis(null);
     if (!selectedFixture || !selectedFixtureId) {
@@ -598,7 +782,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
     analysisRequest.current = controller;
     setAnalysisState(state("Construyendo perfiles y evaluando mercados…", "loading"));
     try {
-      const response = await fetch("/api/football/match-intelligence", {
+      const response = await fetch("/api/football/operational-analysis", {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: controller.signal,
@@ -610,6 +794,16 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
           marketId,
           line: line.trim() || null,
           odds: odds.trim() || null,
+          selection: selection.trim() || null,
+          manualOdds: odds.trim() && selection.trim() ? {
+            bookmaker: bookmaker.trim() || null,
+            selection: selection.trim(),
+            line: line.trim() || null,
+            decimalOdds: odds.trim(),
+          } : null,
+          geminiContext: reanalysis ? geminiContext : null,
+          selectedGeminiItemIds: reanalysis ? selectedGeminiIds : [],
+          reanalysis,
         }),
       });
       const result = await response.json();
@@ -624,6 +818,44 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
       if (error?.name === "AbortError") return;
       setAnalysisState(state("No fue posible completar el análisis.", "provider_error", "client_analysis_failed"));
     }
+  }
+
+  async function analyzeSelectedFixture() {
+    await runOperationalAnalysis({ reanalysis: false });
+  }
+
+  async function validateGeminiContext() {
+    if (!analysis?.fixture || !geminiText.trim()) return;
+    setGeminiState(state("Validando identidad, fuentes y contradicciones…", "loading"));
+    try {
+      const response = await fetch("/api/football/validate-context", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fixture: analysis.fixture,
+          text: geminiText,
+          expectedLine: analysis.director?.line,
+          expectedOdds: analysis.director?.odds,
+        }),
+      });
+      const result = await response.json();
+      setGeminiContext(result.context || null);
+      setSelectedGeminiIds((result.context?.items || []).filter((item) => item.selected).map((item) => item.id));
+      setGeminiState(state(result.message || "Contexto procesado.", safeStatus(result.status), result.errorCode));
+    } catch {
+      setGeminiState(state("No fue posible validar el contexto.", "provider_error", "client_context_failed"));
+    }
+  }
+
+  function toggleGeminiItem(id) {
+    setSelectedGeminiIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  }
+
+  async function reanalyzeWithContext() {
+    if (!geminiContext?.valid_for_reanalysis || !selectedGeminiIds.length) return;
+    setGeminiState(state("Reanalizando con los elementos seleccionados…", "loading"));
+    await runOperationalAnalysis({ reanalysis: true });
+    setGeminiState(state("Nueva versión inmutable creada con contexto manual seleccionado.", "success"));
   }
 
   function openCandidate(candidate) {
@@ -650,15 +882,16 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
       <nav className="p2-main-tabs" aria-label="Modos principales">
         <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Explorar jornada</button>
         <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
+        <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
       </nav>
 
-      <div className="p2-shared-date">
+      {mainMode !== "history" ? <div className="p2-shared-date">
         <label>
           <span>1 · Elige la fecha</span>
           <input type="date" value={date} onChange={(event) => changeDate(event.target.value)} />
         </label>
         <p>Una sola fecha mantiene la consulta controlada y hace visible el contexto exacto.</p>
-      </div>
+      </div> : null}
 
       {mainMode === "journey" ? (
         <section className="p2-mode" aria-labelledby="journey-title">
@@ -747,13 +980,17 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
             </section>
           ) : null}
         </section>
-      ) : (
+      ) : mainMode === "match" ? (
         <section className="p2-mode" aria-labelledby="match-title">
           <div className="p2-mode-heading">
             <p className="eyebrow">Selección estricta</p>
             <h2 id="match-title">Analizar partido</h2>
             <p>Carga la lista, selecciona el partido exacto y decide si Atlas debe revisar todos los mercados o uno específico.</p>
           </div>
+
+          <ol className="p2-flow-steps" aria-label="Flujo del análisis">
+            <li>Datos del partido</li><li>Datos deportivos</li><li>Mercado y cuota</li><li>Investigación Gemini</li><li>Validación del contexto</li><li>Reanálisis</li><li>Dictamen final</li>
+          </ol>
 
           <div className="p2-filter-grid p2-match-filters">
             <label>
@@ -796,13 +1033,16 @@ export default function AtlasFunctionalClient({ competitionGroups, markets }) {
               </select>
             </label>
             <label><span>Línea (opcional)</span><input value={line} onChange={(event) => { setLine(event.target.value); invalidateAnalysis(); }} placeholder="Ej. más de 2,5" /></label>
-            <label><span>Cuota (opcional)</span><input value={odds} onChange={(event) => { setOdds(event.target.value); invalidateAnalysis(); }} placeholder="Ej. 1.85" /></label>
+            <label><span>Selección manual</span><input value={selection} onChange={(event) => { setSelection(event.target.value); invalidateAnalysis(); }} placeholder="Ej. Over 2.5" /></label>
+            <label><span>Bookmaker manual</span><input value={bookmaker} onChange={(event) => { setBookmaker(event.target.value); invalidateAnalysis(); }} placeholder="Solo si reportas la cuota" /></label>
+            <label><span>Cuota decimal (opcional)</span><input inputMode="decimal" value={odds} onChange={(event) => { setOdds(event.target.value); invalidateAnalysis(); }} placeholder="Ej. 1.85" /></label>
           </div>
           <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId}>{analysisState.status === "loading" ? "Analizando partido…" : "6 · Analizar partido"}</button>
           <StatusNotice value={analysisState} />
           {analysis?.director ? <AnalysisResult key={`${analysis.selectedFixtureId}-${analysis.telemetry?.finishedAt || "result"}`} analysis={analysis} /> : null}
+          <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} status={geminiState} />
         </section>
-      )}
+      ) : <HistoryView />}
     </div>
   );
 }
