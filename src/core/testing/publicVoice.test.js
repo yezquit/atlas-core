@@ -8,6 +8,10 @@ const clientPath = new URL(
   import.meta.url
 );
 const layoutPath = new URL("../../app/layout.js", import.meta.url);
+const gatewayPath = new URL("../services/sportsDataGateway.js", import.meta.url);
+const serverPath = new URL("../services/sportsIntelligenceServer.js", import.meta.url);
+const envExamplePath = new URL("../../../.env.example", import.meta.url);
+const gitignorePath = new URL("../../../.gitignore", import.meta.url);
 
 test("DirectorAtlas queda como única voz pública del flujo funcional", async () => {
   const [pageSource, clientSource] = await Promise.all([
@@ -99,4 +103,66 @@ test("el layout no depende de Google Fonts", async () => {
 
   assert.doesNotMatch(source, /next\/font\/google/);
   assert.match(source, /<html lang="es">/);
+});
+
+test("36. modo sencillo muestra el dictamen operativo", async () => {
+  const source = await readFile(clientPath, "utf8");
+  assert.match(source, /analysis_confidence_score/);
+  assert.match(source, /market_suitability/);
+  assert.match(source, /la decisión final corresponde al usuario/i);
+});
+
+test("37. modo experto expone trazabilidad operativa", async () => {
+  const source = await readFile(clientPath, "utf8");
+  for (const id of ["expert-odds", "expert-context", "expert-gemini", "expert-confidence", "expert-version-diff"]) {
+    assert.match(source, new RegExp(`id="${id}"`));
+  }
+});
+
+test("38. porcentaje aclarado como no probabilidad", async () => {
+  const source = await readFile(clientPath, "utf8");
+  assert.match(source, /La confianza mide calidad y coherencia de los datos; no es una probabilidad de acierto/);
+});
+
+test("39. API key ausente del cliente", async () => {
+  const source = await readFile(clientPath, "utf8");
+  assert.doesNotMatch(source, /API_FOOTBALL_KEY|x-apisports-key/);
+});
+
+test("40. ninguna clave Gemini requerida", async () => {
+  const [source, envExample] = await Promise.all([readFile(clientPath, "utf8"), readFile(envExamplePath, "utf8")]);
+  assert.doesNotMatch(source, /GEMINI_API_KEY|generativelanguage\.googleapis/);
+  assert.doesNotMatch(envExample, /GEMINI_API_KEY\s*=/);
+  assert.match(source, /Copiar solicitud para Gemini/);
+});
+
+test("41. presupuesto de reanálisis", async () => {
+  const [source, envExample] = await Promise.all([readFile(serverPath, "utf8"), readFile(envExamplePath, "utf8")]);
+  assert.match(source, /reanalysis: 60/);
+  assert.match(envExample, /ATLAS_REANALYSIS_REQUEST_BUDGET=60/);
+});
+
+test("42. caché corta de odds", async () => {
+  const source = await readFile(gatewayPath, "utf8");
+  assert.match(source, /pathname: "\/odds"/);
+  assert.match(source, /ttlSeconds: 60/);
+  assert.match(source, /resource:odds/);
+});
+
+test("43. fixture ID inmutable en el flujo operativo", async () => {
+  const source = await readFile(clientPath, "utf8");
+  assert.match(source, /Number\(result\?\.selectedFixtureId\) !== requestedFixtureId/);
+  assert.doesNotMatch(source, /setSelectedFixtureId\(String\(result/);
+});
+
+test("44. DirectorAtlas sigue siendo la única voz pública", async () => {
+  const source = await readFile(clientPath, "utf8");
+  assert.match(source, /Dictamen del Director Atlas/);
+  assert.doesNotMatch(source, /atlasExecutiveAnswer|specialistEngine|decisionEngine/);
+});
+
+test("45. política de árbol limpio excluye persistencia generada", async () => {
+  const source = await readFile(gitignorePath, "utf8");
+  assert.match(source, /\/\.atlas-data\//);
+  assert.match(source, /\/\.atlas-cache\//);
 });
