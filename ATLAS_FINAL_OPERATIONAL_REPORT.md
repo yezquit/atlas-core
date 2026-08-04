@@ -279,7 +279,7 @@ No se eliminaron módulos heredados ni se reescribió el proyecto desde cero.
 ```text
 npm run lint                  -> PASS
 npm test                      -> PASS, 133/133
-npm run build                 -> PASS, 15 rutas, sin Google Fonts
+npm run build                 -> PASS, 13 rutas listadas, sin Google Fonts
 npm audit --omit=dev          -> PASS, 0 vulnerabilidades
 git diff --check              -> PASS
 git status --short --branch   -> limpio en rescue/atlas-core-v0.2 al cerrar
@@ -350,5 +350,6 @@ Commits de implementación en esta fase:
 5. `7b945f6` — `test: cover final operational policies`
 6. `0ce6a72` — `chore: add bounded operational verification`
 7. `af8d876` — `feat: secure local operations and finalize decision outputs`
+8. `4100e28` — `docs: add final operational report`
 
-Este informe se añade en un commit documental separado. No se realizó merge a `main`.
+La corrección factual final de este informe se conserva en un commit documental adicional. No se realizó merge a `main`.
