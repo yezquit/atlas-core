@@ -179,8 +179,9 @@ test("16. ranking sin cuota", () => {
 });
 
 test("17. ranking con cuota", () => {
-  const ranked = rankMarketCandidates([candidate("goals")], { marketAssessments: assessments(), quotes: [quote()] });
+  const ranked = rankMarketCandidates([candidate("goals")], { marketAssessments: assessments(), quotes: [quote({ selection: "Draw/Over 2.5", decimal_odds: 20 }), quote()] });
   assert.equal(ranked[0].price_status, "verified_current");
+  assert.equal(ranked[0].price_quote.selection, "Over 2.5");
 });
 
 test("18. cuota vencida no elimina pronóstico", () => {

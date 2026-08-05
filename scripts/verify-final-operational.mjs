@@ -4,7 +4,7 @@ import { createProviderRuntime } from "../src/core/infrastructure/providerRuntim
 import { createSportsDataGateway } from "../src/core/services/sportsDataGateway.js";
 import { analyzeOperationalFixture } from "../src/core/services/operationalAnalysisService.js";
 
-const HARD_REQUEST_LIMIT = 120;
+const HARD_REQUEST_LIMIT = 80;
 const HARD_FIXTURE_LIMIT = 2;
 const DEFAULT_DATE = "2026-08-08";
 
@@ -39,10 +39,23 @@ function publicTelemetry(runtime) {
 }
 
 function summary(result) {
+  const generatedLines = (result.marketSelection?.generated || []).map((item) => ({
+    marketFamily: item.market_family,
+    projectedMean: item.distribution?.projected_mean ?? null,
+    median: item.distribution?.median ?? null,
+    lines: [...new Set((item.candidates || []).map((candidate) => candidate.line))],
+  }));
+  const firstProviderQuote = result.odds?.quotes?.find((item) => item.source === "api-football") || null;
   return {
     fixtureId: result.selectedFixtureId,
     fixture: result.fixture ? `${result.fixture.teams.home.name} vs ${result.fixture.teams.away.name}` : null,
     status: result.status,
+    analysisMode: result.analysisMode,
+    generatedLines,
+    sportsWinner: result.director?.sports_verdict || null,
+    priceAssessment: result.director?.price_assessment || null,
+    firstProviderLine: firstProviderQuote?.line || null,
+    winnerSelectedBeforePrice: Boolean(result.marketSelection?.primary),
     odds: {
       status: result.odds?.status,
       quotes: result.odds?.quotes?.length || 0,
@@ -84,7 +97,7 @@ async function main() {
       contract: "AtlasFinalControlledVerification",
       status: "unavailable",
       reason: "API-FOOTBALL no está configurado en este entorno.",
-      reproducibleCommand: "npm run verify:operational -- --date=2026-08-08 --max-fixtures=2",
+      reproducibleCommand: "npm run verify:operational -- --date=2026-08-08 --max-fixtures=1",
       hardRequestLimit: HARD_REQUEST_LIMIT,
       hardFixtureLimit: HARD_FIXTURE_LIMIT,
       geminiApiUsed: false,
@@ -98,24 +111,17 @@ async function main() {
   const fixtureLoad = await gateway.loadFixturesForDate({ competition, season: 2026, date });
   const fixtures = (fixtureLoad.fixtures || []).slice(0, maximumFixtures);
   const results = [];
-  for (const selected of fixtures) {
-    const result = await analyzeOperationalFixture({ date, competitionKey: competition.key, season: 2026, fixtureId: selected.fixtureId, marketId: "open" }, gateway, { idFactory: () => `controlled-${selected.fixtureId}-1` });
-    results.push(summary(result));
-  }
-  let syntheticReanalysis = null;
-  if (fixtures[0] && !runtime.snapshot().budgetExhausted) {
+  if (fixtures[0]) {
     const selected = fixtures[0];
-    const syntheticFixtureText = [
-      "HECHOS CONFIRMADOS",
-      `- FIXTURE SINTÉTICO DE PRUEBA; no es una fuente real. Fixture ${selected.fixtureId}: ${selected.teams.home.name} vs ${selected.teams.away.name}. https://example.invalid/atlas-fixture-test ${date}`,
-      "DATOS NO ENCONTRADOS",
-      "- Este texto de prueba no aporta lesiones, alineaciones ni noticias reales.",
-    ].join("\n");
-    const result = await analyzeOperationalFixture({ date, competitionKey: competition.key, season: 2026, fixtureId: selected.fixtureId, marketId: "open", geminiResponse: syntheticFixtureText, reanalysis: true }, gateway, { idFactory: () => `controlled-${selected.fixtureId}-2` });
-    syntheticReanalysis = summary(result);
+    const general = await analyzeOperationalFixture({ date, competitionKey: competition.key, season: 2026, fixtureId: selected.fixtureId, analysisMode: "general", marketId: "open" }, gateway, { idFactory: () => `controlled-${selected.fixtureId}-general` });
+    results.push(summary(general));
+    if (!runtime.snapshot().budgetExhausted) {
+      const specific = await analyzeOperationalFixture({ date, competitionKey: competition.key, season: 2026, fixtureId: selected.fixtureId, analysisMode: "specific", marketId: "goals" }, gateway, { idFactory: () => `controlled-${selected.fixtureId}-goals` });
+      results.push(summary(specific));
+    }
   }
   const telemetry = publicTelemetry(runtime);
-  if (telemetry.requestsUsed > HARD_REQUEST_LIMIT) throw new Error("Se excedió el límite duro de 120 solicitudes.");
+  if (telemetry.requestsUsed > HARD_REQUEST_LIMIT) throw new Error("Se excedió el límite duro de 80 solicitudes.");
   console.log(JSON.stringify({
     contract: "AtlasFinalControlledVerification",
     version: 1,
@@ -124,13 +130,14 @@ async function main() {
     season: 2026,
     date,
     fixturesFound: fixtureLoad.fixtures?.length || 0,
-    fixturesAnalyzed: results.length,
+    fixturesAnalyzed: fixtures.length,
+    analysesRun: results.length,
     analyses: results,
-    syntheticReanalysis,
     telemetry,
     hardRequestLimit: HARD_REQUEST_LIMIT,
     hardFixtureLimit: HARD_FIXTURE_LIMIT,
     geminiApiUsed: false,
+    sportsValidationClaimed: false,
     scannedCompetitionCount: 1,
   }, null, 2));
 }

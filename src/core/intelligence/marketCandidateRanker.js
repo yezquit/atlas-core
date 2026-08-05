@@ -7,9 +7,9 @@ export const OVERALL_STATUS = Object.freeze({ SUITABLE: "suitable_for_considerat
 function clamp(value, minimum = 0, maximum = 100) { return Math.max(minimum, Math.min(maximum, value)); }
 function round(value, decimals = 1) { return Number(Number(value).toFixed(decimals)); }
 function normalizedDirection(value) {
-  const normalized = String(value || "").toLowerCase();
-  if (/over|mas de|más de/.test(normalized)) return "over";
-  if (/under|menos de/.test(normalized)) return "under";
+  const normalized = String(value || "").trim().toLowerCase();
+  if (/^(over|mas de|más de)\b/.test(normalized)) return "over";
+  if (/^(under|menos de)\b/.test(normalized)) return "under";
   return null;
 }
 
@@ -104,4 +104,3 @@ export function buildRankedMarketSelection(input = {}) {
     explanation: primary ? `${primary.selection} ocupa el primer lugar por equilibrio deportivo; la cuota no intervino en sports_score.` : "No se generaron candidatos compatibles con la muestra disponible.",
   };
 }
-
