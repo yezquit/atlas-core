@@ -4712,9 +4712,9 @@ body[data-atlas-view="technical"] .view-mode-buttons {
 }
 
 .p2-director-yes { border-color: rgba(74, 222, 128, 0.78); }
-.p2-director-caution,
-.p2-director-not-yet,
-.p2-director-insufficient { border-color: rgba(250, 204, 21, 0.72); }
+.p2-director-not-yet { border-color: rgba(250, 204, 21, 0.72); }
+.p2-director-caution { border-color: rgba(251, 146, 60, 0.82); }
+.p2-director-insufficient { border-color: rgba(148, 163, 184, 0.72); }
 .p2-director-no,
 .p2-director-blocked { border-color: rgba(248, 113, 113, 0.82); }
 
@@ -4761,6 +4761,37 @@ body[data-atlas-view="technical"] .view-mode-buttons {
 .p2-director-heading h2:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 6px;
+}
+
+.p2-director-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.p2-director-summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.p2-director-summary small,
+.p2-director-summary span {
+  color: var(--muted);
+}
+
+.p2-director-summary strong {
+  overflow-wrap: anywhere;
+  font-size: clamp(16px, 2vw, 21px);
+}
+
+.p2-technical-summary {
+  opacity: 0.9;
 }
 
 .p2-director-actions {
@@ -4826,7 +4857,8 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   .p2-filter-grid,
   .p2-match-filters,
   .p2-split,
-  .p2-four-columns {
+  .p2-four-columns,
+  .p2-director-summary {
     grid-template-columns: 1fr;
   }
 
