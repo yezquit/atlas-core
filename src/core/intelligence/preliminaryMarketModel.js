@@ -87,11 +87,13 @@ export function estimatePreliminaryMarketProbability({
   awayTeamProfile,
   refereeProfile,
   contextItems = [],
+  contextShift = 0,
+  allowLimitedReferee = false,
 } = {}) {
   const supported = new Set(["goals", "total_shots", "shots_on_goal", "cards", "corners"]);
   if (!supported.has(marketFamily)) return unavailable("La familia de mercado no tiene metodología documentada.");
   const compatibleTeamCoverage = (profile) => ["verified", "partial"].includes(profile?.quality_status);
-  if (leagueProfile?.quality_status !== "verified" || !compatibleTeamCoverage(homeTeamProfile) || !compatibleTeamCoverage(awayTeamProfile)) {
+  if (!["verified", "partial"].includes(leagueProfile?.quality_status) || !compatibleTeamCoverage(homeTeamProfile) || !compatibleTeamCoverage(awayTeamProfile)) {
     return unavailable("Las coberturas de liga y equipos no son compatibles para una estimación preliminar.");
   }
   const parsedLine = parsePreliminaryMarketLine({ selection, line });
@@ -108,11 +110,12 @@ export function estimatePreliminaryMarketProbability({
     ["home_role", BASE_WEIGHTS.home_role, sample(homeTeamProfile, marketFamily, ["as_home"]), 2],
     ["away_role", BASE_WEIGHTS.away_role, sample(awayTeamProfile, marketFamily, ["as_away"]), 2],
   ];
+  const shifted = (values) => values.map((value) => Number(value) + Number(contextShift || 0));
   const observations = definitions.map(([name, weight, values, minimum]) => ({
     name,
     weight,
     minimum,
-    observation: observation(values, parsedLine),
+    observation: observation(shifted(values), parsedLine),
   }));
   const missingRequired = observations.filter((item) => !item.observation || item.observation.sample_size < item.minimum);
   if (missingRequired.length) {
@@ -124,16 +127,17 @@ export function estimatePreliminaryMarketProbability({
 
   if (marketFamily === "cards") {
     const refereeValues = refereeProfile?.event_samples?.cards?.match_totals || [];
-    const refereeObservation = observation(refereeValues, parsedLine);
+    const refereeObservation = observation(shifted(refereeValues), parsedLine);
     if (
       refereeProfile?.status !== "confirmed" ||
       refereeProfile?.quality_status !== "verified" ||
       !refereeObservation ||
       refereeObservation.sample_size < 5
     ) {
-      return unavailable("El mercado de tarjetas requiere árbitro confirmado y al menos cinco observaciones arbitrales compatibles.");
+      if (!allowLimitedReferee) return unavailable("El mercado de tarjetas requiere árbitro confirmado y al menos cinco observaciones arbitrales compatibles.");
+    } else {
+      observations.push({ name: "referee", weight: 0.15, minimum: 5, observation: refereeObservation });
     }
-    observations.push({ name: "referee", weight: 0.15, minimum: 5, observation: refereeObservation });
   }
 
   const totalWeight = observations.reduce((sum, item) => sum + item.weight, 0);
@@ -158,7 +162,8 @@ export function estimatePreliminaryMarketProbability({
   if (rateSpread > 0.65) return unavailable("Las submuestras son contradictorias para la línea exacta.", [`Dispersión observada: ${rounded(rateSpread)}.`]);
   const weightedRate = inputsUsed.reduce((sum, item) => sum + item.observed_rate * item.weight, 0);
   const rawEffectiveSample = 1 / inputsUsed.reduce((sum, item) => sum + (item.weight ** 2) / item.sample_size, 0);
-  const coverageFactor = Math.min(1, ...observations.map((item) => item.observation.sample_size / (item.minimum * 2)));
+  const refereeLimited = marketFamily === "cards" && !observations.some((item) => item.name === "referee");
+  const coverageFactor = Math.min(refereeLimited ? 0.65 : 1, ...observations.map((item) => item.observation.sample_size / (item.minimum * 2)));
   const effectiveSample = rawEffectiveSample * coverageFactor;
   const leagueRate = inputsUsed.find((item) => item.source === "league").observed_rate;
   const shrinkageStrength = 8;
@@ -171,6 +176,8 @@ export function estimatePreliminaryMarketProbability({
     "No se calcula valor esperado ni se afirma ventaja sobre el mercado.",
     ...(coverageFactor < 1 ? [`La muestra efectiva fue penalizada por cobertura pequeña (factor ${rounded(coverageFactor)}).`] : []),
     ...(rateSpread > 0.4 ? ["Existe dispersión relevante entre submuestras."] : []),
+    ...(refereeLimited ? ["Tarjetas en estado provisional limitado: falta un árbitro confirmado con muestra compatible."] : []),
+    ...(Number(contextShift) !== 0 ? [`Contexto aplicado con desplazamiento acotado de ${rounded(Number(contextShift))} eventos.`] : []),
     ...contextItems.filter((item) => item.kind === "not_found").map((item) => `Contexto no encontrado: ${item.text}`),
   ];
   return {
@@ -188,6 +195,8 @@ export function estimatePreliminaryMarketProbability({
     league_base_rate: rounded(leagueRate),
     shrinkage_strength: shrinkageStrength,
     coverage_penalty_factor: rounded(coverageFactor),
+    context_shift_events: rounded(Number(contextShift) || 0),
+    referee_dependency_status: refereeLimited ? "limited_missing_referee" : "satisfied_or_not_required",
     weights: BASE_WEIGHTS,
     inputs_used: inputsUsed,
     limitations,
