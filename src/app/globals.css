@@ -4230,12 +4230,19 @@ body[data-atlas-view="technical"] .view-mode-buttons {
 .p2-main-tabs,
 .p2-view-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   padding: 7px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(5, 10, 20, 0.76);
+}
+
+.p2-main-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.p2-view-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .p2-main-tabs button,
@@ -4694,6 +4701,111 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   overflow-wrap: anywhere;
 }
 
+.p2-director {
+  scroll-margin-top: 20px;
+  margin-bottom: 18px;
+  border: 2px solid rgba(87, 225, 255, 0.58);
+  border-radius: 22px;
+  padding: clamp(18px, 4vw, 30px);
+  background: linear-gradient(145deg, rgba(7, 28, 42, 0.98), rgba(2, 8, 17, 0.98));
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.34);
+}
+
+.p2-director-yes { border-color: rgba(74, 222, 128, 0.78); }
+.p2-director-caution,
+.p2-director-not-yet,
+.p2-director-insufficient { border-color: rgba(250, 204, 21, 0.72); }
+.p2-director-no,
+.p2-director-blocked { border-color: rgba(248, 113, 113, 0.82); }
+
+.p2-director-kicker {
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.p2-decision-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.p2-decision-icon {
+  display: grid;
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.p2-director-heading {
+  display: grid;
+  justify-content: stretch;
+}
+
+.p2-director-heading h2 {
+  margin: 0 0 8px;
+  font-size: clamp(22px, 4vw, 36px);
+  line-height: 1.08;
+}
+
+.p2-director-heading h2:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 6px;
+}
+
+.p2-director-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.p2-gemini-item span {
+  display: grid;
+  gap: 4px;
+}
+
+.p2-history-entry {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.p2-history-entry > label {
+  border: 0;
+  padding: 0;
+}
+
+.p2-result-entry {
+  margin-top: 12px;
+}
+
+.p2-result-entry label {
+  display: grid;
+  gap: 4px;
+}
+
+.p2-stale-action {
+  margin: 16px 0;
+  border: 1px solid rgba(250, 204, 21, 0.55);
+  border-radius: 16px;
+  padding: 16px;
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.p2-intended-use {
+  margin: 16px 0;
+}
+
 @media (max-width: 900px) {
   .p2-competition-groups,
   .p2-candidate-grid,
@@ -4716,6 +4828,15 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   .p2-split,
   .p2-four-columns {
     grid-template-columns: 1fr;
+  }
+
+  .p2-director-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .p2-decision-banner {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .p2-main-tabs {
