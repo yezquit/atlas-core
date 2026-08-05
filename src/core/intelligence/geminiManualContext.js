@@ -38,35 +38,116 @@ function hostname(url) {
   }
 }
 
+const TRUSTED_SOURCE_CLASSES = new Set([
+  SOURCE_CLASSIFICATION.OFFICIAL_COMPETITION,
+  SOURCE_CLASSIFICATION.OFFICIAL_CLUB,
+  SOURCE_CLASSIFICATION.FEDERATION,
+  SOURCE_CLASSIFICATION.RECOGNIZED_MEDIA,
+]);
+
+function summarize(content, maximumLength = 180) {
+  const clean = String(content || "")
+    .replace(/https?:\/\/[^\s)>\]}]+/gi, "")
+    .replace(/^\s*[•*-]+\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (clean.length <= maximumLength) return clean;
+  const shortened = clean.slice(0, maximumLength - 1);
+  const boundary = shortened.lastIndexOf(" ");
+  return `${shortened.slice(0, boundary > maximumLength * 0.65 ? boundary : maximumLength - 1).trim()}…`;
+}
+
+function affectedMarkets(content) {
+  const candidate = normalize(content);
+  const markets = new Set();
+  if (/delanter|goleador|atacante|alineaci|lesion|sancion|rotacion|fatiga|campo|cesped|lluvia|viento|clima/.test(candidate)) {
+    markets.add("goals");
+  }
+  if (/extremo|lateral|carrilero|campo|cesped|lluvia|viento|clima/.test(candidate)) markets.add("corners");
+  if (/arbitro|tarjeta|falta|sancion/.test(candidate)) markets.add("cards");
+  if (/delanter|atacante|extremo|lateral|carrilero|alineaci|rotacion|campo|cesped|lluvia|viento|clima/.test(candidate)) {
+    markets.add("total_shots");
+    markets.add("shots_on_goal");
+  }
+  return [...markets];
+}
+
 function inferImpact(kind, content) {
   if (kind === GEMINI_ITEM_KIND.CONTRADICTION || kind === GEMINI_ITEM_KIND.NOT_FOUND) return "limiting";
   if (kind === GEMINI_ITEM_KIND.RUMOR) return "neutral";
   const candidate = normalize(content);
-  if (/lesion|baja|sancion|ausencia|rotacion|fatiga|suspendid|duda|mal estado/.test(candidate)) return "unfavorable";
-  if (/confirmad|disponible|recuperad|titular|buen estado|descanso/.test(candidate)) return "favorable";
+  if (/favorece|respalda|beneficia/.test(candidate)) return "favorable";
+  if (/perjudica|debilita|contrario a|en contra de/.test(candidate)) return "unfavorable";
+  if (/lesion|baja|sancion|ausencia|rotacion|fatiga|suspendid|duda|probable|sin confirmar|mal estado/.test(candidate)) return "limiting";
   return "neutral";
+}
+
+function isGenericSupportPage(domains) {
+  return domains.some((domain) => /^(?:support|weather)\.google\./.test(domain) || /^support\./.test(domain));
+}
+
+function isPredictionOpinion(content, domains) {
+  const candidate = normalize(content);
+  return /pronostico|apuesta|pick\b|tipster|cuota recomendada/.test(candidate) || domains.some((domain) => /tipster|betting|apuestas/.test(domain));
+}
+
+function isAlreadyKnownFixtureData(content) {
+  const candidate = normalize(content);
+  const knownTerms = ["horario", "hora del partido", "sede", "estadio", "fixture", "equipos"];
+  return knownTerms.some((term) => candidate.includes(term)) && !/lesion|alineaci|rotacion|campo|cesped|clima|arbitro|sancion/.test(candidate);
+}
+
+function impactExplanation(kind, impact, markets) {
+  if (kind === GEMINI_ITEM_KIND.CONTRADICTION) return "Existe una contradicción que requiere revisión manual antes de utilizarla.";
+  if (kind === GEMINI_ITEM_KIND.NOT_FOUND) return "Registra una limitación de información; no constituye evidencia favorable ni contraria.";
+  if (kind === GEMINI_ITEM_KIND.RUMOR) return "Es un rumor y no se incorpora automáticamente al análisis.";
+  if (!markets.length) return "No se pudo vincular el dato con una variable deportiva del mercado actual.";
+  if (impact === "favorable") return "El texto declara un efecto favorable, sujeto a verificación de fuente y contexto.";
+  if (impact === "unfavorable") return "El texto declara un efecto desfavorable, sujeto a verificación de fuente y contexto.";
+  if (impact === "limiting") return "El dato es relevante, pero su vigencia o confirmación limita el dictamen.";
+  return "No existe comparación suficiente para asignar una dirección deportiva sin inventarla.";
 }
 
 function buildItem(content, kind, index, sourceOptions) {
   const urls = extractUrls(content);
   const dates = content.match(/\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b/g) || [];
+  const domains = urls.map(hostname).filter(Boolean);
+  const classifications = urls.map((url) => classifySource(url, sourceOptions));
+  const markets = affectedMarkets(content);
+  const impact = inferImpact(kind, content);
+  const genericSupportPage = isGenericSupportPage(domains);
+  const recognizedSource = classifications.some((classification) => TRUSTED_SOURCE_CLASSES.has(classification));
+  const sourceIsCurrent = dates.length > 0 || /actualizad|vigente|hoy|ultima hora|última hora/.test(normalize(content));
+  const relevantImpact = markets.length > 0 && !isAlreadyKnownFixtureData(content);
+  const selected = recognizedSource && sourceIsCurrent && relevantImpact && !genericSupportPage &&
+    !isPredictionOpinion(content, domains) && ![
+      GEMINI_ITEM_KIND.RUMOR,
+      GEMINI_ITEM_KIND.CONTRADICTION,
+      GEMINI_ITEM_KIND.NOT_FOUND,
+    ].includes(kind);
   return {
     id: `gemini-${index + 1}`,
     kind,
-    summary: content,
+    category: kind,
+    summary: summarize(content),
     text: content,
     source: urls[0] || null,
     urls,
     domain: urls[0] ? hostname(urls[0]) : null,
-    domains: urls.map(hostname).filter(Boolean),
+    domains,
     publication_date: dates[0] || null,
     publication_dates: dates,
     provenance: "manual_gemini_paste",
-    source_classifications: urls.map((url) => classifySource(url, sourceOptions)),
+    source_classification: classifications[0] || SOURCE_CLASSIFICATION.UNKNOWN,
+    source_classifications: classifications,
+    source_is_generic_support: genericSupportPage,
     verification_status: urls.length ? "user_reported" : "unverified",
-    validation_status: urls.length ? "user_reported" : "unverified",
-    impact: inferImpact(kind, content),
-    selected: kind !== GEMINI_ITEM_KIND.RUMOR,
+    validation_status: selected ? "usable_as_context" : urls.length ? "user_reported" : "unverified",
+    affected_markets: markets,
+    impact,
+    impact_explanation: impactExplanation(kind, impact, markets),
+    selection_warning: kind === GEMINI_ITEM_KIND.CONTRADICTION ? "Revisa esta contradicción antes de utilizarla." : null,
+    selected,
   };
 }
 
@@ -170,7 +251,8 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
   const away = fixture?.teams?.away?.name || "";
   const normalizedText = normalize(originalText);
   const teamsMentioned = [home, away].filter((team) => team && normalizedText.includes(normalize(team)));
-  const incompatibleDate = (originalText.match(/\b20\d{2}-\d{2}-\d{2}\b/g) || []).some(
+  const explicitlyClaimedFixtureDates = [...originalText.matchAll(/(?:fecha\s+del\s+partido|partido|fixture|kickoff)[^\n\d]{0,24}(20\d{2}-\d{2}-\d{2})/gi)].map((match) => match[1]);
+  const incompatibleDate = explicitlyClaimedFixtureDates.some(
     (date) => fixture?.date?.utc && date !== fixture.date.utc.slice(0, 10)
   );
   const lineMatches = expectedLine ? normalizedText.includes(normalize(expectedLine)) : true;
@@ -182,6 +264,14 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
     ...(!lineMatches ? ["line_not_confirmed"] : []),
     ...(!oddsMatches ? ["odds_not_confirmed"] : []),
   ];
+  for (const item of items) {
+    const itemFixtureIds = [...item.text.matchAll(/fixture(?:\s+id)?\s*[:#-]?\s*(\d+)/gi)].map((match) => Number(match[1]));
+    item.fixture_compatible = !itemFixtureIds.some((id) => id !== expectedFixtureId) && !incompatibleDate;
+    if (!item.fixture_compatible) {
+      item.selected = false;
+      item.validation_status = "unverified";
+    }
+  }
   return {
     contract: "GeminiManualContext",
     version: 1,

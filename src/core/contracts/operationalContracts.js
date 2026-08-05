@@ -73,6 +73,13 @@ export const SOURCE_CLASSIFICATION = Object.freeze({
   UNKNOWN: "unknown",
 });
 
+export const LINE_ORIGIN = Object.freeze({
+  ATLAS_SELECTED: "atlas_selected",
+  USER_SELECTED: "user_selected",
+  PROVIDER_QUOTE: "provider_quote",
+  TRANSFERRED_CANDIDATE: "transferred_candidate",
+});
+
 export function confidenceLabel(score) {
   if (score >= 93) return "excepcional";
   if (score >= 85) return "muy_alta";
@@ -115,6 +122,7 @@ export function createOperationalAnalysisVersion(input = {}) {
     evidence: input.evidence || [],
     odds: input.odds || [],
     active_quote: input.activeQuote || null,
+    line_origin: Object.values(LINE_ORIGIN).includes(input.lineOrigin) ? input.lineOrigin : null,
     gemini_context: input.geminiContext || null,
     analysis_confidence: input.analysisConfidence || null,
     preliminary_probability: input.preliminaryProbability || null,

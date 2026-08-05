@@ -13,6 +13,7 @@ export function buildAnalysisVersion(input, { idFactory, now = () => new Date().
     evidence: input.evidence,
     odds: input.odds,
     activeQuote: input.activeQuote,
+    lineOrigin: input.lineOrigin,
     geminiContext: input.geminiContext,
     analysisConfidence: input.analysisConfidence,
     preliminaryProbability: input.preliminaryProbability,
@@ -29,7 +30,16 @@ function signature(item) {
 
 export function compareAnalysisVersions(previous, current) {
   if (!previous || !current || Number(previous.fixture_id) !== Number(current.fixture_id)) {
-    return { comparable: false, explanation: "Las versiones no pertenecen al mismo fixture." };
+    return {
+      contract: "AnalysisVersionDiff",
+      version: 1,
+      comparable: false,
+      previous_analysis_id: previous?.analysis_id || null,
+      current_analysis_id: current?.analysis_id || null,
+      fixture_id: current?.fixture_id || null,
+      engine_version: current?.engine_version || null,
+      explanation: "No hay una versión anterior comparable.",
+    };
   }
   const previousEvidence = new Map((previous.evidence || []).map((item) => [signature(item), item]));
   const currentEvidence = new Map((current.evidence || []).map((item) => [signature(item), item]));
@@ -43,6 +53,12 @@ export function compareAnalysisVersions(previous, current) {
   const currentDirector = current.director || {};
   const previousRisks = new Set(previous.director?.risks || []);
   const currentRisks = new Set(current.director?.risks || []);
+  const previousMissing = new Set(previous.director?.missing_data || []);
+  const currentMissing = new Set(current.director?.missing_data || []);
+  const previousGemini = new Set((previous.gemini_context?.selected_items || []).map(signature));
+  const currentGeminiItems = current.gemini_context?.selected_items || [];
+  const incorporatedGeminiItems = currentGeminiItems.filter((item) => !previousGemini.has(signature(item)));
+  const pair = (previousValue, currentValue) => ({ previous: previousValue ?? null, current: currentValue ?? null });
   const changes = {
     new_evidence: newEvidence,
     removed_or_stale_evidence: removedEvidence,
@@ -64,24 +80,33 @@ export function compareAnalysisVersions(previous, current) {
     risk_change: JSON.stringify(previous.director?.risks || []) !== JSON.stringify(current.director?.risks || []),
     suitability_change: previous.director?.market_suitability !== current.director?.market_suitability,
     verdict_change: previous.director?.verdict !== current.director?.verdict,
-    preliminary_probability: { previous: previous.preliminary_probability?.point_estimate ?? null, current: current.preliminary_probability?.point_estimate ?? null },
+    analysis_id: pair(previous.analysis_id, current.analysis_id),
+    analyzed_at: pair(previous.created_at, current.created_at),
+    phase: pair(previous.phase, current.phase),
+    preliminary_probability: pair(previous.preliminary_probability?.point_estimate, current.preliminary_probability?.point_estimate),
     uncertainty_interval: {
       previous: { low: previous.preliminary_probability?.uncertainty_low ?? null, high: previous.preliminary_probability?.uncertainty_high ?? null },
       current: { low: current.preliminary_probability?.uncertainty_low ?? null, high: current.preliminary_probability?.uncertainty_high ?? null },
     },
-    analysis_confidence: { previous: previous.analysis_confidence?.analysis_confidence_score ?? null, current: current.analysis_confidence?.analysis_confidence_score ?? null },
-    suitability: { previous: previous.director?.market_suitability || null, current: current.director?.market_suitability || null },
-    price_evaluation: { previous: previousDirector.price_assessment?.status || null, current: currentDirector.price_assessment?.status || null },
-    individual_eligibility: { previous: previousDirector.individual_eligibility || null, current: currentDirector.individual_eligibility || null },
-    parlay_eligibility: { previous: previousDirector.parlay_eligibility || null, current: currentDirector.parlay_eligibility || null },
-    verdict: { previous: previous.director?.verdict || null, current: current.director?.verdict || null },
-    line: { previous: previous.director?.line ?? null, current: current.director?.line ?? null },
-    odds: { previous: previousOdds, current: currentOdds },
-    active_quote: { previous: previousActiveQuote, current: currentActiveQuote },
-    gemini_items_incorporated: current.gemini_context?.selected_items || [],
+    analysis_confidence: pair(previous.analysis_confidence?.analysis_confidence_score, current.analysis_confidence?.analysis_confidence_score),
+    market: pair(previousDirector.market_evaluated?.label, currentDirector.market_evaluated?.label),
+    direction: pair(previousDirector.sports_verdict?.direction, currentDirector.sports_verdict?.direction),
+    suitability: pair(previous.director?.market_suitability, current.director?.market_suitability),
+    price_evaluation: pair(previousDirector.price_assessment?.status, currentDirector.price_assessment?.status),
+    individual_eligibility: pair(previousDirector.individual_eligibility, currentDirector.individual_eligibility),
+    parlay_eligibility: pair(previousDirector.parlay_eligibility, currentDirector.parlay_eligibility),
+    verdict: pair(previous.director?.verdict, current.director?.verdict),
+    line: pair(previous.director?.line, current.director?.line),
+    bookmaker: pair(previousActiveQuote?.bookmaker_name || previousDirector.bookmaker, currentActiveQuote?.bookmaker_name || currentDirector.bookmaker),
+    odds: pair(previousOdds, currentOdds),
+    implied_probability: pair(previousActiveQuote?.implied_probability ?? previousDirector.implied_probability, currentActiveQuote?.implied_probability ?? currentDirector.implied_probability),
+    active_quote: pair(previousActiveQuote, currentActiveQuote),
+    gemini_items_incorporated: incorporatedGeminiItems,
     new_risks: [...currentRisks].filter((item) => !previousRisks.has(item)),
     resolved_risks: [...previousRisks].filter((item) => !currentRisks.has(item)),
-    missing_data: current.director?.missing_data || [],
+    added_missing_data: [...currentMissing].filter((item) => !previousMissing.has(item)),
+    resolved_missing_data: [...previousMissing].filter((item) => !currentMissing.has(item)),
+    missing_data: [...currentMissing],
   };
   const explanations = [];
   if (newEvidence.length) explanations.push(`Se incorporaron ${newEvidence.length} elementos de evidencia.`);
@@ -95,7 +120,10 @@ export function compareAnalysisVersions(previous, current) {
   if (changes.gemini_change) explanations.push(`Se incorporaron ${changes.gemini_items_incorporated.length} elementos seleccionados del contexto manual de Gemini.`);
   if (changes.risk_change) explanations.push("Cambió el inventario de riesgos considerado.");
   if (changes.suitability_change || changes.verdict_change) explanations.push("DirectorAtlas actualizó el dictamen según los cambios observados.");
-  if (changes.gemini_change && !changes.price_evaluation_change && !changes.individual_eligibility_change && !changes.parlay_eligibility_change && !changes.verdict_change) explanations.push("El contexto complementario no fue suficiente para modificar el dictamen; no aporta evidencia suficiente para modificar la evaluación económica.");
+  const unchangedAfterContext = changes.gemini_change && !changes.probability_change && !changes.uncertainty_change && changes.confidence_change === 0 &&
+    !changes.line_change && !changes.odds_change && !changes.price_evaluation_change && !changes.individual_eligibility_change &&
+    !changes.parlay_eligibility_change && !changes.suitability_change && !changes.verdict_change;
+  if (unchangedAfterContext) explanations.push("El contexto fue incorporado, pero no aportó evidencia suficiente para modificar la probabilidad, la evaluación económica ni el dictamen. La evidencia no fue suficiente para modificar el dictamen ni la evaluación económica y no aporta evidencia suficiente para modificar el resultado.");
   if (!explanations.length) explanations.push("No hubo cambios materiales; el dictamen se mantiene.");
-  return { contract: "AnalysisVersionDiff", version: 1, comparable: true, previous_analysis_id: previous.analysis_id, current_analysis_id: current.analysis_id, changes, explanation: explanations.join(" ") };
+  return { contract: "AnalysisVersionDiff", version: 1, comparable: true, previous_analysis_id: previous.analysis_id, current_analysis_id: current.analysis_id, fixture_id: current.fixture_id, engine_version: current.engine_version, changes, explanation: explanations.join(" ") };
 }
