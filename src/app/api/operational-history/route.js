@@ -1,4 +1,4 @@
-import { getOperationalHistoryRepository } from "@/core/services/operationalAnalysisServer";
+import { getOperationalHistoryRepository, recordOperationalResult } from "@/core/services/operationalAnalysisServer";
 import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
 
 function filters(url) {
@@ -14,7 +14,29 @@ export async function GET(request) {
     return new Response(json, { headers: { "content-type": "application/json", "content-disposition": "attachment; filename=atlas-history.json" } });
   }
   const analyses = await repository.list(filters(url));
-  return Response.json({ status: "success", count: analyses.length, analyses });
+  return Response.json({ status: "success", count: analyses.length, analyses, calibration: await repository.calibration() });
+}
+
+export async function PATCH(request) {
+  if (!isLocalRequest(request)) return localAccessDeniedResponse();
+  let input;
+  try {
+    input = await request.json();
+  } catch {
+    return Response.json({ status: "unavailable", errorCode: "invalid_json" }, { status: 400 });
+  }
+  if (!input?.analysisId || !["manual_user_input", "api_football"].includes(input.source)) {
+    return Response.json({ status: "unavailable", errorCode: "invalid_result_request", message: "Indica una versión y un origen de resultado válidos." }, { status: 400 });
+  }
+  if (input.source === "manual_user_input" && !Number.isFinite(Number(input.actualTotal))) {
+    return Response.json({ status: "unavailable", errorCode: "invalid_actual_total", message: "El total real debe ser numérico." }, { status: 400 });
+  }
+  try {
+    const recorded = await recordOperationalResult({ analysisId: input.analysisId, actualTotal: input.actualTotal, source: input.source });
+    return Response.json({ status: "success", message: "Resultado registrado de forma auditable.", ...recorded });
+  } catch (error) {
+    return Response.json({ status: "unavailable", errorCode: error?.message || "result_update_failed", message: "El resultado todavía no está disponible." }, { status: 409 });
+  }
 }
 
 export async function DELETE(request) {

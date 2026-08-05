@@ -42,7 +42,14 @@ export function createFileOperationalHistory() {
         await persist(memory.events.at(-1));
         return true;
       },
+      async appendResult(result) {
+        await memory.appendResult(result);
+        await persist(memory.events.at(-1));
+        return result;
+      },
       list: (filters) => memory.list(filters),
+      listResults: () => memory.listResults(),
+      calibration: () => memory.calibration(),
       latestForFixture: (fixtureId) => memory.latestForFixture(fixtureId),
       exportJson: (filters) => memory.exportJson(filters),
       directory,

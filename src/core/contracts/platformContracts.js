@@ -19,7 +19,7 @@ export function createAuthorizedUserProfile(input = {}) {
 }
 
 export function createPersistencePort(adapter) {
-  for (const method of ["appendAnalysis", "appendDeletion", "list", "latestForFixture", "exportJson"]) {
+  for (const method of ["appendAnalysis", "appendDeletion", "appendResult", "list", "listResults", "calibration", "latestForFixture", "exportJson"]) {
     if (typeof adapter?.[method] !== "function") throw new TypeError(`PersistencePort requiere ${method}.`);
   }
   return Object.freeze({
@@ -28,7 +28,10 @@ export function createPersistencePort(adapter) {
     provider: adapter.provider || "server_local_append_only",
     appendAnalysis: adapter.appendAnalysis.bind(adapter),
     appendDeletion: adapter.appendDeletion.bind(adapter),
+    appendResult: adapter.appendResult.bind(adapter),
     list: adapter.list.bind(adapter),
+    listResults: adapter.listResults.bind(adapter),
+    calibration: adapter.calibration.bind(adapter),
     latestForFixture: adapter.latestForFixture.bind(adapter),
     exportJson: adapter.exportJson.bind(adapter),
   });
