@@ -868,7 +868,9 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   }
 
   function startNewSearch() {
-    const hasUnsavedData = Boolean(geminiText.trim() && !geminiContext) || Boolean(odds.trim() && !analysis?.selectedOdds);
+    const hasUnsavedData = Boolean(geminiText.trim() && !geminiContext) || Boolean(
+      odds.trim() && Number(odds) !== Number(analysis?.selectedOdds?.decimal_odds)
+    );
     if (hasUnsavedData && !window.confirm("Hay datos temporales sin incorporar. ¿Iniciar una nueva búsqueda?")) return;
     fixturesRequest.current?.abort();
     journeyRequest.current?.abort();
@@ -1004,6 +1006,10 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       return;
     }
     const requestedFixtureId = Number(selectedFixtureId);
+    const reportedDirection = selection.trim() || analysis?.director?.sports_verdict?.direction || "";
+    const reportedSelection = reportedDirection && line.trim()
+      ? `${reportedDirection} ${line.trim()}`
+      : reportedDirection;
     const controller = new AbortController();
     analysisRequest.current = controller;
     setAnalysisState(state("Construyendo perfiles y evaluando mercados…", "loading"));
@@ -1022,11 +1028,11 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           analysisMode,
           line: line.trim() || null,
           odds: odds.trim() || null,
-          selection: selection.trim() || null,
-          manualOdds: odds.trim() && selection.trim() ? {
+          selection: reportedSelection || null,
+          manualOdds: odds.trim() && reportedSelection ? {
             bookmaker: bookmaker.trim() || null,
             marketFamily: analysis?.director?.market_evaluated?.family || (analysisMode === "specific" ? marketId : null),
-            selection: selection.trim(),
+            selection: reportedSelection,
             line: line.trim() || null,
             decimalOdds: odds.trim(),
             consultedAt: oddsConsultedAt ? localDateTimeToUtcIso(oddsConsultedAt, defaultTimezone) : null,
@@ -1056,7 +1062,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   }
 
   async function reanalyzeWithManualOdds() {
-    if (!odds.trim() || !selection.trim()) return;
+    if (!odds.trim() || !line.trim() || !(selection.trim() || analysis?.director?.sports_verdict?.direction)) return;
     await runOperationalAnalysis({ reanalysis: true });
   }
 
@@ -1284,7 +1290,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               </select>
             </label> : <div><strong>Atlas comparará las cinco familias</strong><small>La cuota no participa en el ranking deportivo.</small></div>}
             <label><span>Línea encontrada (opcional)</span><input value={line} onChange={(event) => setLine(event.target.value)} placeholder={analysis?.director?.line ? `Sugerida: ${analysis.director.line}` : "Atlas sugerirá una línea"} /></label>
-            <label><span>Dirección</span><input value={selection} onChange={(event) => setSelection(event.target.value)} placeholder={analysis?.director?.selection || "Ej. Over 2.5"} /></label>
+            {analysis?.director ? <label><span>Mercado candidato</span><input readOnly value={analysis.director.market_evaluated?.label || ""} /></label> : null}
+            <label><span>Dirección {analysis?.director ? "(cambia solo si tu casa ofrece otra)" : ""}</span><select value={selection || analysis?.director?.sports_verdict?.direction || ""} onChange={(event) => setSelection(event.target.value)}><option value="">Atlas la seleccionará</option><option value="over">Más de</option><option value="under">Menos de</option></select></label>
             <label><span>Bookmaker manual</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Solo si reportas la cuota" /></label>
             <label><span>Cuota decimal (opcional)</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.85" /></label>
             <label><span>Hora de consulta de la cuota</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
@@ -1295,10 +1302,10 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
             <small>Esta elección no altera los datos deportivos ni la estimación.</small>
           </fieldset>
           <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId}>{analysisState.status === "loading" ? "Analizando partido…" : "6 · Analizar partido"}</button>
-          {analysis?.director ? <div className="p2-inline-actions"><button type="button" className="secondary-button" onClick={() => runOperationalAnalysis({ reanalysis: true })} disabled={analysisState.status === "loading"}>Repetir análisis</button><button type="button" className="primary-button" onClick={reanalyzeWithManualOdds} disabled={!odds.trim() || !selection.trim() || !line.trim() || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
+          {analysis?.director ? <div className="p2-inline-actions"><button type="button" className="secondary-button" onClick={() => runOperationalAnalysis({ reanalysis: true })} disabled={analysisState.status === "loading"}>Repetir análisis</button><button type="button" className="primary-button" onClick={reanalyzeWithManualOdds} disabled={!odds.trim() || !line.trim() || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
           <StatusNotice value={analysisState} />
           {analysis?.director ? <AnalysisResult key={`${analysis.selectedFixtureId}-${analysis.telemetry?.finishedAt || "result"}`} analysis={analysis} /> : null}
-          {analysis?.selectedOdds?.freshness === "stale" ? <div className="p2-stale-action"><p>La cotización anterior venció. Introduce arriba la casa, selección, línea, cuota y hora de consulta actuales.</p><button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!odds.trim() || !selection.trim() || analysisState.status === "loading"}>Guardar cuota actual y reanalizar</button></div> : null}
+          {analysis?.selectedOdds?.freshness === "stale" ? <div className="p2-stale-action"><p>La cotización anterior venció. Introduce arriba la casa, dirección, línea, cuota y hora de consulta actuales.</p><button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!odds.trim() || !line.trim() || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
           <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} status={geminiState} />
         </section>
       ) : <HistoryView timezone={defaultTimezone} />}
