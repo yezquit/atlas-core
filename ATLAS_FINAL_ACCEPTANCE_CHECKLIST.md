@@ -1,132 +1,138 @@
-# ATLAS — CHECKLIST FINAL DE ACEPTACIÓN OPERATIVA V1
+# ATLAS — CHECKLIST FINAL DE ACEPTACIÓN DEL MOTOR DE SELECCIÓN V1
 
 Fecha: 2026-08-05  
 Rama: `rescue/atlas-core-v0.2`  
-Zona operativa por defecto: `America/Bogota`
+Zona operativa: `America/Bogota`
 
 ## Convenciones
 
-- `[x]`: comprobado en esta corrección.
-- `[ ]`: prueba manual que debe repetirse con datos reales disponibles; no se simularon datos deportivos para marcarla como aprobada.
+- `[x]`: verificado automáticamente o en la comprobación real controlada.
+- `[ ]`: prueba manual pendiente; no se marca aprobada sin observación directa.
 
-## 1. Escritorio
+## 1. Modo general
 
-- [x] Los modos Explorar jornada, Analizar partido e Historial se muestran en una fila.
-- [x] La página no presenta desbordamiento horizontal a 1280 px.
-- [x] La fecha y los controles principales tienen etiquetas accesibles.
-- [x] No se detectaron errores ni advertencias de consola al cargar la página.
-- [ ] Ejecutar un análisis real con cobertura completa y confirmar visualmente el cuadro final con datos del proveedor.
-- [ ] Comprobar manualmente modo sencillo y modo experto con un expediente real reanalizado.
+- [x] Genera candidatos antes de consultar cuotas.
+- [x] Recorre las cinco familias cuando la muestra es compatible.
+- [x] Genera ranking deportivo sin cuota.
+- [x] Muestra candidato principal, alternativas y perfiles de línea.
+- [x] No usa orden de llegada ni primera línea del proveedor como ranking.
+- [ ] En escritorio, ejecutar otro fixture real con dos o más familias compatibles y revisar la explicación comparativa.
 
-## 2. Móvil
+## 2. Mercado específico y cambio de familia
 
-- [x] Revisión a 390 × 844 px sin desbordamiento horizontal.
-- [x] La navegación se apila y permanece legible.
-- [x] El selector de fecha cabe en el ancho disponible.
-- [x] Tarjetas, columnas del Director y acciones pasan a una sola columna.
-- [ ] Completar un análisis real en móvil y verificar teclado, scroll, foco y reanálisis de cuota.
+- [x] Goles nunca cambia silenciosamente a córners.
+- [x] Tarjetas nunca cambia silenciosamente a córners.
+- [x] Las cinco familias respetan el filtro específico en pruebas.
+- [x] Se muestran al menos dos alternativas cuando existen.
+- [ ] Cambiar manualmente entre las cinco familias en la UI y verificar el encabezado de cada resultado.
 
-## 3. Fecha y zona horaria
+## 3. Varias líneas, Over y Under
 
-- [x] `ATLAS_DEFAULT_TIMEZONE=America/Bogota` está documentada en `.env.example`.
-- [x] La fecha elegida genera el día local completo de 00:00:00.000 a 23:59:59.999.
-- [x] El intervalo local se convierte a UTC antes de la consulta.
-- [x] El proveedor recibe la zona horaria cuando el endpoint la admite.
-- [x] Los fixtures se filtran nuevamente por `local_calendar_date` después de normalizarse.
-- [x] Un kickoff `2026-08-05T01:20:00Z` pertenece al 4 de agosto en Bogotá y no al 5.
-- [x] Se conservan `kickoff_utc`, `kickoff_local`, `timezone` y `local_calendar_date`.
-- [x] La caché separa consultas por zona y fecha local; el contrato de caché cambió a versión 2.
-- [x] Explorar, Analizar e Historial usan la zona configurada.
+- [x] Goles, córners y tarjetas usan catálogos válidos.
+- [x] Remates y remates a puerta derivan medio puntos de su distribución.
+- [x] Cada línea evalúa Over y Under.
+- [x] Se descartan líneas absurdas o demasiado alejadas.
+- [x] 7.5 y 8.5 conservan probabilidades distintas.
+- [ ] Revisar en escritorio y móvil las alternativas más probable, mejor equilibrio y agresiva.
 
-## 4. Familias de mercado y probabilidad
+## 4. Sin cuota y cuota vencida
 
-- [x] Goles produce una estimación solo con muestra compatible.
-- [x] Remates totales produce una estimación solo con muestra compatible.
-- [x] Remates a puerta produce una estimación solo con muestra compatible.
-- [x] Tarjetas exige árbitro confirmado, cobertura verificada y muestra arbitral mínima.
-- [x] Córners produce una estimación solo con muestra compatible.
-- [x] La línea debe interpretarse como Over/Under exacto.
-- [x] La probabilidad no parte de 50% y no copia la confianza informativa.
-- [x] Muestra insuficiente, cobertura incompatible o contradicción crítica devuelven `unavailable`.
-- [x] Se muestran estimación puntual, intervalo, muestra efectiva, metodología, entradas y limitaciones.
-- [x] El modelo se identifica como `preliminary-market-v1` y `preliminary_unvalidated`.
-- [x] No se declara valor esperado ni se superan extremos injustificados.
-- [ ] Repetir cada familia con un fixture real cuya cobertura cumpla todos los mínimos.
+- [x] Sin cuota existe `sports_verdict`.
+- [x] Sin cuota el cuadro dice “Todavía no — falta evaluar la cuota”.
+- [x] Una cuota vencida no elimina el pronóstico.
+- [x] Una cuota vencida queda fuera de parlay.
+- [x] La verificación real mantuvo Over 2.5 con precio vencido.
+- [ ] Confirmar visualmente que casa, frescura y acción se entienden sin abrir el modo técnico.
 
-## 5. Cuotas
+## 5. Cuota manual distinta
 
-- [x] Probabilidad implícita y probabilidad deportiva están separadas.
-- [x] Una cuota vencida incluye antigüedad, límite, origen y motivo exacto.
-- [x] Una cuota vencida bloquea la consideración final y la elegibilidad para parlay.
-- [x] La entrada manual conserva casa, selección, línea, cuota y hora de consulta.
-- [x] La cuota manual permanece reportada por el usuario; no se promueve a verificada.
-- [x] “Guardar cuota actual y reanalizar” crea una nueva versión mediante el flujo existente.
-- [ ] Probar con una cuota real vencida devuelta por el proveedor y actualizarla manualmente desde la UI.
+- [x] Una línea válida distinta se incorpora y recalcula.
+- [x] El motor no reutiliza la probabilidad de la línea sugerida.
+- [x] Selecciones combinadas como `Draw/Over` no coinciden con un total simple.
+- [x] Existe el botón “Evaluar esta línea y cuota”.
+- [ ] Introducir una cuota manual actual para una línea distinta y revisar la nueva versión en Historial.
 
 ## 6. Gemini manual
 
-- [x] El flujo conserva copiar, pegar, validar, seleccionar y reanalizar.
-- [x] Cada elemento muestra resumen, categoría, fuente, dominio, fecha, procedencia, validación e impacto.
-- [x] Se muestran contadores de detectados, seleccionados, rechazados, rumores y limitaciones.
-- [x] Los rumores empiezan desmarcados.
-- [x] Los datos no encontrados se convierten en limitaciones.
-- [x] Si fallan las secciones, el parser crea elementos por párrafos sin verificarlos.
-- [x] Fixture, equipos, fecha, línea y cuota permanecen inmutables.
-- [x] El contexto seleccionado puede afectar confianza, riesgos, faltantes y aptitud.
-- [x] Gemini no proporciona directamente porcentajes deportivos.
-- [x] Si el dictamen no cambia, la diferencia lo explica expresamente.
-- [ ] Completar un ciclo manual con una respuesta real de Gemini y fuentes revisables.
+- [x] Mapea elementos a variables deportivas.
+- [x] Limita contexto `user_reported` a 0.15 desviaciones estándar acumuladas.
+- [x] Regenera distribución y ranking.
+- [x] Muestra mensaje de mantener, cambiar o no producir efecto.
+- [x] No usa Gemini API ni acepta su texto como probabilidad.
+- [ ] Completar un ciclo de pegar, validar, seleccionar y reanalizar desde la UI.
 
-## 7. Reanálisis temporal
+## 7. Dictamen temprano
 
-- [x] Todas las fases se traducen a español natural.
-- [x] DirectorAtlas indica próxima acción y momento de la siguiente revisión.
-- [x] La comparación conserva valores anteriores y actuales de probabilidad, confianza, aptitud, veredicto, línea y cuota.
-- [x] La comparación identifica contexto Gemini, riesgos nuevos, riesgos resueltos y faltantes.
-- [x] Cada reanálisis crea una versión inmutable.
-- [ ] Verificar manualmente las seis fases cerca de sus ventanas reales de kickoff.
+- [x] Existen estados temprano, provisional, actualizado y final prepartido.
+- [x] Alineaciones ausentes reducen cobertura, pero no bloquean por definición.
+- [x] Tarjetas puede quedar provisional y fuertemente limitada sin árbitro.
+- [ ] Repetir un expediente un día antes, tres horas antes y 60–30 minutos antes.
 
-## 8. Aptitud individual y parlay
+## 8. Nueva búsqueda y repetición
 
-- [x] El formulario permite Evaluación individual, Considerar para parlay o Ambos.
-- [x] La elección de uso no modifica los datos deportivos.
-- [x] DirectorAtlas muestra aptitud individual y elegibilidad para parlay por separado.
-- [x] Un candidato apto conserva selección, línea, cuota, timestamp, confianza, probabilidad, incertidumbre y riesgos.
-- [x] Historial construye parlays únicamente con candidatos guardados y elegibles.
-- [x] La política no inventa selecciones para completar combinaciones.
-- [x] Se controlan fixture repetido, línea crítica repetida y correlación.
-- [ ] Reunir seis candidatos reales independientes para probar los tres parlays sin fabricar picks.
+- [x] “Nueva búsqueda” limpia estado volátil.
+- [x] No elimina historial persistente.
+- [x] Solo confirma cuando hay datos temporales sin incorporar.
+- [x] “Repetir análisis” conserva configuración y crea otra versión.
+- [ ] Probar ambos botones después de escribir contexto Gemini no validado.
 
-## 9. Historial, resultados y calibración
+## 9. Explorar jornada
 
-- [x] El historial filtra por la fecha local del fixture.
-- [x] Puede registrarse un total real manual como hit, miss, void o unresolved.
-- [x] Puede solicitarse actualización desde API-FOOTBALL usando la integración existente.
-- [x] Los resultados se añaden al log append-only y no reescriben la predicción.
-- [x] Se calculan casos resueltos, hit rate, Brier, bandas, familia, competición y fase.
-- [x] No hay recalibración automática.
-- [x] El umbral documentado para una revisión manual de calibración es 200 predicciones resueltas.
-- [x] El modelo permanece preliminar aun cuando alcance el umbral; requiere validación humana posterior.
-- [ ] Registrar un resultado real finalizado desde API-FOOTBALL y contrastarlo manualmente.
+- [x] Usa candidatos del ranking nuevo.
+- [x] Muestra partido, mercado, línea, probabilidad, intervalo, score, precio y razón.
+- [x] Favorece diversidad solo cuando la diferencia es de cuatro puntos o menos.
+- [x] Conserva el límite configurable.
+- [ ] Ejecutar una jornada real con más de un fixture y abrir dos candidatos diferentes.
 
-## 10. DirectorAtlas y claridad
+## 10. Parlay
 
-- [x] DirectorAtlas es la única voz pública.
-- [x] El cuadro principal no está dentro de un acordeón.
-- [x] El cuadro usa texto, icono y contraste; no depende solo del color.
-- [x] Se muestran SÍ, SÍ CON CAUTELA, TODAVÍA NO o NO según la aptitud.
-- [x] El encabezado recibe foco y la página se desplaza suavemente al resultado.
-- [x] Se distingue “Primer dictamen generado” de “Dictamen actualizado”.
-- [x] El modo sencillo traduce estados; el modo experto conserva códigos y trazabilidad.
-- [x] Confianza y probabilidad muestran aclaraciones independientes.
+- [x] Exige candidato y versión del ranking.
+- [x] Exige línea exacta, cuota actual, incertidumbre y confianza.
+- [x] Mantiene la política de correlación.
+- [x] No usa cuotas vencidas ni inventa candidatos.
+- [ ] Reunir seis candidatos reales elegibles antes de probar la construcción completa.
 
-## 11. Validación automática final
+## 11. DirectorAtlas
+
+- [x] Continúa como única voz pública.
+- [x] Separa dictamen deportivo de evaluación de precio.
+- [x] Muestra Sí, Todavía no, Cautela, No e Información insuficiente.
+- [x] La explicación simple y “qué podría cambiarlo” tienen máximo tres elementos.
+- [x] Los códigos internos permanecen fuera del modo sencillo.
+- [x] El análisis técnico completo sigue disponible.
+
+## 12. Escritorio
+
+- [x] El CSS incluye resumen principal en cuadrícula y tonos independientes.
+- [x] El resultado no depende solo del color: usa icono y texto.
+- [ ] Revisar a 1280 px el modo general, específico, precio pendiente y precio vencido.
+- [ ] Confirmar foco, scroll y ausencia de desbordamiento horizontal en navegador real.
+
+## 13. Móvil
+
+- [x] El resumen, filtros y acciones pasan a una columna bajo 640 px.
+- [x] Nueva búsqueda permanece disponible en navegación apilada.
+- [ ] Revisar a 390 × 844 px selección, alternativas, formulario manual y Gemini.
+- [ ] Confirmar teclado, foco, scroll y acciones en un dispositivo real.
+
+## 14. Verificación real controlada
+
+- [x] Un fixture: Santa Fe vs Chico, ID `1549722`.
+- [x] Modo general y modo específico de goles.
+- [x] Over/Under y seis líneas de goles generadas.
+- [x] Ganador Over 2.5; primera línea del proveedor 1.5.
+- [x] Pronóstico conservado con cuota vencida y alineaciones no disponibles.
+- [x] 74 solicitudes externas totales entre descubrimiento y confirmación; límite 80.
+- [x] Sin Gemini API, sin barrido de 17 ligas y sin declarar validación deportiva.
+
+## 15. Validación automática final
 
 - [x] `npm run lint`
-- [x] `npm test` — 178 aprobadas, 0 fallidas.
+- [x] `npm test` — 228 aprobadas, 0 fallidas.
+- [x] Nueva batería — 50 aprobadas, 0 fallidas.
 - [x] `npm run build`
 - [x] `npm audit --omit=dev` — 0 vulnerabilidades.
 - [x] `git diff --check`
-- [x] Rama confirmada: `rescue/atlas-core-v0.2`.
+- [x] Rama `rescue/atlas-core-v0.2`.
 - [x] Sin merge a `main`.
 
