@@ -4391,7 +4391,65 @@ body[data-atlas-view="technical"] .view-mode-buttons {
 }
 
 .p2-market-entry {
-  grid-template-columns: 1.2fr 1fr 1fr;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 22px 0;
+}
+
+.p2-entry-panel,
+.p2-transferred-candidate,
+.p2-verdict-block,
+.p2-market-comparison {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(4, 10, 20, 0.62);
+}
+
+.p2-entry-panel label {
+  display: block;
+  margin-top: 14px;
+}
+
+.p2-entry-panel .eyebrow,
+.p2-verdict-block .eyebrow,
+.p2-transferred-candidate .eyebrow {
+  margin-bottom: 8px;
+}
+
+.p2-family-copy,
+.p2-family-copy small {
+  display: block;
+}
+
+.p2-family-copy small,
+.p2-sample-note {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.p2-market-comparison {
+  margin: 14px 0;
+}
+
+.p2-market-comparison h4 {
+  margin: 0;
+}
+
+.p2-market-comparison details ul {
+  padding-left: 20px;
+}
+
+.p2-transferred-candidate {
+  margin: 20px 0;
+  border-color: rgba(77, 163, 255, 0.45);
+}
+
+.p2-verdict-split {
+  margin: 16px 0;
 }
 
 .p2-primary {
@@ -4410,6 +4468,35 @@ body[data-atlas-view="technical"] .view-mode-buttons {
 
 .p2-status strong {
   color: var(--accent);
+}
+
+.p2-status-success {
+  border-color: rgba(74, 222, 128, 0.42);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.p2-status-success strong {
+  color: #86efac;
+}
+
+.p2-status-warning {
+  border-color: rgba(250, 204, 21, 0.55);
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.p2-status-warning strong {
+  color: #fde68a;
+}
+
+.p2-status-neutral,
+.p2-status-empty {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.07);
+}
+
+.p2-status-neutral strong,
+.p2-status-empty strong {
+  color: #cbd5e1;
 }
 
 .p2-status-blocked,

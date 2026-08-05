@@ -25,6 +25,68 @@ const PROFILE_FIXTURE_LIMIT = 10;
 const REFEREE_FIXTURE_LIMIT = 10;
 const SUPPORTED_MARKET_IDS = new Set(SPORTS_MARKETS.map((market) => market.id));
 
+function lowerFamilyReason(candidate, winner) {
+  if (!candidate) return "Sin candidatos válidos.";
+  const candidateWidth = Number(candidate.uncertainty_high) - Number(candidate.uncertainty_low);
+  const winnerWidth = Number(winner.uncertainty_high) - Number(winner.uncertainty_low);
+  if ((candidate.sample_size_effective || 0) < 5) return "Muestra insuficiente.";
+  if (candidateWidth > winnerWidth) return "Incertidumbre mayor.";
+  if (candidate.preliminary_probability < winner.preliminary_probability) return "Probabilidad menor.";
+  return "Puntaje deportivo inferior.";
+}
+
+export function buildJourneyFamilyComparison(selection, marketAssessments = [], selectedCandidate = null) {
+  const winner = selectedCandidate || selection?.primary || null;
+  const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
+  const bestByFamily = new Map();
+  for (const candidate of selection?.ranked_candidates || []) {
+    if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
+  }
+  const families = (selection?.generated || []).map((generated) => {
+    const candidate = bestByFamily.get(generated.market_family) || null;
+    const assessment = assessmentByFamily.get(generated.market_family) || null;
+    let reason = candidate && winner ? lowerFamilyReason(candidate, winner) : "Sin candidatos válidos.";
+    if (!candidate && generated.reason === "insufficient_distribution_data") reason = "Muestra insuficiente.";
+    else if (!candidate && (assessment?.available_evidence?.length || 0) < (assessment?.data_requirements?.length || 0) * 0.7) reason = "Cobertura insuficiente.";
+    else if (!candidate && (assessment?.risk_flags || []).some((item) => /crític|critical|depend/i.test(item))) reason = "Dependencia crítica.";
+    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mayor sports_score del ranking general.";
+    return {
+      market_family: generated.market_family,
+      market_label: assessment?.market_label || generated.market_family,
+      best_score: candidate?.sports_score ?? null,
+      best_rank: candidate?.rank ?? null,
+      reason,
+    };
+  });
+  return {
+    general_rank: winner?.rank ?? null,
+    sports_score: winner?.sports_score ?? null,
+    families_compared: families.map((item) => item.market_label),
+    best_by_family: families,
+    why_market_won: winner
+      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} ganó por sports_score (${winner.sports_score}/100), no por el orden inicial.`
+      : "No hubo un candidato ganador.",
+  };
+}
+
+export function deriveJourneyOutcome({ fixturesFound = 0, candidates = [], telemetry = {} } = {}) {
+  if (telemetry.budgetExhausted && candidates.length === 0) {
+    return { status: DATA_LOAD_STATUS.BLOCKED, displayTone: "blocked", overallStatus: "blocked", message: "Análisis bloqueado por un límite crítico antes de producir candidatos." };
+  }
+  if (candidates.length === 0) {
+    return {
+      status: DATA_LOAD_STATUS.EMPTY,
+      displayTone: "neutral",
+      overallStatus: "no_candidates",
+      message: fixturesFound === 0 ? "No se encontraron partidos en las competiciones seleccionadas." : "No se encontraron candidatos con respaldo suficiente",
+    };
+  }
+  const priceComplete = candidates.every((candidate) => ["verified_current", "user_reported_current"].includes(candidate.priceStatus));
+  return priceComplete
+    ? { status: DATA_LOAD_STATUS.SUCCESS, displayTone: "success", overallStatus: "completed", message: "Análisis de jornada completado" }
+    : { status: DATA_LOAD_STATUS.SUCCESS, displayTone: "warning", overallStatus: "candidates_pending_price", message: "Candidatos deportivos encontrados — evaluación de precio pendiente" };
+}
+
 function dateShift(date, days) {
   const value = new Date(`${date}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
@@ -383,11 +445,15 @@ export async function scanSportsJourney(input, gateway) {
     for (const candidate of selection.ranked_candidates) {
       if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
     }
-    return [...bestByFamily.values()].map((candidate) => ({ analysis, candidate }));
+    return [...bestByFamily.values()].map((candidate) => ({
+      analysis,
+      candidate,
+      comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
+    }));
   });
   const maximumCandidates = Math.max(1, Math.min(10, Number(input.maximumCandidates) || 5));
   const highlighted = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates)
-    .map(({ analysis, candidate }) => ({
+    .map(({ analysis, candidate, comparison }) => ({
       competition: analysis.competition.localName,
       competitionKey: analysis.competition.key,
       season: analysis.fixture.competition.season,
@@ -399,6 +465,7 @@ export async function scanSportsJourney(input, gateway) {
       localCalendarDate: analysis.fixture.date.local_calendar_date,
       market: analysis.marketAssessments.find((item) => item.market_family === candidate.market_family)?.market_label || candidate.market_family,
       marketId: candidate.market_family,
+      analysisMode: "specific",
       selection: candidate.selection,
       direction: candidate.direction,
       line: candidate.line,
@@ -411,6 +478,27 @@ export async function scanSportsJourney(input, gateway) {
       displayStatus: candidate.overall_status,
       technicalSupport: candidate.sports_score,
       sampleSize: candidate.sample_size_effective,
+      methodologyVersion: candidate.methodology_version,
+      generalRank: candidate.rank,
+      sportsScore: candidate.sports_score,
+      familiesCompared: comparison.families_compared,
+      familyComparison: comparison.best_by_family,
+      whyMarketWon: comparison.why_market_won,
+      transferredCandidate: {
+        fixture_id: analysis.fixture.fixtureId,
+        analysis_mode: "specific",
+        market_family: candidate.market_family,
+        direction: candidate.direction,
+        line: candidate.line,
+        selection: candidate.selection,
+        preliminary_probability: candidate.preliminary_probability,
+        uncertainty: { low: candidate.uncertainty_low, high: candidate.uncertainty_high },
+        sports_score: candidate.sports_score,
+        rank: candidate.rank,
+        reasons: candidate.rank_reason,
+        risks: candidate.limitations.slice(0, 3),
+        methodology_version: candidate.methodology_version,
+      },
       reasons: candidate.rank_reason,
       risks: candidate.limitations.slice(0, 3),
       missingData: candidate.price_status === "unavailable" ? ["Cuota actual para la línea exacta"] : [],
@@ -418,19 +506,14 @@ export async function scanSportsJourney(input, gateway) {
       rankReason: candidate.rank_reason.join(" "),
     }));
   const telemetry = gateway.runtime.snapshot();
+  const outcome = deriveJourneyOutcome({ fixturesFound: fixtures.length, candidates: highlighted, telemetry });
   return {
     contract: "JourneyExplorationResult",
     version: 2,
-    status:
-      telemetry.budgetExhausted
-        ? DATA_LOAD_STATUS.BLOCKED
-        : fixtures.length === 0
-          ? DATA_LOAD_STATUS.EMPTY
-          : DATA_LOAD_STATUS.SUCCESS,
-    message:
-      fixtures.length === 0
-        ? "No se encontraron partidos en las competiciones seleccionadas."
-        : `${highlighted.length} candidato(s) destacados tras revisar la jornada.`,
+    status: outcome.status,
+    displayTone: outcome.displayTone,
+    overallStatus: outcome.overallStatus,
+    message: outcome.message,
     date: input.date,
     timezone: normalizeTimeZone(input.timezone),
     competitionsQueried: competitions.map((item) => item.localName),

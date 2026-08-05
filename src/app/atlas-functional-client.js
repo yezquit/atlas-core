@@ -27,6 +27,8 @@ const STATUS_LABELS = Object.freeze({
   candidate_for_market_review: "Candidato para revisar línea y cuota",
   viable_with_caution: "Viable con cautela",
   blocked: "Análisis bloqueado",
+  warning: "Evaluación pendiente",
+  neutral: "Sin candidatos",
   verified: "Verificado",
   partial: "Cobertura parcial",
   insufficient_sample: "Muestra insuficiente",
@@ -157,6 +159,11 @@ function formatValue(value) {
   return displayStatus(value);
 }
 
+function formatEffectiveSample(value, maximumFractionDigits = 1) {
+  if (!Number.isFinite(Number(value))) return "No disponible";
+  return new Intl.NumberFormat("es-CO", { maximumFractionDigits }).format(Number(value));
+}
+
 function seasonFor(competition, date) {
   const year = Number(date?.slice(0, 4));
   if (!Number.isInteger(year)) return competition?.currentSeason || "";
@@ -170,9 +177,10 @@ function seasonFor(competition, date) {
 
 function StatusNotice({ value }) {
   if (!value?.message) return null;
+  const visualStatus = value.tone || safeStatus(value.status);
   return (
-    <div className={`p2-status p2-status-${safeStatus(value.status)}`} role="status">
-      <strong>{displayStatus(value.status)}</strong>
+    <div className={`p2-status p2-status-${visualStatus}`} role="status">
+      <strong>{displayStatus(visualStatus)}</strong>
       <span>{value.message}</span>
       {value.errorCode ? <small>Referencia: {value.errorCode}</small> : null}
     </div>
@@ -339,6 +347,29 @@ function DirectorResult({ analysis, headingRef }) {
         <div><small>Confianza del análisis</small><strong>{director.analysis_confidence_score || 0}%</strong><span>No es probabilidad de acierto.</span></div>
         <div><small>Precio</small><strong>{displayStatus(price?.status || director.odds_freshness)}</strong><span>{price?.bookmaker || "Casa pendiente"}</span></div>
         <div><small>Parlay</small><strong>{displayStatus(director.parlay_eligibility)}</strong></div>
+      </div>
+      <div className="p2-split p2-verdict-split">
+        <section className="p2-verdict-block">
+          <p className="eyebrow">PRONÓSTICO DEPORTIVO</p>
+          <DefinitionGrid entries={[
+            ["Mercado", director.market_evaluated?.label],
+            ["Selección y línea", sports?.selection || director.selection],
+            ["Probabilidad preliminar", percentage(sports?.preliminary_probability)],
+            ["Incertidumbre", `${percentage(sports?.uncertainty_low)}–${percentage(sports?.uncertainty_high)}`],
+            ["Muestra efectiva ponderada", formatEffectiveSample(director.probability_effective_sample, 1)],
+          ]} />
+          <p className="p2-sample-note">Las submuestras pueden solaparse y no equivalen a partidos independientes.</p>
+        </section>
+        <section className="p2-verdict-block">
+          <p className="eyebrow">EVALUACIÓN DE PRECIO</p>
+          <DefinitionGrid entries={[
+            ["Estado", displayStatus(price?.status)],
+            ["Casa", price?.bookmaker],
+            ["Cuota activa", price?.decimal_odds],
+            ["Probabilidad implícita", price?.implied_probability === null || price?.implied_probability === undefined ? null : `${(price.implied_probability * 100).toFixed(2)}%`],
+          ]} />
+          <p>{price?.message}</p>
+        </section>
       </div>
       <DefinitionGrid entries={[
           ["Partido", director.fixture ? `${director.fixture.home_team} vs ${director.fixture.away_team}` : null],
@@ -526,6 +557,8 @@ function ExpertResult({ analysis }) {
           ["Motivo del vencimiento", analysis.selectedOdds?.stale_reason],
         ]} />
         <details className="p2-source-details"><summary>Ver cuotas normalizadas</summary><pre>{JSON.stringify(analysis.odds?.quotes || [], null, 2)}</pre></details>
+        <ListBlock title="Advertencias de normalización" items={analysis.odds?.warnings} />
+        <details className="p2-source-details"><summary>Ver objetos descartados y motivo</summary><pre>{JSON.stringify(analysis.odds?.discarded || [], null, 2)}</pre></details>
       </Accordion>
 
       <Accordion id="expert-context" title="Alineaciones, lesiones y contexto" summary="Cobertura prepartido trazable">
@@ -555,10 +588,11 @@ function ExpertResult({ analysis }) {
           ["Estimación", percentage(analysis.preliminaryProbability?.point_estimate)],
           ["Límite inferior", percentage(analysis.preliminaryProbability?.uncertainty_low)],
           ["Límite superior", percentage(analysis.preliminaryProbability?.uncertainty_high)],
-          ["Muestra efectiva", analysis.preliminaryProbability?.sample_size_effective],
+          ["Muestra efectiva ponderada (valor técnico)", formatEffectiveSample(analysis.preliminaryProbability?.sample_size_effective, 3)],
           ["Metodología", analysis.preliminaryProbability?.methodology_version],
           ["Validación", "Modelo preliminar, aún no validado con suficiente historial"],
         ]} />
+        <p className="p2-sample-note">Las submuestras pueden solaparse y no equivalen a partidos independientes. El valor original se conserva en la versión técnica.</p>
         <ListBlock title="Limitaciones" items={analysis.preliminaryProbability?.limitations} />
         <details className="p2-source-details"><summary>Ver fórmula, pesos y submuestras</summary><pre>{JSON.stringify({ weights: analysis.preliminaryProbability?.weights, inputs_used: analysis.preliminaryProbability?.inputs_used, shrinkage_strength: analysis.preliminaryProbability?.shrinkage_strength }, null, 2)}</pre></details>
       </Accordion>
@@ -832,6 +866,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   const [selectedFixtureId, setSelectedFixtureId] = useState("");
   const [marketId, setMarketId] = useState("open");
   const [analysisMode, setAnalysisMode] = useState("general");
+  const [transferredCandidate, setTransferredCandidate] = useState(null);
   const [line, setLine] = useState("");
   const [odds, setOdds] = useState("");
   const [bookmaker, setBookmaker] = useState("");
@@ -850,6 +885,22 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   const selectedFixture = fixtures.find(
     (fixture) => String(fixture.fixtureId) === selectedFixtureId
   ) || null;
+  const manualQuoteReady = Boolean(
+    bookmaker.trim() &&
+    line.trim() &&
+    odds.trim() &&
+    Number(odds.replace(",", ".")) > 1 &&
+    oddsConsultedAt &&
+    (selection.trim() || analysis?.director?.sports_verdict?.direction || transferredCandidate?.direction)
+  );
+
+  function clearTemporaryQuote() {
+    setLine("");
+    setOdds("");
+    setBookmaker("");
+    setSelection("");
+    setOddsConsultedAt("");
+  }
 
   function invalidateJourney(message = "Los filtros cambiaron. Vuelve a escanear la jornada.") {
     journeyRequest.current?.abort();
@@ -885,13 +936,10 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     setAnalysis(null);
     setAnalysisState(state("Selecciona un partido; Atlas nunca ejecuta el análisis automáticamente."));
     setAnalysisMode("general");
+    setTransferredCandidate(null);
     setJourneyAnalysisMode("general");
     setMarketId("open");
-    setLine("");
-    setOdds("");
-    setBookmaker("");
-    setSelection("");
-    setOddsConsultedAt("");
+    clearTemporaryQuote();
     setGeminiText("");
     setGeminiContext(null);
     setSelectedGeminiIds([]);
@@ -905,6 +953,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     setSeason(String(seasonFor(competition, value)));
     setFixtures([]);
     setFixturesState(state("Carga los partidos para la nueva fecha."));
+    setTransferredCandidate(null);
+    clearTemporaryQuote();
     invalidateJourney();
     invalidateAnalysis(undefined, true);
   }
@@ -951,7 +1001,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       const result = await response.json();
       if (controller.signal.aborted) return;
       setJourney(result);
-      setJourneyState(state(result?.message || "No fue posible interpretar el resultado.", safeStatus(result?.status), result?.errorCode));
+      setJourneyState({ ...state(result?.message || "No fue posible interpretar el resultado.", safeStatus(result?.status), result?.errorCode), tone: result?.displayTone });
     } catch (error) {
       if (error?.name === "AbortError") return;
       setJourneyState(state("No fue posible completar el escaneo.", "provider_error", "client_journey_failed"));
@@ -965,12 +1015,16 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     setSeason(String(seasonFor(competition, date)));
     setFixtures([]);
     setFixturesState(state("Carga los partidos de la nueva competición."));
+    setTransferredCandidate(null);
+    clearTemporaryQuote();
     invalidateAnalysis(undefined, true);
   }
 
   async function loadFixtures() {
     fixturesRequest.current?.abort();
     setFixtures([]);
+    setTransferredCandidate(null);
+    clearTemporaryQuote();
     invalidateAnalysis("Selecciona un partido después de cargar la lista.", true);
     if (!date || !competitionKey || !season) {
       setFixturesState(state("Fecha, competición y temporada son obligatorias."));
@@ -994,22 +1048,27 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   }
 
   function chooseFixture(fixtureId) {
+    setTransferredCandidate(null);
+    clearTemporaryQuote();
     setSelectedFixtureId(String(fixtureId));
     invalidateAnalysis(`Partido seleccionado. Pulsa “Analizar partido” para continuar.`);
   }
 
   async function runOperationalAnalysis({ reanalysis = false } = {}) {
     analysisRequest.current?.abort();
+    const currentAnalysis = analysis;
     setAnalysis(null);
     if (!selectedFixture || !selectedFixtureId) {
       setAnalysisState(state("Selecciona un partido válido de la lista."));
       return;
     }
     const requestedFixtureId = Number(selectedFixtureId);
-    const reportedDirection = selection.trim() || analysis?.director?.sports_verdict?.direction || "";
+    const reportedDirection = selection.trim() || currentAnalysis?.director?.sports_verdict?.direction || transferredCandidate?.direction || "";
     const reportedSelection = reportedDirection && line.trim()
-      ? `${reportedDirection} ${line.trim()}`
+      ? `${reportedDirection === "under" ? "Under" : "Over"} ${line.trim()}`
       : reportedDirection;
+    const manualMarketFamily = transferredCandidate?.market_family || currentAnalysis?.director?.market_evaluated?.family || (analysisMode === "specific" ? marketId : null);
+    const consultedAt = oddsConsultedAt ? localDateTimeToUtcIso(oddsConsultedAt, defaultTimezone) : null;
     const controller = new AbortController();
     analysisRequest.current = controller;
     setAnalysisState(state("Construyendo perfiles y evaluando mercados…", "loading"));
@@ -1029,14 +1088,18 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           line: line.trim() || null,
           odds: odds.trim() || null,
           selection: reportedSelection || null,
-          manualOdds: odds.trim() && reportedSelection ? {
-            bookmaker: bookmaker.trim() || null,
-            marketFamily: analysis?.director?.market_evaluated?.family || (analysisMode === "specific" ? marketId : null),
+          manualOdds: manualQuoteReady ? {
+            bookmaker: bookmaker.trim(),
+            marketFamily: manualMarketFamily,
+            direction: reportedDirection,
             selection: reportedSelection,
-            line: line.trim() || null,
+            line: line.trim(),
             decimalOdds: odds.trim(),
-            consultedAt: oddsConsultedAt ? localDateTimeToUtcIso(oddsConsultedAt, defaultTimezone) : null,
+            consultedAt,
+            timezone: defaultTimezone,
+            analysisVersion: currentAnalysis?.analysisVersion?.analysis_id || "initial",
           } : null,
+          transferredCandidate,
           intendedUse,
           geminiContext: reanalysis ? geminiContext : null,
           selectedGeminiItemIds: reanalysis ? selectedGeminiIds : [],
@@ -1047,6 +1110,10 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       if (controller.signal.aborted) return;
       if (Number(result?.selectedFixtureId) !== requestedFixtureId) {
         setAnalysisState(state("Atlas rechazó una respuesta que no conservó el fixture seleccionado.", "blocked", "fixture_id_changed"));
+        return;
+      }
+      if (transferredCandidate && result?.marketSelection?.primary?.market_family !== transferredCandidate.market_family) {
+        setAnalysisState(state("Atlas rechazó un resultado que cambió la familia del candidato transferido.", "blocked", "transferred_candidate_changed"));
         return;
       }
       setAnalysis(result);
@@ -1062,7 +1129,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   }
 
   async function reanalyzeWithManualOdds() {
-    if (!odds.trim() || !line.trim() || !(selection.trim() || analysis?.director?.sports_verdict?.direction)) return;
+    if (!manualQuoteReady) return;
     await runOperationalAnalysis({ reanalysis: true });
   }
 
@@ -1106,17 +1173,39 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     setDate(candidate.localCalendarDate || candidate.kickoffLocal?.slice(0, 10) || date);
     setCompetitionKey(candidate.competitionKey);
     setSeason(String(candidate.season || seasonFor(competition, candidate.kickoff)));
-    setMarketId(candidate.marketId || "open");
+    const transferred = candidate.transferredCandidate || {
+      fixture_id: candidate.fixtureId,
+      analysis_mode: "specific",
+      market_family: candidate.marketId,
+      direction: candidate.direction,
+      line: candidate.line,
+      selection: candidate.selection,
+      preliminary_probability: candidate.probability,
+      uncertainty: { low: candidate.uncertaintyLow, high: candidate.uncertaintyHigh },
+      sports_score: candidate.sportsScore ?? candidate.technicalSupport,
+      rank: candidate.generalRank,
+      reasons: candidate.reasons,
+      risks: candidate.risks,
+      methodology_version: candidate.methodologyVersion,
+    };
+    setTransferredCandidate(transferred);
+    setAnalysisMode("specific");
+    setMarketId(transferred.market_family);
+    setLine(String(transferred.line));
+    setSelection(transferred.direction);
+    setOdds("");
+    setBookmaker("");
+    setOddsConsultedAt("");
     setFixtures([{
       fixtureId: candidate.fixtureId,
       label: candidate.fixture,
-      date: { utc: candidate.kickoff },
+      date: { utc: candidate.kickoff, kickoff_utc: candidate.kickoff, timezone: candidate.timezone || defaultTimezone },
       status: { long: "Candidato de la jornada" },
     }]);
     setSelectedFixtureId(String(candidate.fixtureId));
     setFixturesState(state("Candidato transferido. El fixture ID permanece inmutable.", "success"));
     setAnalysis(null);
-    setAnalysisState(state("Revisa la selección y pulsa “Analizar partido”."));
+    setAnalysisState(state("Candidato completo transferido. Continúa con este candidato para crear el análisis individual."));
   }
 
   return (
@@ -1220,8 +1309,19 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                       ["Estado de cuota", displayStatus(candidate.priceStatus)],
                       ["Estado", candidate.displayStatus],
                       ["Respaldo técnico", `${candidate.technicalSupport}/100`],
-                      ["Tamaño de muestra", candidate.sampleSize],
+                      ["Muestra efectiva ponderada", formatEffectiveSample(candidate.sampleSize, 1)],
                     ]} />
+                    <p className="p2-sample-note">Las submuestras pueden solaparse y no equivalen a partidos independientes.</p>
+                    <section className="p2-market-comparison" aria-label="Por qué ganó este mercado">
+                      <h4>Por qué ganó este mercado</h4>
+                      <DefinitionGrid entries={[
+                        ["Posición en el ranking general", candidate.generalRank],
+                        ["Sports score", `${candidate.sportsScore ?? candidate.technicalSupport}/100`],
+                        ["Familias comparadas", candidate.familiesCompared?.join(", ")],
+                      ]} />
+                      <p>{candidate.whyMarketWon}</p>
+                      <details><summary>Ver comparación de mercados</summary><ul>{(candidate.familyComparison || []).map((family) => <li key={family.market_family}><strong>{family.market_label}</strong>: {family.best_score === null ? "sin puntaje" : `${family.best_score}/100`} · {family.reason}</li>)}</ul></details>
+                    </section>
                     <ListBlock title="Razones" items={candidate.reasons} />
                     <ListBlock title="Riesgos" items={candidate.risks} />
                     <ListBlock title="Datos faltantes" items={candidate.missingData} />
@@ -1244,10 +1344,26 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           <ol className="p2-flow-steps" aria-label="Flujo del análisis">
             <li>Datos del partido</li><li>Datos deportivos</li><li>Mercado y cuota</li><li>Investigación Gemini</li><li>Validación del contexto</li><li>Reanálisis</li><li>Dictamen final</li>
           </ol>
+          {transferredCandidate ? (
+            <section className="p2-transferred-candidate" aria-labelledby="transferred-candidate-title">
+              <p className="eyebrow">Candidato transferido desde la jornada</p>
+              <h3 id="transferred-candidate-title">{markets.find((item) => item.id === transferredCandidate.market_family)?.label || transferredCandidate.market_family} · {transferredCandidate.direction === "over" ? "Más de" : "Menos de"} {transferredCandidate.line}</h3>
+              <DefinitionGrid entries={[
+                ["Probabilidad preliminar", percentage(transferredCandidate.preliminary_probability)],
+                ["Incertidumbre", `${percentage(transferredCandidate.uncertainty?.low)}–${percentage(transferredCandidate.uncertainty?.high)}`],
+                ["Respaldo deportivo", `${transferredCandidate.sports_score}/100`],
+                ["Posición general", transferredCandidate.rank],
+              ]} />
+              <div className="p2-inline-actions">
+                <button type="button" className="primary-button" onClick={() => runOperationalAnalysis({ reanalysis: false })} disabled={analysisState.status === "loading"}>Continuar con este candidato</button>
+                <button type="button" className="secondary-button" onClick={() => { setMainMode("journey"); setTransferredCandidate(null); clearTemporaryQuote(); }}>Volver a comparar todas las opciones</button>
+              </div>
+            </section>
+          ) : null}
           <fieldset className="p2-market-filters">
             <legend>Modo de análisis</legend>
-            <label><input type="radio" name="match-analysis-mode" checked={analysisMode === "general"} onChange={() => { setAnalysisMode("general"); setMarketId("open"); invalidateAnalysis(); }} />Buscar mejor opción general</label>
-            <label><input type="radio" name="match-analysis-mode" checked={analysisMode === "specific"} onChange={() => { setAnalysisMode("specific"); setMarketId(markets[0]?.id || "goals"); invalidateAnalysis(); }} />Analizar un mercado específico</label>
+            <label><input type="radio" name="match-analysis-mode" disabled={Boolean(transferredCandidate)} checked={analysisMode === "general"} onChange={() => { setAnalysisMode("general"); setMarketId("open"); invalidateAnalysis(); }} />Buscar mejor opción general</label>
+            <label><input type="radio" name="match-analysis-mode" disabled={Boolean(transferredCandidate)} checked={analysisMode === "specific"} onChange={() => { setAnalysisMode("specific"); setMarketId(markets[0]?.id || "goals"); invalidateAnalysis(); }} />Analizar un mercado específico</label>
           </fieldset>
 
           <div className="p2-filter-grid p2-match-filters">
@@ -1282,30 +1398,38 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
             </fieldset>
           ) : null}
 
-          <div className="p2-filter-grid p2-market-entry">
-            {analysisMode === "specific" ? <label>
-              <span>5 · Mercado</span>
-              <select value={marketId} onChange={(event) => { setMarketId(event.target.value); invalidateAnalysis(); }}>
-                {markets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
-              </select>
-            </label> : <div><strong>Atlas comparará las cinco familias</strong><small>La cuota no participa en el ranking deportivo.</small></div>}
-            <label><span>Línea encontrada (opcional)</span><input value={line} onChange={(event) => setLine(event.target.value)} placeholder={analysis?.director?.line ? `Sugerida: ${analysis.director.line}` : "Atlas sugerirá una línea"} /></label>
-            {analysis?.director ? <label><span>Mercado candidato</span><input readOnly value={analysis.director.market_evaluated?.label || ""} /></label> : null}
-            <label><span>Dirección {analysis?.director ? "(cambia solo si tu casa ofrece otra)" : ""}</span><select value={selection || analysis?.director?.sports_verdict?.direction || ""} onChange={(event) => setSelection(event.target.value)}><option value="">Atlas la seleccionará</option><option value="over">Más de</option><option value="under">Menos de</option></select></label>
-            <label><span>Bookmaker manual</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Solo si reportas la cuota" /></label>
-            <label><span>Cuota decimal (opcional)</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.85" /></label>
-            <label><span>Hora de consulta de la cuota</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
+          <div className="p2-market-entry">
+            <section className="p2-entry-panel p2-atlas-forecast" aria-labelledby="atlas-forecast-form-title">
+              <p className="eyebrow" id="atlas-forecast-form-title">PRONÓSTICO DE ATLAS</p>
+              {analysisMode === "specific" ? <label>
+                <span>5 · Familia de mercado</span>
+                <select value={marketId} disabled={Boolean(transferredCandidate)} onChange={(event) => { setMarketId(event.target.value); invalidateAnalysis(); }}>
+                  {markets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
+                </select>
+              </label> : <div className="p2-family-copy"><strong>Atlas comparará las cinco familias.</strong><small>La cuota no participa en el ranking deportivo.</small></div>}
+              <label><span>Mercado candidato</span><input readOnly value={analysis?.director?.market_evaluated?.label || markets.find((item) => item.id === transferredCandidate?.market_family)?.label || "Atlas lo determinará"} /></label>
+              <label><span>Selección candidata</span><input readOnly value={analysis?.director?.selection || transferredCandidate?.selection || "Atlas la determinará"} /></label>
+              <label><span>Línea sugerida</span><input readOnly value={analysis?.director?.line ?? transferredCandidate?.line ?? "Atlas la determinará"} /></label>
+            </section>
+            <section className="p2-entry-panel p2-user-quote" aria-labelledby="user-quote-form-title">
+              <p className="eyebrow" id="user-quote-form-title">CUOTA ENCONTRADA POR EL USUARIO</p>
+              <label><span>Casa</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
+              <label><span>Dirección ofrecida</span><select value={selection || analysis?.director?.sports_verdict?.direction || transferredCandidate?.direction || ""} onChange={(event) => setSelection(event.target.value)}><option value="">Selecciona la dirección ofrecida</option><option value="over">Más de</option><option value="under">Menos de</option></select></label>
+              <label><span>Línea ofrecida</span><input inputMode="decimal" value={line} onChange={(event) => setLine(event.target.value)} placeholder={analysis?.director?.line ? `Sugerida: ${analysis.director.line}` : "Ej. 1.5"} /></label>
+              <label><span>Cuota decimal</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.65" /></label>
+              <label><span>Hora de consulta</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
+            </section>
           </div>
           <fieldset className="p2-market-filters p2-intended-use">
             <legend>Uso previsto</legend>
             {[['individual', 'Evaluación individual'], ['parlay', 'Considerar para parlay'], ['both', 'Ambos']].map(([value, label]) => <label key={value}><input type="radio" name="intended-use" value={value} checked={intendedUse === value} onChange={() => setIntendedUse(value)} />{label}</label>)}
             <small>Esta elección no altera los datos deportivos ni la estimación.</small>
           </fieldset>
-          <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId}>{analysisState.status === "loading" ? "Analizando partido…" : "6 · Analizar partido"}</button>
-          {analysis?.director ? <div className="p2-inline-actions"><button type="button" className="secondary-button" onClick={() => runOperationalAnalysis({ reanalysis: true })} disabled={analysisState.status === "loading"}>Repetir análisis</button><button type="button" className="primary-button" onClick={reanalyzeWithManualOdds} disabled={!odds.trim() || !line.trim() || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
+          <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId}>{analysisState.status === "loading" ? "Analizando partido…" : transferredCandidate ? "Reanalizar este candidato" : "6 · Analizar partido"}</button>
+          {analysis?.director ? <div className="p2-inline-actions"><button type="button" className="secondary-button" onClick={() => runOperationalAnalysis({ reanalysis: true })} disabled={analysisState.status === "loading"}>Repetir análisis</button><button type="button" className="primary-button" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
           <StatusNotice value={analysisState} />
           {analysis?.director ? <AnalysisResult key={`${analysis.selectedFixtureId}-${analysis.telemetry?.finishedAt || "result"}`} analysis={analysis} /> : null}
-          {analysis?.selectedOdds?.freshness === "stale" ? <div className="p2-stale-action"><p>La cotización anterior venció. Introduce arriba la casa, dirección, línea, cuota y hora de consulta actuales.</p><button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!odds.trim() || !line.trim() || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
+          {analysis?.selectedOdds?.freshness === "stale" ? <div className="p2-stale-action"><p>La cotización anterior venció. Introduce arriba la casa, dirección, línea, cuota y hora de consulta actuales.</p><button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>Evaluar esta línea y cuota</button></div> : null}
           <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} status={geminiState} />
         </section>
       ) : <HistoryView timezone={defaultTimezone} />}
