@@ -156,8 +156,8 @@ test("25. contexto puede no cambiar resultado y lo explica", () => {
   assert.match(diff.explanation, /no aporta evidencia suficiente para modificar/);
 });
 test("26. cuadro principal SÍ", async () => assert.match(await readFile(clientPath, "utf8"), /SÍ — APTO PARA CONSIDERACIÓN/));
-test("27. cuadro principal NO", async () => assert.match(await readFile(clientPath, "utf8"), /NO — NO VIABLE/));
-test("28. cuadro principal TODAVÍA NO", async () => assert.match(await readFile(clientPath, "utf8"), /TODAVÍA NO — REVISAR LÍNEA Y CUOTA/));
+test("27. cuadro principal NO", async () => assert.match(await readFile(clientPath, "utf8"), /NO — MERCADO NO VIABLE/));
+test("28. cuadro principal TODAVÍA NO", async () => assert.match(await readFile(clientPath, "utf8"), /TODAVÍA NO — FALTA EVALUAR LA CUOTA/));
 test("29. scroll y foco", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /scrollIntoView/); assert.match(source, /\.focus\(/); });
 test("30. fases traducidas", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /three_hours_before: "Tres horas antes"/); });
 test("31. individual separado de parlay", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /Aptitud individual/); assert.match(source, /Elegibilidad para parlay/); });

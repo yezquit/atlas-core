@@ -201,9 +201,9 @@ test("30. cuota ausente", () => {
   assert.equal(assessMarketSuitability({ fixtureVerified: true, marketCandidate: true, sampleSufficient: true, requiredEvidenceAvailable: true, line: "2.5", confidenceScore: 90 }).status, "review_only");
 });
 
-test("31. cuota stale bloquea", () => {
+test("31. cuota stale conserva el pronóstico y deja el precio en revisión", () => {
   const quote = normalizeProviderOdds({ response: [providerItem({ update: "2026-08-20T18:00:00Z" })], fixtureId: 9001, now: "2026-08-20T20:00:00Z" }).quotes[0];
-  assert.equal(assessMarketSuitability({ fixtureVerified: true, marketCandidate: true, sampleSufficient: true, requiredEvidenceAvailable: true, line: "2.5", oddsQuote: quote, confidenceScore: 90 }).status, "blocked");
+  assert.equal(assessMarketSuitability({ fixtureVerified: true, marketCandidate: true, sampleSufficient: true, requiredEvidenceAvailable: true, line: "2.5", oddsQuote: quote, confidenceScore: 90, preliminaryProbability: { probability_status: "preliminary" } }).status, "review_only");
 });
 
 test("32. parlay sin candidatos", () => {
