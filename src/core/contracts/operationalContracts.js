@@ -103,6 +103,7 @@ export function createOperationalAnalysisVersion(input = {}) {
     inputs: input.inputs || {},
     evidence: input.evidence || [],
     odds: input.odds || [],
+    active_quote: input.activeQuote || null,
     gemini_context: input.geminiContext || null,
     analysis_confidence: input.analysisConfidence || null,
     preliminary_probability: input.preliminaryProbability || null,

@@ -6,7 +6,7 @@ import { buildGeminiResearchPrompt, parseGeminiResponse, selectGeminiItems } fro
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
 import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
 import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
-import { createManualOdds, normalizeProviderOdds, selectBestComparableOdds } from "../intelligence/oddsIntelligence.js";
+import { createManualOdds, normalizeProviderOdds, selectBestComparableOdds, validateManualOddsInput } from "../intelligence/oddsIntelligence.js";
 import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
@@ -58,14 +58,39 @@ async function loadPreMatchResources({ base, gateway, analyzedAt }) {
 
 export async function analyzeOperationalFixture(input, gateway, { now = () => new Date().toISOString(), idFactory, previousVersion = null } = {}) {
   const analyzedAt = now();
+  if (input.manualOdds) {
+    const manualValidation = validateManualOddsInput({
+      ...input.manualOdds,
+      fixtureId: input.fixtureId,
+      direction: input.manualOdds.direction || input.manualOdds.selection,
+    });
+    if (!manualValidation.valid) {
+      return {
+        status: DATA_LOAD_STATUS.UNAVAILABLE,
+        errorCode: "invalid_manual_odds",
+        message: "La cuota manual no cumple el contrato requerido.",
+        validationErrors: manualValidation.errors,
+        selectedFixtureId: Number(input.fixtureId) || null,
+        fixture: null,
+        operational: null,
+      };
+    }
+  }
   const base = await analyzeSportsFixture(input, gateway);
   if (base.status !== DATA_LOAD_STATUS.SUCCESS || !base.fixture) return { ...base, operational: null };
   const resource = await loadPreMatchResources({ base, gateway, analyzedAt });
   const oddsResult = resource.oddsRaw.status === DATA_LOAD_STATUS.SUCCESS
     ? normalizeProviderOdds({ response: resource.oddsRaw.response, fixtureId: base.fixture.fixtureId, now: analyzedAt, kickoff: base.fixture.date?.utc })
     : { contract: "OddsResult", version: 1, fixture_id: base.fixture.fixtureId, status: "unavailable", quotes: [], warnings: [resource.oddsRaw.errorCode || "odds_unavailable"] };
-  const requestedLine = input.manualOdds?.line ?? input.line ?? null;
-  const requestedSelection = input.manualOdds?.selection ?? input.selection ?? null;
+  const previousActiveQuote = Number(previousVersion?.fixture_id) === Number(base.fixture.fixtureId)
+    ? previousVersion?.active_quote || null
+    : null;
+  const reusableActiveQuote = input.reanalysis ? previousActiveQuote : null;
+  const rawRequestedLine = input.manualOdds?.line ?? input.line ?? reusableActiveQuote?.line ?? null;
+  const requestedLine = rawRequestedLine === null || rawRequestedLine === undefined
+    ? null
+    : String(rawRequestedLine).replace(",", ".");
+  const requestedSelection = input.manualOdds?.selection ?? input.selection ?? reusableActiveQuote?.selection ?? null;
   const context = {
     lineups: resource.coverage.lineupsCovered
       ? normalizeLineups({ response: resource.lineupsRaw.response, fixture: base.fixture, coverageAvailable: true, fetchedAt: resource.lineupsRaw.requestMeta?.fetchedAt || analyzedAt })
@@ -109,20 +134,27 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextItems: selectedGemini,
     contextImpacts: geminiImpacts,
   });
-  const manualMarketFamily = input.manualOdds?.marketFamily || (analysisMode === "specific" ? input.marketId : initialSelection.primary?.market_family);
-  const manualQuote = createManualOdds({
+  const manualMarketFamily = input.manualOdds?.marketFamily || reusableActiveQuote?.market_family || (analysisMode === "specific" ? input.marketId : initialSelection.primary?.market_family);
+  const manualQuote = input.manualOdds ? createManualOdds({
     fixtureId: base.fixture.fixtureId,
-    bookmaker: input.manualOdds?.bookmaker,
+    bookmaker: input.manualOdds.bookmaker,
     marketFamily: manualMarketFamily,
     marketName: base.marketAssessments.find((item) => item.market_family === manualMarketFamily)?.market_label,
     selection: requestedSelection,
+    direction: input.manualOdds.direction,
     line: requestedLine,
-    decimalOdds: input.manualOdds?.decimalOdds ?? input.odds,
-    receivedAt: input.manualOdds?.consultedAt || analyzedAt,
+    decimalOdds: input.manualOdds.decimalOdds,
+    receivedAt: input.manualOdds.consultedAt,
     analyzedAt,
     kickoff: base.fixture.date?.utc,
-  });
-  if (manualQuote) oddsResult.quotes.push(manualQuote);
+    timezone: input.manualOdds.timezone || input.timezone,
+    analysisVersion: input.manualOdds.analysisVersion || previousVersion?.analysis_id || "initial",
+  }) : null;
+  const preferredQuote = manualQuote || reusableActiveQuote;
+  if (preferredQuote && !oddsResult.quotes.some((quote) => quote.quote_id === preferredQuote.quote_id)) {
+    oddsResult.quotes.push(preferredQuote);
+  }
+  if (oddsResult.quotes.length) oddsResult.status = "available";
   let marketSelection = buildRankedMarketSelection({
     analysisMode: requestedLine && manualMarketFamily ? "specific" : analysisMode,
     requestedMarketId: requestedLine && manualMarketFamily ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
@@ -135,6 +167,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextImpacts: geminiImpacts,
     exactLine: requestedLine,
     quotes: oddsResult.quotes,
+    preferredQuote,
   });
   if (requestedLine && requestedSelection) {
     const direction = /under|menos/i.test(requestedSelection) ? "under" : /over|más|mas/i.test(requestedSelection) ? "over" : null;
@@ -253,7 +286,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     opposingEvidence,
     contradictions,
     missingData: [...(marketAssessment?.missing_evidence || []), ...geminiLimitations],
-    risks: [...(marketAssessment?.risk_flags || []), ...(oddsResult.warnings || []), ...unfavorableGemini],
+    risks: [...(marketAssessment?.risk_flags || []), ...(context.lineups.warnings || []), ...(context.injuries.warnings || []), ...(oddsResult.warnings || []), ...unfavorableGemini],
     evidenceRefs: base.evidenceRefs,
     parlayAuthorization: "insufficient_candidates",
     preliminaryProbability,
@@ -287,6 +320,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     inputs: { ...input, geminiResponse: input.geminiResponse ? "stored_in_gemini_context" : null, lineup_status: context.lineups.status, injury_status: context.injuries.status, referee_status: base.refereeProfile?.status, weather_status: base.venueWeatherContext?.weather_status },
     evidence,
     odds: oddsResult.quotes,
+    activeQuote: selectedOdds,
     geminiContext,
     analysisConfidence: confidence,
     preliminaryProbability,
@@ -325,6 +359,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     odds: oddsResult,
     bestComparableOdds: bestProviderOdds,
     selectedOdds,
+    activeQuote: selectedOdds,
     preMatchContext: context,
     gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, reanalysis_message: contextReanalysisMessage },
     confidence,

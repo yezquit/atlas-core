@@ -12,6 +12,7 @@ export function buildAnalysisVersion(input, { idFactory, now = () => new Date().
     inputs: input.inputs,
     evidence: input.evidence,
     odds: input.odds,
+    activeQuote: input.activeQuote,
     geminiContext: input.geminiContext,
     analysisConfidence: input.analysisConfidence,
     preliminaryProbability: input.preliminaryProbability,
@@ -36,6 +37,8 @@ export function compareAnalysisVersions(previous, current) {
   const removedEvidence = [...previousEvidence.keys()].filter((key) => !currentEvidence.has(key));
   const previousOdds = previous.director?.odds ?? null;
   const currentOdds = current.director?.odds ?? null;
+  const previousActiveQuote = previous.active_quote || null;
+  const currentActiveQuote = current.active_quote || null;
   const previousRisks = new Set(previous.director?.risks || []);
   const currentRisks = new Set(current.director?.risks || []);
   const changes = {
@@ -47,6 +50,7 @@ export function compareAnalysisVersions(previous, current) {
     weather_change: previous.inputs?.weather_status !== current.inputs?.weather_status,
     line_change: previous.director?.line !== current.director?.line,
     odds_change: previousOdds !== currentOdds,
+    active_quote_change: previousActiveQuote?.quote_id !== currentActiveQuote?.quote_id,
     confidence_change: (current.analysis_confidence?.analysis_confidence_score || 0) - (previous.analysis_confidence?.analysis_confidence_score || 0),
     probability_change: (current.preliminary_probability?.point_estimate ?? null) !== (previous.preliminary_probability?.point_estimate ?? null),
     probability_status_change: current.preliminary_probability?.probability_status !== previous.preliminary_probability?.probability_status,
@@ -60,6 +64,7 @@ export function compareAnalysisVersions(previous, current) {
     verdict: { previous: previous.director?.verdict || null, current: current.director?.verdict || null },
     line: { previous: previous.director?.line ?? null, current: current.director?.line ?? null },
     odds: { previous: previousOdds, current: currentOdds },
+    active_quote: { previous: previousActiveQuote, current: currentActiveQuote },
     gemini_items_incorporated: current.gemini_context?.selected_items || [],
     new_risks: [...currentRisks].filter((item) => !previousRisks.has(item)),
     resolved_risks: [...previousRisks].filter((item) => !currentRisks.has(item)),

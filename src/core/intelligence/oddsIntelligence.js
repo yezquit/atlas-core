@@ -10,9 +10,16 @@ const MARKET_NAME_RULES = Object.freeze([
   ["corners", ["corners", "córners", "corners kicks"]],
   ["goals", ["goals over/under", "total goals", "goals", "goles"]],
 ]);
+const MANUAL_MARKET_FAMILIES = new Set(MARKET_NAME_RULES.map(([family]) => family));
 
 function text(value) {
   return value === null || value === undefined ? null : String(value).trim() || null;
+}
+
+export function parseDecimalOdds(value) {
+  const candidate = text(value)?.replace(",", ".");
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
 }
 
 function normalized(value) {
@@ -39,9 +46,45 @@ export function parseSelectionLine(value, explicitLine = null) {
 }
 
 export function impliedProbability(decimalOdds) {
-  const value = Number(decimalOdds);
-  if (!Number.isFinite(value) || value <= 1) return null;
+  const value = parseDecimalOdds(decimalOdds);
+  if (value === null) return null;
   return Number((1 / value).toFixed(6));
+}
+
+function numericToken(value) {
+  const match = text(value)?.match(/-?\d+(?:[.,]\d+)?/);
+  return match ? Number(match[0].replace(",", ".")) : null;
+}
+
+function structurallyConsistentValue(value) {
+  const selectionLine = numericToken(value?.value);
+  const handicapLine = numericToken(value?.handicap);
+  if (
+    selectionLine !== null &&
+    handicapLine !== null &&
+    selectionLine !== handicapLine
+  ) {
+    return { valid: false, reason: "provider_selection_handicap_mismatch" };
+  }
+  return { valid: true, reason: null };
+}
+
+export function validateManualOddsInput(input = {}) {
+  const direction = normalized(input.direction || input.selection);
+  const line = numericToken(input.line);
+  const selectionLine = numericToken(input.selection);
+  const consultedAt = Date.parse(input.consultedAt);
+  const errors = [];
+  if (!Number.isInteger(Number(input.fixtureId)) || Number(input.fixtureId) <= 0) errors.push("invalid_fixture_id");
+  if (!MANUAL_MARKET_FAMILIES.has(text(input.marketFamily))) errors.push("invalid_market_family");
+  if (!/^(over|under)(\b|$)/.test(direction)) errors.push("invalid_direction");
+  if (!Number.isFinite(line)) errors.push("invalid_line");
+  if (selectionLine !== null && Number.isFinite(line) && selectionLine !== line) errors.push("selection_line_mismatch");
+  if (parseDecimalOdds(input.decimalOdds) === null) errors.push("invalid_decimal_odds");
+  if (!text(input.bookmaker)) errors.push("missing_bookmaker");
+  if (!Number.isFinite(consultedAt)) errors.push("invalid_consulted_at");
+  if (!text(input.timezone)) errors.push("missing_timezone");
+  return { valid: errors.length === 0, errors, line };
 }
 
 export function oddsFreshnessPolicy({ kickoff = null, now = new Date().toISOString(), source = "provider" } = {}) {
@@ -87,6 +130,7 @@ export function normalizeProviderOdds({
   staleAfterMinutes = null,
 } = {}) {
   const warnings = [];
+  const discarded = [];
   const quotes = [];
   for (const item of response) {
     if (Number(item?.fixture?.id) !== Number(fixtureId)) {
@@ -102,10 +146,22 @@ export function normalizeProviderOdds({
       for (const bet of bookmaker.bets || []) {
         const marketFamily = mapProviderMarket(bet.name);
         if (!marketFamily) continue;
-        for (const value of bet.values || []) {
-          const decimalOdds = Number(value.odd);
+        for (const [valueIndex, value] of (bet.values || []).entries()) {
+          const consistency = structurallyConsistentValue(value);
+          const decimalOdds = parseDecimalOdds(value.odd);
           const { selection, line } = parseSelectionLine(value.value, value.handicap);
-          if (!selection || !Number.isFinite(decimalOdds) || decimalOdds <= 1) continue;
+          const structuralBase = {
+            bookmaker_id: Number.isFinite(Number(bookmaker.id)) ? Number(bookmaker.id) : null,
+            provider_bet_id: text(bet.id),
+            provider_bet_name: text(bet.name),
+            provider_value_index: valueIndex,
+          };
+          if (!consistency.valid || !selection || decimalOdds === null) {
+            const reason = consistency.reason || (!selection ? "provider_selection_missing" : "provider_odd_invalid");
+            warnings.push(reason);
+            discarded.push({ ...structuralBase, reason });
+            continue;
+          }
           const status = freshness === "stale"
             ? ODDS_VERIFICATION_STATUS.STALE
             : ODDS_VERIFICATION_STATUS.VERIFIED_PROVIDER;
@@ -130,10 +186,18 @@ export function normalizeProviderOdds({
             age_minutes: freshnessResult.age_minutes,
             freshness_limit_minutes: freshnessLimit,
             freshness_phase: policy.phase,
+            stale: freshness === "stale",
+            source_status: freshness === "stale" ? "stale" : "verified_current",
             stale_reason: freshness === "stale"
               ? `La cotización tiene ${freshnessResult.age_minutes} minutos y supera el límite de ${freshnessLimit} minutos para esta fase.`
               : null,
             verification_status: status,
+            provider_bet_id: text(bet.id),
+            provider_bet_name: text(bet.name),
+            provider_value_index: valueIndex,
+            provider_raw_selection: text(value.value),
+            provider_raw_handicap: text(value.handicap),
+            provider_odd_field: "odd",
             warnings: freshness === "stale" ? ["odds_stale"] : [],
           });
         }
@@ -147,26 +211,35 @@ export function normalizeProviderOdds({
     fixture_id: Number(fixtureId),
     status: deduplicated.length ? "available" : "unavailable",
     quotes: deduplicated,
+    discarded,
     warnings: [...new Set(warnings)],
   };
 }
 
-export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketName, selection, line, decimalOdds, receivedAt = new Date().toISOString(), analyzedAt = new Date().toISOString(), kickoff = null }) {
-  const parsedOdds = Number(decimalOdds);
-  if (!fixtureId || !text(selection) || !Number.isFinite(parsedOdds) || parsedOdds <= 1) return null;
+export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketName, selection, direction = null, line, decimalOdds, receivedAt = new Date().toISOString(), analyzedAt = new Date().toISOString(), kickoff = null, timezone = null, analysisVersion = null }) {
+  const parsedOdds = parseDecimalOdds(decimalOdds);
+  if (!fixtureId || !text(selection) || parsedOdds === null) return null;
   const policy = oddsFreshnessPolicy({ kickoff, now: analyzedAt, source: "manual_user_input" });
   const freshnessResult = freshnessFor(receivedAt, analyzedAt, policy.limit_minutes);
+  const resolvedDirection = /^(under|menos)/i.test(direction || selection) ? "under" : /^(over|más|mas)/i.test(direction || selection) ? "over" : null;
+  const normalizedLine = text(line);
+  const canonicalSelection = resolvedDirection && normalizedLine
+    ? `${resolvedDirection === "over" ? "Over" : "Under"} ${normalizedLine}`
+    : text(selection);
+  const requestKey = quoteId([fixtureId, "manual", bookmaker, marketFamily, resolvedDirection, normalizedLine, parsedOdds, receivedAt, timezone, analysisVersion]);
   return {
     contract: "OddsQuote",
     schema_version: OPERATIONAL_SCHEMA_VERSION,
-    quote_id: quoteId([fixtureId, "manual", bookmaker, marketFamily, selection, line, parsedOdds, receivedAt]),
+    quote_id: requestKey,
+    request_key: requestKey,
     fixture_id: Number(fixtureId),
     bookmaker_id: null,
     bookmaker_name: text(bookmaker) || "No informado",
     market_family: text(marketFamily) || "unknown",
     market_name: text(marketName) || text(marketFamily) || "Mercado manual",
-    selection: text(selection),
-    line: text(line),
+    selection: canonicalSelection,
+    direction: resolvedDirection,
+    line: normalizedLine,
     decimal_odds: parsedOdds,
     implied_probability: impliedProbability(parsedOdds),
     implied_probability_label: "Probabilidad implícita de la cuota",
@@ -177,6 +250,10 @@ export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketNam
     age_minutes: freshnessResult.age_minutes,
     freshness_limit_minutes: policy.limit_minutes,
     freshness_phase: policy.phase,
+    stale: freshnessResult.freshness === "stale",
+    source_status: freshnessResult.freshness === "stale" ? "stale" : "user_reported_current",
+    timezone: text(timezone),
+    analysis_version: text(analysisVersion),
     stale_reason: freshnessResult.freshness === "stale"
       ? `La cuota manual fue consultada hace ${freshnessResult.age_minutes} minutos y supera el límite de ${policy.limit_minutes} minutos para esta fase.`
       : null,

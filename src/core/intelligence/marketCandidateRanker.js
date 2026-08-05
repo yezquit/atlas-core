@@ -13,17 +13,38 @@ function normalizedDirection(value) {
   return null;
 }
 
-function comparableQuote(candidate, quotes = []) {
+function priceStatusForQuote(quote) {
+  if (quote?.freshness === "stale" || quote?.verification_status === "stale" || quote?.stale) return PRICE_STATUS.STALE;
+  if (quote?.verification_status === "verified_provider") return PRICE_STATUS.VERIFIED_CURRENT;
+  return PRICE_STATUS.USER_REPORTED_CURRENT;
+}
+
+function quotePriority(quote) {
+  return {
+    [PRICE_STATUS.VERIFIED_CURRENT]: 3,
+    [PRICE_STATUS.USER_REPORTED_CURRENT]: 2,
+    [PRICE_STATUS.STALE]: 1,
+  }[priceStatusForQuote(quote)] || 0;
+}
+
+function isExactQuote(candidate, quote) {
+  return quote?.market_family === candidate.market_family &&
+    normalizedDirection(quote.direction || quote.selection) === candidate.direction &&
+    Number(quote.line) === Number(candidate.line);
+}
+
+export function selectCandidateQuote(candidate, quotes = [], preferredQuote = null) {
   const sameMarket = quotes.filter((quote) => quote.market_family === candidate.market_family);
   if (!sameMarket.length) return { quote: null, status: PRICE_STATUS.UNAVAILABLE };
-  const sameDirection = sameMarket.filter((quote) => normalizedDirection(quote.selection) === candidate.direction);
+  const sameDirection = sameMarket.filter((quote) => normalizedDirection(quote.direction || quote.selection) === candidate.direction);
   if (!sameDirection.length) return { quote: null, status: PRICE_STATUS.INCOMPATIBLE_SELECTION };
   const exact = sameDirection.filter((quote) => Number(quote.line) === Number(candidate.line));
   if (!exact.length) return { quote: null, status: PRICE_STATUS.INCOMPATIBLE_LINE };
-  const quote = [...exact].sort((left, right) => Number(right.decimal_odds) - Number(left.decimal_odds))[0];
-  if (quote.freshness === "stale" || quote.verification_status === "stale") return { quote, status: PRICE_STATUS.STALE };
-  if (quote.verification_status === "verified_provider") return { quote, status: PRICE_STATUS.VERIFIED_CURRENT };
-  return { quote, status: PRICE_STATUS.USER_REPORTED_CURRENT };
+  const explicit = preferredQuote && isExactQuote(candidate, preferredQuote) ? preferredQuote : null;
+  const quote = explicit || [...exact].sort((left, right) =>
+    quotePriority(right) - quotePriority(left) || Number(right.decimal_odds) - Number(left.decimal_odds)
+  )[0];
+  return { quote, status: priceStatusForQuote(quote) };
 }
 
 export function calculateSportsScore(candidate, { marketAssessment = null, confidenceScore = null } = {}) {
@@ -58,12 +79,12 @@ function rankReason(candidate) {
   ];
 }
 
-export function rankMarketCandidates(candidates = [], { quotes = [], marketAssessments = [], confidenceScore = null, blocked = false } = {}) {
+export function rankMarketCandidates(candidates = [], { quotes = [], preferredQuote = null, marketAssessments = [], confidenceScore = null, blocked = false } = {}) {
   const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
   return candidates.map((candidate) => {
     const marketAssessment = assessmentByFamily.get(candidate.market_family) || null;
     const sportsScore = calculateSportsScore(candidate, { marketAssessment, confidenceScore });
-    const price = comparableQuote(candidate, quotes);
+    const price = selectCandidateQuote(candidate, quotes, preferredQuote);
     const enriched = { ...candidate, sports_score: sportsScore };
     return { ...enriched, price_status: price.status, price_quote: price.quote, overall_status: overallStatus(enriched, price.status, blocked), rank_reason: rankReason(enriched), ranker_version: MARKET_CANDIDATE_RANKER_VERSION };
   }).sort((left, right) => {
@@ -95,7 +116,7 @@ export function buildRankedMarketSelection(input = {}) {
     awayTeamProfile: input.awayTeamProfile, refereeProfile: input.refereeProfile, contextItems: input.contextItems,
     contextImpacts: input.contextImpacts, exactLine: input.exactLine,
   }));
-  const ranked = rankMarketCandidates(generated.flatMap((result) => result.candidates), { quotes: input.quotes, marketAssessments: assessments, confidenceScore: input.confidenceScore, blocked: input.blocked });
+  const ranked = rankMarketCandidates(generated.flatMap((result) => result.candidates), { quotes: input.quotes, preferredQuote: input.preferredQuote, marketAssessments: assessments, confidenceScore: input.confidenceScore, blocked: input.blocked });
   const primary = ranked[0] || null;
   return {
     contract: "RankedMarketSelection", version: 1, analysis_mode: analysisMode,

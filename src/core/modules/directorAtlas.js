@@ -543,13 +543,13 @@ export function buildOperationalDirectorVerdict({
   const probability = marketCandidate?.preliminary_probability ?? preliminaryProbability?.point_estimate ?? null;
   const uncertaintyLow = marketCandidate?.uncertainty_low ?? preliminaryProbability?.uncertainty_low ?? null;
   const uncertaintyHigh = marketCandidate?.uncertainty_high ?? preliminaryProbability?.uncertainty_high ?? null;
-  const priceStatus = marketCandidate?.price_status || (oddsQuote
-    ? oddsQuote.freshness === "stale" || oddsQuote.verification_status === "stale"
+  const priceStatus = oddsQuote
+    ? oddsQuote.source_status || (oddsQuote.freshness === "stale" || oddsQuote.verification_status === "stale"
       ? "stale"
       : oddsQuote.verification_status === "verified_provider"
         ? "verified_current"
-        : "user_reported_current"
-    : "unavailable");
+        : "user_reported_current")
+    : marketCandidate?.price_status || "unavailable";
   const pricePending = ["unavailable", "stale", "incompatible_line", "incompatible_selection"].includes(priceStatus);
   let suitabilityStatus = requestedSuitability;
   if (requestedSuitability !== MARKET_SUITABILITY.BLOCKED) {
@@ -592,13 +592,17 @@ export function buildOperationalDirectorVerdict({
   };
   const conditions = [...new Set(suitability?.conditions || [])];
   if (pricePending && !conditions.some((item) => /cuota/i.test(item))) conditions.unshift("Introducir una cuota actual para la línea exacta seleccionada.");
+  const sportsReason = marketCandidate
+    ? `${selectionLabel} ocupa el primer lugar por su frecuencia estimada, estabilidad entre submuestras y menor incertidumbre relativa.`
+    : null;
   const reasons = [
-    `Confianza del análisis: ${confidence?.analysis_confidence_score || 0}%, ${String(confidence?.confidence_label || "baja").replaceAll("_", " ")}. Este porcentaje mide calidad y coherencia de evidencia, no probabilidad de acierto.`,
+    sportsReason,
     ...supportingEvidence,
     ...(preliminaryProbability?.probability_status === "preliminary"
       ? [`La frecuencia estimada procede de ${preliminaryProbability.sample_size_effective} observaciones efectivas y ajuste hacia la base de liga.`]
       : []),
-  ];
+    `Confianza del análisis: ${confidence?.analysis_confidence_score || 0}%, ${String(confidence?.confidence_label || "baja").replaceAll("_", " ")}. Este porcentaje mide calidad y coherencia de evidencia, no probabilidad de acierto.`,
+  ].filter(Boolean);
   const uncertaintyWidth = probabilityAvailable ? uncertaintyHigh - uncertaintyLow : null;
   const currentPrice = ["verified_current", "user_reported_current"].includes(priceStatus);
   const parlayEligibility = suitabilityStatus === MARKET_SUITABILITY.BLOCKED
@@ -645,7 +649,9 @@ export function buildOperationalDirectorVerdict({
           ? "La cuota no coincide con la dirección deportiva evaluada."
           : preliminaryDifference === null
             ? "La cuota está disponible, pero la comparación deportiva permanece limitada."
-            : "La estimación preliminar se compara con la probabilidad implícita, pero no permite afirmar valor esperado.";
+            : preliminaryDifference > 0
+              ? "La estimación preliminar está por encima de la probabilidad implícita, pero el intervalo de incertidumbre es amplio y el modelo aún no está calibrado para afirmar valor esperado."
+              : "La estimación preliminar se compara con la probabilidad implícita, pero no permite afirmar valor esperado.";
   const sportsVerdict = marketCandidate ? {
     status: (marketCandidate.sports_score ?? 0) >= 58 ? "sports_candidate" : "review_only",
     market_family: marketCandidate.market_family,
@@ -676,20 +682,29 @@ export function buildOperationalDirectorVerdict({
     decimal_odds: oddsQuote?.decimal_odds || null,
     implied_probability: impliedProbability,
     freshness: oddsQuote?.freshness || "unavailable",
+    source_status: priceStatus,
+    consulted_at: oddsQuote?.consulted_at || null,
+    timezone: oddsQuote?.timezone || null,
     market_matches: !["unavailable", "incompatible_line", "incompatible_selection"].includes(priceStatus),
     preliminary_difference: preliminaryDifference,
     expected_value_claimed: false,
   };
+  const resolvedMissingData = [...new Set(missingData)].filter((item) =>
+    pricePending || !/cuota|odds|precio/i.test(String(item))
+  );
+  if (pricePending && !resolvedMissingData.some((item) => /cuota actual/i.test(String(item)))) {
+    resolvedMissingData.unshift("Cuota actual para la línea exacta");
+  }
   const whatMayChange = [...new Set([
-    ...missingData,
+    ...resolvedMissingData,
     ...(marketAssessment?.market_family === "cards" && marketCandidate?.context_adjustment?.applied_impacts?.length === 0 ? ["Confirmación y perfil del árbitro"] : []),
     "Alineaciones, bajas o rotaciones relevantes",
     "Clima, estado del campo o una nueva cuota",
   ])].slice(0, 3);
   const simpleReasons = [...new Set([
+    sportsReason,
     marketSelection?.explanation,
     marketCandidate ? `La línea queda en ${marketCandidate.sports_score}/100 de equilibrio deportivo.` : null,
-    supportingEvidence[0],
   ].filter(Boolean))].slice(0, 3);
   return {
     contract: "DirectorVerdict",
@@ -754,14 +769,14 @@ export function buildOperationalDirectorVerdict({
     reasons: [...new Set(reasons)],
     simple_reasons: simpleReasons,
     what_may_change: whatMayChange,
-    primary_reason: reasons[0] || verdicts[suitabilityStatus],
+    primary_reason: sportsReason || reasons[0] || verdicts[suitabilityStatus],
     supporting_evidence: [...new Set(supportingEvidence)],
     primary_supporting_evidence: supportingEvidence[0] || null,
     opposing_evidence: [...new Set(opposingEvidence)],
     primary_opposing_evidence: opposingEvidence[0] || null,
     contradictions: [...new Set(contradictions)],
     risks: [...new Set(risks)],
-    missing_data: [...new Set(missingData)],
+    missing_data: resolvedMissingData,
     avoid: ["No presentar el mercado como seguro.", "No confundir probabilidad implícita con probabilidad estimada.", "No perseguir pérdidas ni asumir rentabilidad."],
     conditions: [...new Set(conditions)],
     blocking_condition: suitabilityStatus === MARKET_SUITABILITY.BLOCKED
