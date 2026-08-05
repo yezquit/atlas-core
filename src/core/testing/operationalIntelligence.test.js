@@ -188,7 +188,7 @@ test("27. exportación JSON", async () => {
 
 test("28. mercado apto para consideración", () => {
   const quote = normalizeProviderOdds({ response: [providerItem()], fixtureId: 9001, now: "2026-08-20T20:00:00Z" }).quotes[0];
-  const result = assessMarketSuitability({ fixtureVerified: true, marketCandidate: true, sampleSufficient: true, requiredEvidenceAvailable: true, line: "2.5", oddsQuote: quote, confidenceScore: 80 });
+  const result = assessMarketSuitability({ fixtureVerified: true, marketCandidate: true, sampleSufficient: true, requiredEvidenceAvailable: true, line: "2.5", oddsQuote: quote, confidenceScore: 80, preliminaryProbability: { probability_status: "preliminary", point_estimate: 0.61, uncertainty_low: 0.52, uncertainty_high: 0.69 } });
   assert.equal(result.status, "suitable_under_conditions");
   assert.equal(result.apt_for_consideration, true);
 });

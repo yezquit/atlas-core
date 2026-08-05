@@ -23,13 +23,13 @@ test("DirectorAtlas queda como única voz pública del flujo funcional", async (
   assert.match(pageSource, /<AtlasFunctionalClient/);
   assert.match(
     clientSource,
-    /className="director-atlas-panel functional-director p2-director"/
+    /director-atlas-panel functional-director p2-director/
   );
   assert.doesNotMatch(clientSource, /atlasExecutiveAnswer/);
   assert.doesNotMatch(clientSource, /decisionEngine/);
   assert.match(clientSource, /analysis\.director/);
   assert.match(clientSource, /director\.estimated_probability/);
-  assert.match(clientSource, /director\.probability_status === "unavailable"/);
+  assert.match(clientSource, /director\.probability_status === "preliminary"/);
 });
 
 test("la UI exige selección explícita y conserva el fixture ID", async () => {
@@ -121,7 +121,7 @@ test("37. modo experto expone trazabilidad operativa", async () => {
 
 test("38. porcentaje aclarado como no probabilidad", async () => {
   const source = await readFile(clientPath, "utf8");
-  assert.match(source, /La confianza mide calidad y coherencia de los datos; no es una probabilidad de acierto/);
+  assert.match(source, /Este porcentaje mide calidad y coherencia de la evidencia; no es una probabilidad de acierto/);
 });
 
 test("39. API key ausente del cliente", async () => {
