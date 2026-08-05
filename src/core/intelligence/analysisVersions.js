@@ -39,6 +39,8 @@ export function compareAnalysisVersions(previous, current) {
   const currentOdds = current.director?.odds ?? null;
   const previousActiveQuote = previous.active_quote || null;
   const currentActiveQuote = current.active_quote || null;
+  const previousDirector = previous.director || {};
+  const currentDirector = current.director || {};
   const previousRisks = new Set(previous.director?.risks || []);
   const currentRisks = new Set(current.director?.risks || []);
   const changes = {
@@ -54,13 +56,24 @@ export function compareAnalysisVersions(previous, current) {
     confidence_change: (current.analysis_confidence?.analysis_confidence_score || 0) - (previous.analysis_confidence?.analysis_confidence_score || 0),
     probability_change: (current.preliminary_probability?.point_estimate ?? null) !== (previous.preliminary_probability?.point_estimate ?? null),
     probability_status_change: current.preliminary_probability?.probability_status !== previous.preliminary_probability?.probability_status,
+    uncertainty_change: previous.preliminary_probability?.uncertainty_low !== current.preliminary_probability?.uncertainty_low || previous.preliminary_probability?.uncertainty_high !== current.preliminary_probability?.uncertainty_high,
+    price_evaluation_change: previousDirector.price_assessment?.status !== currentDirector.price_assessment?.status,
+    individual_eligibility_change: previousDirector.individual_eligibility !== currentDirector.individual_eligibility,
+    parlay_eligibility_change: previousDirector.parlay_eligibility !== currentDirector.parlay_eligibility,
     gemini_change: JSON.stringify(previous.gemini_context?.selected_items || []) !== JSON.stringify(current.gemini_context?.selected_items || []),
     risk_change: JSON.stringify(previous.director?.risks || []) !== JSON.stringify(current.director?.risks || []),
     suitability_change: previous.director?.market_suitability !== current.director?.market_suitability,
     verdict_change: previous.director?.verdict !== current.director?.verdict,
     preliminary_probability: { previous: previous.preliminary_probability?.point_estimate ?? null, current: current.preliminary_probability?.point_estimate ?? null },
+    uncertainty_interval: {
+      previous: { low: previous.preliminary_probability?.uncertainty_low ?? null, high: previous.preliminary_probability?.uncertainty_high ?? null },
+      current: { low: current.preliminary_probability?.uncertainty_low ?? null, high: current.preliminary_probability?.uncertainty_high ?? null },
+    },
     analysis_confidence: { previous: previous.analysis_confidence?.analysis_confidence_score ?? null, current: current.analysis_confidence?.analysis_confidence_score ?? null },
     suitability: { previous: previous.director?.market_suitability || null, current: current.director?.market_suitability || null },
+    price_evaluation: { previous: previousDirector.price_assessment?.status || null, current: currentDirector.price_assessment?.status || null },
+    individual_eligibility: { previous: previousDirector.individual_eligibility || null, current: currentDirector.individual_eligibility || null },
+    parlay_eligibility: { previous: previousDirector.parlay_eligibility || null, current: currentDirector.parlay_eligibility || null },
     verdict: { previous: previous.director?.verdict || null, current: current.director?.verdict || null },
     line: { previous: previous.director?.line ?? null, current: current.director?.line ?? null },
     odds: { previous: previousOdds, current: currentOdds },
@@ -77,10 +90,12 @@ export function compareAnalysisVersions(previous, current) {
   if (changes.injury_change) explanations.push("Cambió el reporte de bajas.");
   if (changes.line_change || changes.odds_change) explanations.push("Cambió la línea o la cuota del mercado.");
   if (changes.probability_change || changes.probability_status_change) explanations.push("Cambió la estimación deportiva preliminar o su disponibilidad.");
+  if (changes.uncertainty_change) explanations.push("Cambió el intervalo de incertidumbre.");
+  if (changes.price_evaluation_change || changes.individual_eligibility_change || changes.parlay_eligibility_change) explanations.push("Se recalcularon la evaluación de precio, la aptitud individual y la elegibilidad para parlay.");
   if (changes.gemini_change) explanations.push(`Se incorporaron ${changes.gemini_items_incorporated.length} elementos seleccionados del contexto manual de Gemini.`);
   if (changes.risk_change) explanations.push("Cambió el inventario de riesgos considerado.");
   if (changes.suitability_change || changes.verdict_change) explanations.push("DirectorAtlas actualizó el dictamen según los cambios observados.");
-  if (changes.gemini_change && !changes.suitability_change && !changes.verdict_change) explanations.push("El contexto complementario fue incorporado, pero no aporta evidencia suficiente para modificar el dictamen anterior.");
+  if (changes.gemini_change && !changes.price_evaluation_change && !changes.individual_eligibility_change && !changes.parlay_eligibility_change && !changes.verdict_change) explanations.push("El contexto complementario no fue suficiente para modificar el dictamen; no aporta evidencia suficiente para modificar la evaluación económica.");
   if (!explanations.length) explanations.push("No hubo cambios materiales; el dictamen se mantiene.");
   return { contract: "AnalysisVersionDiff", version: 1, comparable: true, previous_analysis_id: previous.analysis_id, current_analysis_id: current.analysis_id, changes, explanation: explanations.join(" ") };
 }

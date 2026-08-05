@@ -93,12 +93,20 @@ const STATUS_LABELS = Object.freeze({
   insufficient_information: "Información insuficiente",
   verified_current: "Vigente y verificada",
   user_reported_current: "Vigente, reportada por el usuario",
+  favorable_preliminary: "Favorable preliminar",
+  marginal: "Marginal",
+  unfavorable: "Desfavorable",
+  not_viable_at_this_price: "No viable a esta cuota",
+  eligible_with_caution: "Elegible con cautela",
   incompatible_line: "Línea incompatible",
   incompatible_selection: "Selección incompatible",
   early_forecast: "Pronóstico temprano",
   provisional_forecast: "Pronóstico provisional",
   updated_forecast: "Pronóstico actualizado",
   final_pre_match_forecast: "Pronóstico final prepartido",
+  hours_before: "Horas antes del partido",
+  pre_match_closed: "Análisis prepartido cerrado",
+  provider_odd_invalid: "La cotización del proveedor presentó datos inválidos.",
 });
 
 const METRIC_LABELS = Object.freeze({
@@ -336,12 +344,12 @@ function DirectorResult({ analysis, headingRef }) {
       <div className="p2-decision-banner">
         <span className="p2-decision-icon" aria-hidden="true">{decision.icon}</span>
         <div className="p2-director-heading">
-          <h2 id="director-atlas-title" ref={headingRef} tabIndex="-1">{decision.title}</h2>
+          <h2 id="director-atlas-title" ref={headingRef} tabIndex="-1">{director.display_status || decision.title}</h2>
           <p>{director.verdict}</p>
         </div>
       </div>
       <div className="p2-director-summary">
-        <div><small>Respuesta directa</small><strong>{director.decision_code === "yes" ? "Sí" : director.decision_code === "no" ? "No" : "Todavía no"}</strong></div>
+        <div><small>Respuesta directa</small><strong>{director.decision_code === "yes" ? "Sí" : director.decision_code === "no" ? "No" : director.decision_code === "caution" ? "Solo con cautela" : "Todavía no"}</strong></div>
         <div><small>Opción seleccionada</small><strong>{sports?.selection || director.selection || "Sin selección"}</strong></div>
         <div><small>Probabilidad preliminar</small><strong>{percentage(sports?.preliminary_probability ?? director.estimated_probability)}</strong><span>{sports ? `${percentage(sports.uncertainty_low)}–${percentage(sports.uncertainty_high)}` : "Sin intervalo"}</span></div>
         <div><small>Confianza del análisis</small><strong>{director.analysis_confidence_score || 0}%</strong><span>No es probabilidad de acierto.</span></div>
@@ -359,6 +367,7 @@ function DirectorResult({ analysis, headingRef }) {
             ["Muestra efectiva ponderada", formatEffectiveSample(director.probability_effective_sample, 1)],
           ]} />
           <p className="p2-sample-note">Las submuestras pueden solaparse y no equivalen a partidos independientes.</p>
+          <p>{sports?.message}</p>
         </section>
         <section className="p2-verdict-block">
           <p className="eyebrow">EVALUACIÓN DE PRECIO</p>
@@ -369,6 +378,17 @@ function DirectorResult({ analysis, headingRef }) {
             ["Probabilidad implícita", price?.implied_probability === null || price?.implied_probability === undefined ? null : `${(price.implied_probability * 100).toFixed(2)}%`],
           ]} />
           <p>{price?.message}</p>
+          <p className="p2-sample-note">{price?.model_notice}</p>
+        </section>
+        <section className="p2-verdict-block">
+          <p className="eyebrow">APTITUD INDIVIDUAL</p>
+          <h3>{displayStatus(director.individual_eligibility)}</h3>
+          <p>{director.individual_eligibility_reason}</p>
+        </section>
+        <section className="p2-verdict-block">
+          <p className="eyebrow">ELEGIBILIDAD PARA PARLAY</p>
+          <h3>{displayStatus(director.parlay_eligibility)}</h3>
+          <p>{director.parlay_eligibility_reason}</p>
         </section>
       </div>
       <DefinitionGrid entries={[
@@ -611,6 +631,21 @@ function ExpertResult({ analysis }) {
           ["Motor", analysis.analysisVersion?.engine_version],
         ]} />
         <p>{analysis.changesSincePrevious?.explanation || "Esta es la primera versión conservada para el fixture."}</p>
+        {analysis.changesSincePrevious?.comparable ? <DefinitionGrid entries={[
+          ["Probabilidad anterior", percentage(analysis.changesSincePrevious.changes?.preliminary_probability?.previous)],
+          ["Probabilidad actual", percentage(analysis.changesSincePrevious.changes?.preliminary_probability?.current)],
+          ["Intervalo anterior", `${percentage(analysis.changesSincePrevious.changes?.uncertainty_interval?.previous?.low)}–${percentage(analysis.changesSincePrevious.changes?.uncertainty_interval?.previous?.high)}`],
+          ["Intervalo actual", `${percentage(analysis.changesSincePrevious.changes?.uncertainty_interval?.current?.low)}–${percentage(analysis.changesSincePrevious.changes?.uncertainty_interval?.current?.high)}`],
+          ["Confianza anterior", analysis.changesSincePrevious.changes?.analysis_confidence?.previous],
+          ["Confianza actual", analysis.changesSincePrevious.changes?.analysis_confidence?.current],
+          ["Precio anterior", displayStatus(analysis.changesSincePrevious.changes?.price_evaluation?.previous)],
+          ["Precio actual", displayStatus(analysis.changesSincePrevious.changes?.price_evaluation?.current)],
+          ["Aptitud anterior", displayStatus(analysis.changesSincePrevious.changes?.individual_eligibility?.previous)],
+          ["Aptitud actual", displayStatus(analysis.changesSincePrevious.changes?.individual_eligibility?.current)],
+          ["Parlay anterior", displayStatus(analysis.changesSincePrevious.changes?.parlay_eligibility?.previous)],
+          ["Parlay actual", displayStatus(analysis.changesSincePrevious.changes?.parlay_eligibility?.current)],
+          ["Elementos Gemini incorporados", analysis.changesSincePrevious.changes?.gemini_items_incorporated?.length],
+        ]} /> : null}
         {analysis.changesSincePrevious?.comparable ? <details className="p2-source-details"><summary>Qué cambió desde el análisis anterior</summary><pre>{JSON.stringify(analysis.changesSincePrevious.changes, null, 2)}</pre></details> : null}
       </Accordion>
 

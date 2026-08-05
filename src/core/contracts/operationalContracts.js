@@ -17,6 +17,14 @@ export const MARKET_SUITABILITY = Object.freeze({
   SUITABLE_UNDER_CONDITIONS: "suitable_under_conditions",
 });
 
+export const PRICE_EVALUATION_STATUS = Object.freeze({
+  FAVORABLE_PRELIMINARY: "favorable_preliminary",
+  MARGINAL: "marginal",
+  UNFAVORABLE: "unfavorable",
+  UNAVAILABLE: "unavailable",
+  STALE: "stale",
+});
+
 export const PARLAY_OPERATIONAL_STATUS = Object.freeze({
   UNSUPPORTED: "unsupported",
   INSUFFICIENT_CANDIDATES: "insufficient_candidates",
@@ -28,10 +36,12 @@ export const PARLAY_OPERATIONAL_STATUS = Object.freeze({
 export const ANALYSIS_PHASES = Object.freeze([
   "early_review",
   "day_before",
+  "hours_before",
   "three_hours_before",
   "one_hour_before",
   "thirty_minutes_before",
   "final_pre_match",
+  "pre_match_closed",
 ]);
 
 export const CONTEXT_STATUS = Object.freeze({
@@ -77,11 +87,12 @@ export function phaseForKickoff(kickoff, analyzedAt = new Date().toISOString()) 
   if (!Number.isFinite(distance)) {
     return { phase: "early_review", kickoffDistanceMinutes: null };
   }
-  if (distance > 1_440) return { phase: "early_review", kickoffDistanceMinutes: distance };
-  if (distance > 180) return { phase: "day_before", kickoffDistanceMinutes: distance };
-  if (distance > 60) return { phase: "three_hours_before", kickoffDistanceMinutes: distance };
-  if (distance > 30) return { phase: "one_hour_before", kickoffDistanceMinutes: distance };
-  if (distance > 10) return { phase: "thirty_minutes_before", kickoffDistanceMinutes: distance };
+  if (distance <= 0) return { phase: "pre_match_closed", kickoffDistanceMinutes: distance };
+  if (distance > 1_080) return { phase: "day_before", kickoffDistanceMinutes: distance };
+  if (distance > 360) return { phase: "hours_before", kickoffDistanceMinutes: distance };
+  if (distance > 120) return { phase: "three_hours_before", kickoffDistanceMinutes: distance };
+  if (distance > 45) return { phase: "one_hour_before", kickoffDistanceMinutes: distance };
+  if (distance > 15) return { phase: "thirty_minutes_before", kickoffDistanceMinutes: distance };
   return { phase: "final_pre_match", kickoffDistanceMinutes: distance };
 }
 

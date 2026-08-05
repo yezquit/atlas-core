@@ -20,6 +20,46 @@ function ratio(numerator, denominator) {
   return denominator > 0 ? Math.max(0, Math.min(1, numerator / denominator)) : 0;
 }
 
+function probabilityLabel(value) {
+  return `${Number((Number(value) * 100).toFixed(1))}%`;
+}
+
+export function buildGeminiEconomicReanalysisMessage({
+  selectedItems = [],
+  impacts = [],
+  previousProbability = null,
+  currentProbability = null,
+  impliedProbability = null,
+  decimalOdds = null,
+  currentPriceStatus = null,
+} = {}) {
+  if (!selectedItems.length) return null;
+  if (!impacts.length || !Number.isFinite(Number(previousProbability)) || !Number.isFinite(Number(currentProbability))) {
+    return "El contexto complementario no fue suficiente para modificar el dictamen ni la evaluación económica.";
+  }
+  const previous = Number(previousProbability);
+  const current = Number(currentProbability);
+  const implied = Number(impliedProbability);
+  if (Math.abs(current - previous) < 0.0005) {
+    return "El contexto fue incorporado, pero no modifica la evaluación económica.";
+  }
+  const movement = current > previous ? "elevó" : "redujo";
+  if (Number.isFinite(implied) && current < implied) {
+    const ending = current < previous
+      ? "La evidencia contraria refuerza el estado no viable a este precio."
+      : `Continúa por debajo del ${probabilityLabel(implied)} implícito de la cuota ${decimalOdds}. La selección sigue sin ser viable a este precio.`;
+    return `El contexto Gemini fue incorporado y ${movement} la estimación de ${probabilityLabel(previous)} a ${probabilityLabel(current)}. ${ending}`;
+  }
+  return `El contexto Gemini fue incorporado y ${movement} la estimación de ${probabilityLabel(previous)} a ${probabilityLabel(current)}. La evaluación de precio actual es ${currentPriceStatus || "marginal"}.`;
+}
+
+export function exactLineExplanation(selection, input = {}) {
+  const origin = input.transferredCandidate && !input.manualOdds
+    ? "seleccionada por Atlas"
+    : "reportada por el usuario";
+  return `${selection} se evaluó con su probabilidad exacta porque corresponde a la línea ${origin}.`;
+}
+
 function asEvidence(base, odds, context, gemini) {
   const evidence = (base.evidenceRefs || []).map((ref) => ({ id: ref, source_ref: ref, status: "verified_provider" }));
   for (const quote of odds.quotes || []) evidence.push({ id: quote.quote_id, source_ref: quote.quote_id, status: quote.verification_status, observed_at: quote.updated_at });
@@ -32,7 +72,7 @@ function asEvidence(base, odds, context, gemini) {
 async function loadPreMatchResources({ base, gateway, analyzedAt }) {
   const fixture = base.fixture;
   const coverage = base.competitionMetadata?.seasonMetadata?.coverage || {};
-  const isBeforeKickoff = Date.parse(analyzedAt) <= Date.parse(fixture.date?.utc);
+  const isBeforeKickoff = Date.parse(analyzedAt) < Date.parse(fixture.date?.utc);
   const oddsCovered = coverageFlag(coverage, ["odds"]);
   const lineupsCovered = coverageFlag(coverage, ["fixtures", "lineups"]);
   const injuriesCovered = coverageFlag(coverage, ["injuries"]);
@@ -181,7 +221,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
         ...marketSelection,
         primary: exactCandidate,
         alternatives: marketSelection.ranked_candidates.filter((candidate) => candidate.candidate_id !== exactCandidate.candidate_id).slice(0, 3),
-        explanation: `${exactCandidate.selection} se evaluó con su probabilidad exacta porque corresponde a la línea reportada por el usuario.`,
+        explanation: exactLineExplanation(exactCandidate.selection, input),
       };
     }
   }
@@ -213,6 +253,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const available = marketAssessment?.available_evidence?.length || 0;
   const sampleSize = primaryCandidate?.sample_size_effective || marketAssessment?.sample_size || 0;
   const telemetry = gateway.runtime.snapshot();
+  const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
   const confidence = calculateAnalysisConfidence({
     source_quality: base.status === DATA_LOAD_STATUS.SUCCESS ? 0.9 : 0.2,
     freshness: selectedOdds?.freshness === "fresh" ? 1 : selectedOdds ? 0.55 : 0.35,
@@ -242,8 +283,9 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextBlocked: Boolean(geminiContext && !geminiContext.valid_for_reanalysis && input.geminiResponse),
     confidenceScore: confidence.analysis_confidence_score,
     preliminaryProbability,
+    sampleSize,
+    phase: input.phase || phaseInfo.phase,
   });
-  const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
   const prompt = buildGeminiResearchPrompt({
     fixture: base.fixture,
     competition: base.competition,
@@ -264,13 +306,17 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   ];
   const priorSelection = previousVersion?.director?.sports_verdict?.selection || previousVersion?.director?.selection || null;
   const currentSelection = primaryCandidate?.selection || null;
-  const contextReanalysisMessage = !selectedGemini.length
-    ? null
-    : geminiImpacts.length === 0
-      ? "El contexto fue procesado, pero no contiene evidencia suficiente para modificar la distribución."
-      : priorSelection && priorSelection !== currentSelection
-        ? `Contexto incorporado. La mejor línea cambia de ${priorSelection} a ${currentSelection}.`
-        : "Contexto incorporado. El candidato principal se mantiene.";
+  const contextReanalysisMessage = buildGeminiEconomicReanalysisMessage({
+    selectedItems: selectedGemini,
+    impacts: geminiImpacts,
+    previousProbability: previousVersion?.preliminary_probability?.point_estimate,
+    currentProbability: primaryCandidate?.preliminary_probability,
+    impliedProbability: selectedOdds?.implied_probability,
+    decimalOdds: selectedOdds?.decimal_odds,
+    currentPriceStatus: suitability.price_evaluation?.status,
+  }) || (selectedGemini.length && priorSelection && priorSelection !== currentSelection
+    ? `Contexto incorporado. La mejor línea cambia de ${priorSelection} a ${currentSelection}.`
+    : null);
   const director = buildOperationalDirectorVerdict({
     fixture: base.fixture,
     competition: base.competition,
@@ -294,10 +340,11 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextReanalysisMessage,
   });
   const evidence = asEvidence(base, oddsResult, context, geminiContext);
-  const parlayInput = director.parlay_eligibility === "eligible" ? [{ fixture_id: base.fixture.fixtureId, candidate_id: primaryCandidate?.candidate_id, ranking_version: primaryCandidate?.ranker_version, market_family: primaryCandidate?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability, uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low, analysis_confidence_score: director.analysis_confidence_score }] : [];
+  const eligibleForParlayReview = ["eligible", "eligible_with_caution"].includes(director.parlay_eligibility);
+  const parlayInput = eligibleForParlayReview ? [{ fixture_id: base.fixture.fixtureId, candidate_id: primaryCandidate?.candidate_id, ranking_version: primaryCandidate?.ranker_version, market_family: primaryCandidate?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability, uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low, analysis_confidence_score: director.analysis_confidence_score, price_status: director.price_assessment.status, price_gap: director.price_assessment.price_gap }] : [];
   const parlay = buildConservativeParlays(parlayInput);
   director.parlay_authorization = parlay.status;
-  const parlayCandidate = director.parlay_eligibility === "eligible" ? {
+  const parlayCandidate = eligibleForParlayReview ? {
     fixture_id: base.fixture.fixtureId,
     candidate_id: primaryCandidate?.candidate_id,
     ranking_version: primaryCandidate?.ranker_version,
@@ -313,6 +360,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     freshness: selectedOdds?.freshness,
     market_suitability: director.market_suitability,
     uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low,
+    price_status: director.price_assessment.status,
+    price_gap: director.price_assessment.price_gap,
   } : null;
   const version = buildAnalysisVersion({
     fixture: base.fixture,
@@ -342,7 +391,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     market_suitability: director.market_suitability,
     analysis_confidence_score: director.analysis_confidence_score,
     preliminary_probability: preliminaryProbability,
-    status: director.authorizes_consideration ? "apt_for_consideration" : director.market_suitability,
+    status: director.individual_eligibility,
     conditions: director.conditions,
     reasons: director.reasons,
     risks: director.risks,

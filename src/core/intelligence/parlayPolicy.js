@@ -19,6 +19,8 @@ export function buildConservativeParlays(candidates = []) {
     ["verified_provider", "user_reported"].includes(item.odds_source_status) &&
     item.freshness === "fresh" &&
     item.preliminary_probability?.probability_status === "preliminary" &&
+    (item.price_status === undefined || ["favorable_preliminary", "marginal"].includes(item.price_status)) &&
+    (item.price_status === undefined || item.price_status !== "marginal" || Number(item.price_gap) > 0) &&
     Number(item.uncertainty_width ?? 0) <= 0.35 &&
     Number(item.analysis_confidence_score ?? 100) >= 60 &&
     Boolean(item.candidate_id) &&

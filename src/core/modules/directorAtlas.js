@@ -543,25 +543,38 @@ export function buildOperationalDirectorVerdict({
   const probability = marketCandidate?.preliminary_probability ?? preliminaryProbability?.point_estimate ?? null;
   const uncertaintyLow = marketCandidate?.uncertainty_low ?? preliminaryProbability?.uncertainty_low ?? null;
   const uncertaintyHigh = marketCandidate?.uncertainty_high ?? preliminaryProbability?.uncertainty_high ?? null;
-  const priceStatus = oddsQuote
+  const quoteStatus = oddsQuote
     ? oddsQuote.source_status || (oddsQuote.freshness === "stale" || oddsQuote.verification_status === "stale"
       ? "stale"
       : oddsQuote.verification_status === "verified_provider"
         ? "verified_current"
         : "user_reported_current")
     : marketCandidate?.price_status || "unavailable";
-  const pricePending = ["unavailable", "stale", "incompatible_line", "incompatible_selection"].includes(priceStatus);
+  const priceEvaluation = suitability?.price_evaluation || {
+    status: ["unavailable", "stale"].includes(quoteStatus) ? quoteStatus : "marginal",
+    message: quoteStatus === "stale"
+      ? "La cuota anterior no se usa para evaluar el precio. El pronóstico deportivo se mantiene."
+      : quoteStatus === "unavailable"
+        ? "Atlas ya identificó la mejor opción deportiva. Falta una cuota actual para evaluar el precio."
+        : "La cuota está disponible, pero la comparación deportiva permanece limitada.",
+    price_gap: null,
+    price_gap_percentage_points: null,
+    expected_value_claimed: false,
+    model_notice: "El modelo es preliminar y aún no está suficientemente calibrado para afirmar valor esperado.",
+  };
+  const priceStatus = priceEvaluation.status;
+  const pricePending = ["unavailable", "stale"].includes(priceStatus);
   let suitabilityStatus = requestedSuitability;
   if (requestedSuitability !== MARKET_SUITABILITY.BLOCKED) {
     if (!marketCandidate || !probabilityAvailable) suitabilityStatus = MARKET_SUITABILITY.INSUFFICIENT_DATA;
     else if ((marketCandidate.sports_score ?? 0) < 45) suitabilityStatus = MARKET_SUITABILITY.NOT_VIABLE;
-    else if (pricePending) suitabilityStatus = MARKET_SUITABILITY.REVIEW_ONLY;
-    else if (priceStatus === "user_reported_current" || (marketCandidate.sports_score ?? 0) < 70) suitabilityStatus = MARKET_SUITABILITY.VIABLE_WITH_CAUTION;
-    else suitabilityStatus = MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS;
+    else if (!suitability?.price_evaluation && pricePending) suitabilityStatus = MARKET_SUITABILITY.REVIEW_ONLY;
+    else if (!suitability?.price_evaluation && (quoteStatus === "user_reported_current" || (marketCandidate.sports_score ?? 0) < 70)) suitabilityStatus = MARKET_SUITABILITY.VIABLE_WITH_CAUTION;
+    else if (!suitability?.price_evaluation) suitabilityStatus = MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS;
   }
   const displayStatuses = {
     blocked: "Análisis bloqueado",
-    not_viable: "No — mercado no viable",
+    not_viable: priceStatus === "unfavorable" ? "No — la cuota no compensa la incertidumbre" : "No — mercado no viable",
     insufficient_data: "Información insuficiente",
     review_only: "Todavía no — falta evaluar la cuota",
     viable_with_caution: "Solo con cautela",
@@ -581,13 +594,15 @@ export function buildOperationalDirectorVerdict({
   verdicts.review_only = priceStatus === "stale"
     ? `Todavía no. La cuota anterior no se usa para evaluar el precio; el pronóstico deportivo ${selectionLabel} se mantiene.`
     : `Todavía no. ${selectionLabel} es el candidato deportivo actual, pero falta una cuota vigente y compatible.`;
-  verdicts.not_viable = `No. ${selectionLabel} no es viable con los datos actuales.`;
+  verdicts.not_viable = priceStatus === "unfavorable"
+    ? `No. ${selectionLabel} conserva respaldo deportivo provisional, pero no es viable a la cuota actual.`
+    : `No. ${selectionLabel} no es viable con los datos actuales.`;
   const decisionCodes = {
     blocked: "blocked",
     not_viable: "no",
     insufficient_data: "insufficient",
     review_only: "not_yet",
-    viable_with_caution: "not_yet",
+    viable_with_caution: "caution",
     suitable_under_conditions: "yes",
   };
   const conditions = [...new Set(suitability?.conditions || [])];
@@ -604,54 +619,54 @@ export function buildOperationalDirectorVerdict({
     `Confianza del análisis: ${confidence?.analysis_confidence_score || 0}%, ${String(confidence?.confidence_label || "baja").replaceAll("_", " ")}. Este porcentaje mide calidad y coherencia de evidencia, no probabilidad de acierto.`,
   ].filter(Boolean);
   const uncertaintyWidth = probabilityAvailable ? uncertaintyHigh - uncertaintyLow : null;
-  const currentPrice = ["verified_current", "user_reported_current"].includes(priceStatus);
+  const currentPrice = ["verified_current", "user_reported_current"].includes(quoteStatus);
   const parlayEligibility = suitabilityStatus === MARKET_SUITABILITY.BLOCKED
     ? "blocked"
-    : currentPrice && probabilityAvailable && uncertaintyWidth <= 0.35 && (confidence?.analysis_confidence_score || 0) >= 60 && [MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS, MARKET_SUITABILITY.VIABLE_WITH_CAUTION].includes(suitabilityStatus)
-      ? "eligible"
-      : marketCandidate && [MARKET_SUITABILITY.REVIEW_ONLY, MARKET_SUITABILITY.VIABLE_WITH_CAUTION].includes(suitabilityStatus)
+    : priceStatus === "unfavorable"
+      ? "not_eligible"
+      : pricePending
         ? "review_only"
-        : "not_eligible";
+        : suitabilityStatus === MARKET_SUITABILITY.REVIEW_ONLY
+          ? "review_only"
+        : [MARKET_SUITABILITY.NOT_VIABLE, MARKET_SUITABILITY.INSUFFICIENT_DATA].includes(suitabilityStatus)
+          ? "not_eligible"
+        : !currentPrice || !probabilityAvailable || uncertaintyWidth > 0.35 || (confidence?.analysis_confidence_score || 0) < 60
+          ? "not_eligible"
+          : priceStatus === "favorable_preliminary"
+            ? "eligible"
+            : priceStatus === "marginal" && Number(priceEvaluation.price_gap) > 0
+              ? "eligible_with_caution"
+              : "not_eligible";
   const individualEligibility = {
     [MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS]: "eligible_under_conditions",
     [MARKET_SUITABILITY.VIABLE_WITH_CAUTION]: "viable_with_caution",
     [MARKET_SUITABILITY.REVIEW_ONLY]: "review_only",
-    [MARKET_SUITABILITY.NOT_VIABLE]: "not_viable",
+    [MARKET_SUITABILITY.NOT_VIABLE]: priceStatus === "unfavorable" ? "not_viable_at_this_price" : "not_viable",
     [MARKET_SUITABILITY.BLOCKED]: "blocked",
     [MARKET_SUITABILITY.INSUFFICIENT_DATA]: "insufficient_data",
   }[suitabilityStatus] || "insufficient_data";
   const nextReviewByPhase = {
     early_review: "Revisar nuevamente el día anterior al partido o cuando cambien la línea, la cuota o el contexto.",
     day_before: "Revisar tres horas antes del inicio y al publicarse novedades de alineación.",
+    hours_before: "Revisar de nuevo al entrar en la ventana de seis horas antes del partido.",
     three_hours_before: "Revisar una hora antes del inicio o ante movimientos de cuota.",
     one_hour_before: "Revisar treinta minutos antes del inicio y confirmar alineaciones.",
     thirty_minutes_before: "Hacer la revisión prepartido final si cambian alineaciones o cuota.",
     final_pre_match: "No reutilizar este dictamen después del inicio; crear una nueva revisión si el partido sigue pendiente.",
+    pre_match_closed: "El partido ya comenzó; el análisis prepartido está cerrado.",
   };
   const temporalStatus = contextReanalysisMessage
     ? "updated_forecast"
     : phase === "early_review"
       ? "early_forecast"
-      : phase === "final_pre_match"
+      : phase === "pre_match_closed"
+        ? "pre_match_closed"
+        : phase === "final_pre_match"
         ? "final_pre_match_forecast"
         : "provisional_forecast";
   const impliedProbability = oddsQuote?.implied_probability ?? null;
-  const preliminaryDifference = probabilityAvailable && Number.isFinite(impliedProbability)
-    ? Number((probability - impliedProbability).toFixed(4))
-    : null;
-  const priceMessage = priceStatus === "unavailable"
-    ? "Atlas ya identificó la mejor opción deportiva. Falta una cuota actual para evaluar el precio."
-    : priceStatus === "stale"
-      ? "La cuota anterior no se usa para evaluar el precio. El pronóstico deportivo se mantiene."
-      : priceStatus === "incompatible_line"
-        ? "La cuota no coincide con la línea deportiva evaluada."
-        : priceStatus === "incompatible_selection"
-          ? "La cuota no coincide con la dirección deportiva evaluada."
-          : preliminaryDifference === null
-            ? "La cuota está disponible, pero la comparación deportiva permanece limitada."
-            : preliminaryDifference > 0
-              ? "La estimación preliminar está por encima de la probabilidad implícita, pero el intervalo de incertidumbre es amplio y el modelo aún no está calibrado para afirmar valor esperado."
-              : "La estimación preliminar se compara con la probabilidad implícita, pero no permite afirmar valor esperado.";
+  const preliminaryDifference = priceEvaluation.price_gap ?? null;
+  const priceMessage = priceEvaluation.message;
   const sportsVerdict = marketCandidate ? {
     status: (marketCandidate.sports_score ?? 0) >= 58 ? "sports_candidate" : "review_only",
     market_family: marketCandidate.market_family,
@@ -664,7 +679,8 @@ export function buildOperationalDirectorVerdict({
     sports_score: marketCandidate.sports_score ?? 0,
     confidence_score: confidence?.analysis_confidence_score || 0,
     temporal_status: temporalStatus,
-    provisional: temporalStatus !== "final_pre_match_forecast",
+    provisional: !["final_pre_match_forecast", "pre_match_closed"].includes(temporalStatus),
+    message: `${selectionLabel} conserva respaldo deportivo provisional.`,
     explanation: marketSelection?.explanation || "Candidato ordenado por calidad deportiva sin usar la cuota.",
   } : {
     status: "insufficient_information",
@@ -676,17 +692,19 @@ export function buildOperationalDirectorVerdict({
     provisional: true,
   };
   const priceAssessment = {
-    status: priceStatus,
+    ...priceEvaluation,
+    status: suitability?.price_evaluation ? priceStatus : quoteStatus,
     message: priceMessage,
     bookmaker: oddsQuote?.bookmaker_name || null,
     decimal_odds: oddsQuote?.decimal_odds || null,
     implied_probability: impliedProbability,
     freshness: oddsQuote?.freshness || "unavailable",
-    source_status: priceStatus,
+    source_status: quoteStatus,
     consulted_at: oddsQuote?.consulted_at || null,
     timezone: oddsQuote?.timezone || null,
     market_matches: !["unavailable", "incompatible_line", "incompatible_selection"].includes(priceStatus),
     preliminary_difference: preliminaryDifference,
+    price_gap_percentage_points: priceEvaluation.price_gap_percentage_points ?? null,
     expected_value_claimed: false,
   };
   const resolvedMissingData = [...new Set(missingData)].filter((item) =>
@@ -710,7 +728,9 @@ export function buildOperationalDirectorVerdict({
     contract: "DirectorVerdict",
     version: 3,
     verdict: verdicts[suitabilityStatus],
-    display_status: displayStatuses[suitabilityStatus],
+    display_status: priceStatus === "unfavorable" && suitabilityStatus === MARKET_SUITABILITY.NOT_VIABLE
+      ? "NO — LA CUOTA NO COMPENSA LA INCERTIDUMBRE"
+      : displayStatuses[suitabilityStatus],
     decision_code: decisionCodes[suitabilityStatus] || "insufficient",
     fixture: fixture ? {
       fixture_id: fixture.fixtureId,
@@ -785,8 +805,22 @@ export function buildOperationalDirectorVerdict({
     parlay_authorization: parlayAuthorization,
     intended_use: ["individual", "parlay", "both"].includes(intendedUse) ? intendedUse : "individual",
     individual_eligibility: individualEligibility,
+    individual_eligibility_reason: priceStatus === "unfavorable"
+      ? "La selección conserva respaldo deportivo, pero no es viable a esta cuota."
+      : conditions[0] || priceMessage,
     parlay_eligibility: parlayEligibility,
-    next_action: pricePending ? "Buscar o introducir una cuota actual para la selección y línea exactas." : conditions[0] || "Revisar nuevamente el contexto entre 60 y 30 minutos antes del inicio.",
+    parlay_eligibility_reason: priceStatus === "unfavorable"
+      ? `La cuota ${oddsQuote?.decimal_odds} exige una probabilidad implícita del ${Number((Number(impliedProbability) * 100).toFixed(1))}%, superior a la estimación preliminar de Atlas del ${Number((Number(probability) * 100).toFixed(1))}%.`
+      : parlayEligibility === "eligible_with_caution"
+        ? "La estimación supera marginalmente la implícita, pero requiere revisión posterior por incertidumbre o contexto."
+        : parlayEligibility === "eligible"
+          ? "La evaluación preliminar de precio, la incertidumbre y la confianza cumplen los criterios actuales."
+          : priceMessage,
+    next_action: pricePending
+      ? "Buscar o introducir una cuota actual para la selección y línea exactas."
+      : priceStatus === "unfavorable"
+        ? "No utilizar esta selección a la cuota actual; reevaluar solo si cambia el precio o la evidencia deportiva."
+        : conditions[0] || "Revisar nuevamente el contexto entre 60 y 30 minutos antes del inicio.",
     next_review: nextReviewByPhase[phase] || nextReviewByPhase.early_review,
     evidence_refs: [...new Set(evidenceRefs)].filter(Boolean),
     engine_version: engineVersion,
