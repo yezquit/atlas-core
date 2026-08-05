@@ -18,6 +18,9 @@ export async function POST(request) {
   } catch {
     return Response.json({ status: DATA_LOAD_STATUS.UNAVAILABLE, errorCode: "invalid_json", message: "La solicitud no contiene JSON válido." }, { status: 400 });
   }
-  const result = await analyzeOperationalFixtureOnServer(input || {}, { reanalysis: Boolean(input?.reanalysis) });
+  const result = await analyzeOperationalFixtureOnServer({
+    ...(input || {}),
+    timezone: input?.timezone || process.env.ATLAS_DEFAULT_TIMEZONE,
+  }, { reanalysis: Boolean(input?.reanalysis) });
   return Response.json(result, { status: statusCode(result) });
 }

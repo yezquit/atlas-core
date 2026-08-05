@@ -1,6 +1,7 @@
 import { DATA_LOAD_STATUS } from "../contracts/atlasContracts.js";
 import { normalizeFootballFixtures } from "../modules/footballFixtureNormalizer.js";
 import { normalizeFixtureStatistics } from "../modules/footballStatisticsNormalizer.js";
+import { localDateInterval, normalizeTimeZone } from "../intelligence/dateTimeContext.js";
 
 function successful(response, details = {}) {
   return { status: DATA_LOAD_STATUS.SUCCESS, response, ...details };
@@ -77,24 +78,27 @@ export function createSportsDataGateway(runtime) {
     });
   }
 
-  async function loadFixturesForDate({ competition, date, season }) {
+  async function loadFixturesForDate({ competition, date, season, timezone }) {
+    const operationalTimezone = normalizeTimeZone(timezone);
+    const dateInterval = localDateInterval(date, operationalTimezone);
     const result = await runtime.request({
       pathname: "/fixtures",
-      query: { league: competition.id, season, date },
+      query: { league: competition.id, season, date, timezone: operationalTimezone },
       ttlSeconds: 300,
       tags: [
         `competition:${competition.id}`,
         `season:${season}`,
         `date:${date}`,
+        `timezone:${operationalTimezone}`,
       ],
-      externalIds: { competitionId: competition.id },
+      externalIds: { competitionId: competition.id, timezone: operationalTimezone, localDate: date },
     });
     if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
-    const fixtures = normalizeFootballFixtures(result.response).filter(
+    const fixtures = normalizeFootballFixtures(result.response, { timezone: operationalTimezone }).filter(
       (fixture) =>
         Number(fixture.competition.id) === Number(competition.id) &&
         Number(fixture.competition.season) === Number(season) &&
-        String(fixture.date.utc || "").slice(0, 10) === date
+        fixture.date.local_calendar_date === date
     );
     return {
       status: fixtures.length ? DATA_LOAD_STATUS.SUCCESS : DATA_LOAD_STATUS.EMPTY,
@@ -103,23 +107,27 @@ export function createSportsDataGateway(runtime) {
         ? `${fixtures.length} partido(s) verificado(s).`
         : "No hay partidos para la fecha seleccionada.",
       requestMeta: result.requestMeta,
+      dateInterval,
+      timezone: operationalTimezone,
     };
   }
 
-  async function loadFixtureById({ fixtureId, competition, date, season }) {
+  async function loadFixtureById({ fixtureId, competition, date, season, timezone }) {
+    const operationalTimezone = normalizeTimeZone(timezone);
     const result = await runtime.request({
       pathname: "/fixtures",
-      query: { id: fixtureId },
+      query: { id: fixtureId, timezone: operationalTimezone },
       ttlSeconds: 300,
       tags: [
         `fixture:${fixtureId}`,
         `competition:${competition.id}`,
         `season:${season}`,
+        `timezone:${operationalTimezone}`,
       ],
-      externalIds: { fixtureId, competitionId: competition.id },
+      externalIds: { fixtureId, competitionId: competition.id, timezone: operationalTimezone, localDate: date },
     });
     if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
-    const exact = normalizeFootballFixtures(result.response).filter(
+    const exact = normalizeFootballFixtures(result.response, { timezone: operationalTimezone }).filter(
       (fixture) => Number(fixture.fixtureId) === Number(fixtureId)
     );
     if (exact.length !== 1) {
@@ -143,7 +151,7 @@ export function createSportsDataGateway(runtime) {
     const contextMatches =
       Number(fixture.competition.id) === Number(competition.id) &&
       Number(fixture.competition.season) === Number(season) &&
-      String(fixture.date.utc || "").slice(0, 10) === date;
+      fixture.date.local_calendar_date === date;
     if (!contextMatches) {
       return unavailable(
         "fixture_selection_mismatch",

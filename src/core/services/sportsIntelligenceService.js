@@ -17,6 +17,7 @@ import { buildTeamRecentIntelligence } from "../intelligence/teamRecentIntellige
 import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
+import { normalizeTimeZone } from "../intelligence/dateTimeContext.js";
 
 const PROFILE_WINDOW_DAYS = 120;
 const PROFILE_FIXTURE_LIMIT = 10;
@@ -85,7 +86,12 @@ export function validateSportsAnalysisInput(input = {}) {
       message: "El mercado no pertenece al catálogo de Fase 2.",
     };
   }
-  return { competition, season, fixtureId: fixtureValidation.fixtureId };
+  return {
+    competition,
+    season,
+    fixtureId: fixtureValidation.fixtureId,
+    timezone: normalizeTimeZone(input.timezone),
+  };
 }
 
 async function loadStatisticsMap(gateway, fixtureIds) {
@@ -107,7 +113,7 @@ export async function analyzeSportsFixture(input, gateway) {
   if (validation.errorCode) {
     return failure({ ...validation, runtime: gateway.runtime });
   }
-  const { competition, season, fixtureId } = validation;
+  const { competition, season, fixtureId, timezone } = validation;
   const metadata = await gateway.loadCompetitionMetadata(competition, season);
   if (metadata.status !== DATA_LOAD_STATUS.SUCCESS) {
     return failure({ ...metadata, runtime: gateway.runtime });
@@ -118,6 +124,7 @@ export async function analyzeSportsFixture(input, gateway) {
     competition,
     date: input.date,
     season,
+    timezone,
   });
   if (selected.status !== DATA_LOAD_STATUS.SUCCESS) {
     return {
@@ -261,6 +268,7 @@ export async function analyzeSportsFixture(input, gateway) {
     selectedFixtureId: fixtureId,
     fixture,
     competition: { ...competition },
+    timezone,
     competitionMetadata: metadata,
     leagueProfile,
     homeTeamProfile,
@@ -332,6 +340,7 @@ export async function scanSportsJourney(input, gateway) {
       competition,
       date: input.date,
       season,
+      timezone: input.timezone,
     });
     if (result.status === DATA_LOAD_STATUS.SUCCESS) {
       fixtures.push(
@@ -353,6 +362,7 @@ export async function scanSportsJourney(input, gateway) {
         fixtureId: item.fixture.fixtureId,
         marketId: requestedMarketIds.length === 1 ? requestedMarketIds[0] : "open",
         marketIds: requestedMarketIds,
+        timezone: input.timezone,
       },
       gateway
     );
@@ -379,6 +389,9 @@ export async function scanSportsJourney(input, gateway) {
       fixtureId: analysis.fixture.fixtureId,
       fixture: `${analysis.fixture.teams.home.name} vs ${analysis.fixture.teams.away.name}`,
       kickoff: analysis.fixture.date.utc,
+      kickoffLocal: analysis.fixture.date.kickoff_local,
+      timezone: analysis.fixture.date.timezone,
+      localCalendarDate: analysis.fixture.date.local_calendar_date,
       market: analysis.selectedMarket.market_label,
       marketId: analysis.selectedMarket.market_family,
       status: analysis.director.status,
@@ -405,6 +418,7 @@ export async function scanSportsJourney(input, gateway) {
         ? "No se encontraron partidos en las competiciones seleccionadas."
         : `${highlighted.length} candidato(s) destacados tras revisar la jornada.`,
     date: input.date,
+    timezone: normalizeTimeZone(input.timezone),
     competitionsQueried: competitions.map((item) => item.localName),
     fixturesFound: fixtures.length,
     fixturesReviewed: reviewed.length,

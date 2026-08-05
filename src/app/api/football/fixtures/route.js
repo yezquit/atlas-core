@@ -17,6 +17,7 @@ export async function GET(request) {
     date: searchParams.get("date") || "",
     leagueKey: searchParams.get("leagueKey") || "",
     season: searchParams.get("season") || "",
+    timezone: searchParams.get("timezone") || process.env.ATLAS_DEFAULT_TIMEZONE,
   });
 
   return Response.json(result, {

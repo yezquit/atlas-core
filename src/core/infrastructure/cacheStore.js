@@ -1,4 +1,4 @@
-export const CACHE_SCHEMA_VERSION = 1;
+export const CACHE_SCHEMA_VERSION = 2;
 
 export function createMemoryCache({ now = () => Date.now() } = {}) {
   const entries = new Map();

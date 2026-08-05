@@ -28,6 +28,7 @@ export async function POST(request) {
     competitionKeys: input?.competitionKeys,
     marketIds: input?.marketIds,
     maximumFixtures: input?.maximumFixtures,
+    timezone: input?.timezone || process.env.ATLAS_DEFAULT_TIMEZONE,
   });
   return Response.json(result, { status: statusCode(result) });
 }

@@ -10,6 +10,7 @@ import {
 } from "../data/apiFootballLeagues.js";
 import { normalizeFootballFixtures } from "../modules/footballFixtureNormalizer.js";
 import { normalizeFixtureStatistics } from "../modules/footballStatisticsNormalizer.js";
+import { localDateInterval, normalizeTimeZone } from "../intelligence/dateTimeContext.js";
 
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 8_000;
 export const FIXTURE_CACHE_SECONDS = 300;
@@ -79,7 +80,7 @@ export function validateSeason(value, { date, league } = {}) {
   return { status: DATA_LOAD_STATUS.SUCCESS, season };
 }
 
-export function validateFixtureQuery({ date, leagueKey, season }) {
+export function validateFixtureQuery({ date, leagueKey, season, timezone }) {
   if (!isValidIsoDate(date)) {
     return unavailable(
       "invalid_date",
@@ -106,6 +107,7 @@ export function validateFixtureQuery({ date, leagueKey, season }) {
     leagueKey,
     season: seasonValidation.season,
     league,
+    timezone: normalizeTimeZone(timezone),
   };
 }
 
@@ -303,6 +305,8 @@ export async function loadFixturesByDate(input, options = {}) {
     leagueId: validation.league.id,
     leagueName: validation.league.localName,
     season: validation.season,
+    timezone: validation.timezone,
+    dateInterval: localDateInterval(validation.date, validation.timezone),
   };
   const providerResult = await requestApiFootball({
     path: "/fixtures",
@@ -310,6 +314,7 @@ export async function loadFixturesByDate(input, options = {}) {
       date: validation.date,
       league: validation.league.id,
       season: validation.season,
+      timezone: validation.timezone,
     },
     ...options,
     cacheSeconds: options.cacheSeconds ?? FIXTURE_CACHE_SECONDS,
@@ -319,12 +324,12 @@ export async function loadFixturesByDate(input, options = {}) {
     return createFixtureCatalogResult({ ...providerResult, query });
   }
 
-  const fixtures = normalizeFootballFixtures(providerResult.response).filter(
+  const fixtures = normalizeFootballFixtures(providerResult.response, { timezone: validation.timezone }).filter(
     (fixture) =>
       fixture.fixtureId &&
       fixture.competition.id === validation.league.id &&
       Number(fixture.competition.season) === validation.season &&
-      String(fixture.date.utc || "").slice(0, 10) === validation.date
+      fixture.date.local_calendar_date === validation.date
   );
 
   if (fixtures.length === 0) {
@@ -372,7 +377,7 @@ export async function loadSelectedFixture(input, options = {}) {
   const selectedFixtureId = idValidation.fixtureId;
   const providerResult = await requestApiFootball({
     path: "/fixtures",
-    query: { id: selectedFixtureId },
+    query: { id: selectedFixtureId, timezone: queryValidation.timezone },
     ...options,
     cacheSeconds: options.cacheSeconds ?? FIXTURE_CACHE_SECONDS,
   });
@@ -381,7 +386,7 @@ export async function loadSelectedFixture(input, options = {}) {
     return { ...providerResult, selectedFixtureId, fixture: null, evidence: [] };
   }
 
-  const exactMatches = normalizeFootballFixtures(providerResult.response).filter(
+  const exactMatches = normalizeFootballFixtures(providerResult.response, { timezone: queryValidation.timezone }).filter(
     (fixture) => fixture.fixtureId === selectedFixtureId
   );
 
@@ -411,7 +416,7 @@ export async function loadSelectedFixture(input, options = {}) {
   const selectionMatches =
     fixture.competition.id === queryValidation.league.id &&
     Number(fixture.competition.season) === queryValidation.season &&
-    String(fixture.date.utc || "").slice(0, 10) === queryValidation.date;
+    fixture.date.local_calendar_date === queryValidation.date;
 
   if (!selectionMatches) {
     return {
@@ -441,6 +446,9 @@ export async function loadSelectedFixture(input, options = {}) {
           date: queryValidation.date,
           leagueId: queryValidation.league.id,
           season: queryValidation.season,
+          timezone: queryValidation.timezone,
+          kickoffUtc: fixture.date.kickoff_utc,
+          kickoffLocal: fixture.date.kickoff_local,
         },
         fetchedAt: new Date().toISOString(),
         quality: { exactId: true, exactContext: true },

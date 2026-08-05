@@ -4,6 +4,7 @@ import { SPORTS_MARKETS } from "@/core/intelligence/marketEngine";
 
 export default function Home() {
   const competitionGroups = groupApiFootballCompetitions();
+  const defaultTimezone = process.env.ATLAS_DEFAULT_TIMEZONE || "America/Bogota";
 
   return (
     <main className="atlas-page">
@@ -20,6 +21,7 @@ export default function Home() {
         <AtlasFunctionalClient
           competitionGroups={competitionGroups}
           markets={SPORTS_MARKETS}
+          defaultTimezone={defaultTimezone}
         />
       </section>
     </main>

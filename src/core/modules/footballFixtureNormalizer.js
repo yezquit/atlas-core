@@ -1,7 +1,10 @@
-export function normalizeFootballFixture(item) {
+import { fixtureDateContext } from "../intelligence/dateTimeContext.js";
+
+export function normalizeFootballFixture(item, { timezone } = {}) {
   const statusShort = item?.fixture?.status?.short || null;
   const referee = item?.fixture?.referee || null;
 
+  const dateContext = fixtureDateContext(item?.fixture?.date, timezone || item?.fixture?.timezone || "UTC");
   return {
     fixtureId: item?.fixture?.id || null,
 
@@ -19,8 +22,12 @@ export function normalizeFootballFixture(item) {
     },
 
     date: {
-      utc: item?.fixture?.date || null,
-      timezone: item?.fixture?.timezone || "UTC",
+      utc: dateContext.kickoff_utc,
+      kickoff_utc: dateContext.kickoff_utc,
+      kickoff_local: dateContext.kickoff_local,
+      timezone: dateContext.timezone,
+      local_calendar_date: dateContext.local_calendar_date,
+      local_label: dateContext.local_label,
     },
 
     status: {
@@ -83,6 +90,6 @@ export function normalizeFootballFixture(item) {
   };
 }
 
-export function normalizeFootballFixtures(items = []) {
-  return items.map(normalizeFootballFixture);
+export function normalizeFootballFixtures(items = [], options = {}) {
+  return items.map((item) => normalizeFootballFixture(item, options));
 }
