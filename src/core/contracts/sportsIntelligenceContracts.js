@@ -1,4 +1,4 @@
-export const SPORTS_INTELLIGENCE_VERSION = 2;
+export const SPORTS_INTELLIGENCE_VERSION = 3;
 
 export const QUALITY_STATUS = Object.freeze({
   VERIFIED: "verified",
@@ -59,6 +59,7 @@ export function createLeagueProfile(input = {}) {
     quality_status: input.qualityStatus || QUALITY_STATUS.UNAVAILABLE,
     labels: input.labels || [],
     warnings: input.warnings || [],
+    event_samples: input.eventSamples || {},
     source_refs: input.sourceRefs || [],
     thresholds_version: input.thresholdsVersion || "league-v1",
   };
@@ -83,6 +84,7 @@ export function createTeamRecentProfile(input = {}) {
     quality_status: input.qualityStatus || QUALITY_STATUS.UNAVAILABLE,
     source_refs: input.sourceRefs || [],
     warnings: input.warnings || [],
+    event_samples: input.eventSamples || {},
   };
 }
 
@@ -111,6 +113,7 @@ export function createRefereeProfile(input = {}) {
     quality_status: input.qualityStatus || QUALITY_STATUS.UNAVAILABLE,
     source_refs: input.sourceRefs || [],
     warnings: input.warnings || [],
+    event_samples: input.eventSamples || {},
   };
 }
 

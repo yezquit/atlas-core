@@ -26,6 +26,14 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     corner_kicks: [],
     ball_possession: [],
   };
+  const detailedAgainst = Object.fromEntries(Object.keys(detailed).map((key) => [key, []]));
+  const matchTotals = {
+    goals: [],
+    total_shots: [],
+    shots_on_goal: [],
+    cards: [],
+    corners: [],
+  };
   const form = [];
 
   for (const fixture of fixtures) {
@@ -35,6 +43,7 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     if (!Number.isFinite(own) || !Number.isFinite(opponent)) continue;
     goalsFor.push(own);
     goalsAgainst.push(opponent);
+    matchTotals.goals.push(own + opponent);
     if (own > opponent) {
       wins += 1;
       form.push("W");
@@ -49,10 +58,32 @@ function summarize(teamId, fixtures, statisticsByFixture) {
       statisticsForFixture(statisticsByFixture, fixture.fixtureId),
       teamId
     );
+    const opponentTeamId = isHome ? fixture.teams.away.id : fixture.teams.home.id;
+    const opponentTeam = teamStatistics(
+      statisticsForFixture(statisticsByFixture, fixture.fixtureId),
+      opponentTeamId
+    );
     for (const key of Object.keys(detailed)) {
       const value = numericStat(team, key);
       if (Number.isFinite(value)) detailed[key].push(value);
+      const against = numericStat(opponentTeam, key);
+      if (Number.isFinite(against)) detailedAgainst[key].push(against);
     }
+    const totalFor = (key) => {
+      const ownValue = numericStat(team, key);
+      const againstValue = numericStat(opponentTeam, key);
+      return Number.isFinite(ownValue) && Number.isFinite(againstValue)
+        ? ownValue + againstValue
+        : null;
+    };
+    const shots = totalFor("total_shots");
+    const shotsOnGoal = totalFor("shots_on_goal");
+    const cards = totalFor("yellow_cards");
+    const corners = totalFor("corner_kicks");
+    if (Number.isFinite(shots)) matchTotals.total_shots.push(shots);
+    if (Number.isFinite(shotsOnGoal)) matchTotals.shots_on_goal.push(shotsOnGoal);
+    if (Number.isFinite(cards)) matchTotals.cards.push(cards);
+    if (Number.isFinite(corners)) matchTotals.corners.push(corners);
   }
 
   const sampleSize = goalsFor.length;
@@ -98,6 +129,13 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     detailed_sample_size: Math.max(...Object.values(detailed).map((values) => values.length), 0),
     average_rest_days: round(average(restIntervals), 1),
     streak: form.join(""),
+    event_samples: {
+      goals: { match_totals: matchTotals.goals, for: goalsFor, conceded: goalsAgainst },
+      total_shots: { match_totals: matchTotals.total_shots, for: detailed.total_shots, conceded: detailedAgainst.total_shots },
+      shots_on_goal: { match_totals: matchTotals.shots_on_goal, for: detailed.shots_on_goal, conceded: detailedAgainst.shots_on_goal },
+      cards: { match_totals: matchTotals.cards, for: detailed.yellow_cards, conceded: detailedAgainst.yellow_cards },
+      corners: { match_totals: matchTotals.corners, for: detailed.corner_kicks, conceded: detailedAgainst.corner_kicks },
+    },
   };
 }
 
@@ -157,5 +195,6 @@ export function buildTeamRecentIntelligence({
             : QUALITY_STATUS.VERIFIED,
     sourceRefs: recent.map((fixture) => `fixture:${fixture.fixtureId}`),
     warnings,
+    eventSamples: general.event_samples,
   });
 }

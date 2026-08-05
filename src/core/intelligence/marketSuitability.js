@@ -15,6 +15,7 @@ export function assessMarketSuitability({
   contextBlocked = false,
   confidenceScore = 0,
   threshold = 75,
+  preliminaryProbability = null,
 } = {}) {
   const conditions = [];
   let status;
@@ -37,6 +38,9 @@ export function assessMarketSuitability({
   ) {
     status = MARKET_SUITABILITY.BLOCKED;
     conditions.push("Actualizar la cuota vencida antes de considerar el mercado.");
+  } else if (preliminaryProbability?.probability_status !== "preliminary") {
+    status = MARKET_SUITABILITY.REVIEW_ONLY;
+    conditions.push("Completar la muestra compatible requerida por el modelo preliminar para esta línea exacta.");
   } else if (confidenceScore < threshold) {
     status = MARKET_SUITABILITY.VIABLE_WITH_CAUTION;
     conditions.push(`Elevar la confianza informativa al umbral configurado de ${threshold}.`);
@@ -53,7 +57,9 @@ export function assessMarketSuitability({
     status,
     apt_for_consideration: status === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
     conditions: [...new Set(conditions)],
-    estimated_probability: null,
-    probability_status: "unavailable",
+    estimated_probability: preliminaryProbability?.point_estimate ?? null,
+    probability_status: preliminaryProbability?.probability_status || "unavailable",
+    uncertainty_low: preliminaryProbability?.uncertainty_low ?? null,
+    uncertainty_high: preliminaryProbability?.uncertainty_high ?? null,
   };
 }

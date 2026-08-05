@@ -91,6 +91,7 @@ export function buildRefereeIntelligence({
     if (Number.isFinite(awayValue)) awayYellow.push(awayValue);
   }
   const yellow = round(average(values("yellow_cards")));
+  const cardSamples = values("yellow_cards");
   const leagueYellow = leagueProfile?.metrics?.yellow_cards_per_match;
   const comparable =
     leagueYellow?.coverage_status === QUALITY_STATUS.VERIFIED &&
@@ -144,5 +145,6 @@ export function buildRefereeIntelligence({
         ? ["No se compara contra la liga con coberturas incompatibles."]
         : []),
     ],
+    eventSamples: { cards: { match_totals: cardSamples } },
   });
 }

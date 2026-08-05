@@ -105,6 +105,8 @@ export function createOperationalAnalysisVersion(input = {}) {
     odds: input.odds || [],
     gemini_context: input.geminiContext || null,
     analysis_confidence: input.analysisConfidence || null,
+    preliminary_probability: input.preliminaryProbability || null,
+    parlay_candidate: input.parlayCandidate || null,
     director: input.director || null,
     parlay: input.parlay || null,
     engine_version: input.engineVersion || OPERATIONAL_ENGINE_VERSION,

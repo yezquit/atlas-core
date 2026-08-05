@@ -187,6 +187,23 @@ export function buildLeagueIntelligence({
   const detailedCovered = Object.values(metrics).filter(
     (metric) => metric.coverage_status === QUALITY_STATUS.VERIFIED
   ).length;
+  const eventSamples = {
+    goals: {
+      match_totals: scores.map(({ home, away }) => home + away),
+    },
+    total_shots: {
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "total_shots")).filter(Number.isFinite),
+    },
+    shots_on_goal: {
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "shots_on_goal")).filter(Number.isFinite),
+    },
+    cards: {
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "yellow_cards")).filter(Number.isFinite),
+    },
+    corners: {
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "corner_kicks")).filter(Number.isFinite),
+    },
+  };
 
   return createLeagueProfile({
     competitionId: competition?.id,
@@ -218,5 +235,6 @@ export function buildLeagueIntelligence({
     ],
     sourceRefs: included.map((fixture) => `fixture:${fixture.fixtureId}`),
     thresholdsVersion: LEAGUE_PROFILE_THRESHOLDS.version,
+    eventSamples,
   });
 }

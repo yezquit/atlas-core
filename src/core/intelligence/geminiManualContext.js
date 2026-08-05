@@ -38,6 +38,48 @@ function hostname(url) {
   }
 }
 
+function inferImpact(kind, content) {
+  if (kind === GEMINI_ITEM_KIND.CONTRADICTION || kind === GEMINI_ITEM_KIND.NOT_FOUND) return "limiting";
+  if (kind === GEMINI_ITEM_KIND.RUMOR) return "neutral";
+  const candidate = normalize(content);
+  if (/lesion|baja|sancion|ausencia|rotacion|fatiga|suspendid|duda|mal estado/.test(candidate)) return "unfavorable";
+  if (/confirmad|disponible|recuperad|titular|buen estado|descanso/.test(candidate)) return "favorable";
+  return "neutral";
+}
+
+function buildItem(content, kind, index, sourceOptions) {
+  const urls = extractUrls(content);
+  const dates = content.match(/\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b/g) || [];
+  return {
+    id: `gemini-${index + 1}`,
+    kind,
+    summary: content,
+    text: content,
+    source: urls[0] || null,
+    urls,
+    domain: urls[0] ? hostname(urls[0]) : null,
+    domains: urls.map(hostname).filter(Boolean),
+    publication_date: dates[0] || null,
+    publication_dates: dates,
+    provenance: "manual_gemini_paste",
+    source_classifications: urls.map((url) => classifySource(url, sourceOptions)),
+    verification_status: urls.length ? "user_reported" : "unverified",
+    validation_status: urls.length ? "user_reported" : "unverified",
+    impact: inferImpact(kind, content),
+    selected: kind !== GEMINI_ITEM_KIND.RUMOR,
+  };
+}
+
+function countersFor(items) {
+  return {
+    detected: items.length,
+    selected: items.filter((item) => item.selected).length,
+    rejected: items.filter((item) => !item.selected).length,
+    rumors: items.filter((item) => item.kind === GEMINI_ITEM_KIND.RUMOR).length,
+    limitations: items.filter((item) => [GEMINI_ITEM_KIND.CONTRADICTION, GEMINI_ITEM_KIND.NOT_FOUND].includes(item.kind)).length,
+  };
+}
+
 export function classifySource(url, { officialClubDomains = [], officialCompetitionDomains = [] } = {}) {
   const domain = hostname(url);
   if (!domain) return SOURCE_CLASSIFICATION.UNKNOWN;
@@ -112,18 +154,13 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
     }
     const content = rawLine.replace(/^\s*[-*\d.)]+\s*/, "").trim();
     if (!currentKind || !content) continue;
-    const urls = extractUrls(content);
-    items.push({
-      id: `gemini-${items.length + 1}`,
-      kind: currentKind,
-      text: content,
-      urls,
-      domains: urls.map(hostname).filter(Boolean),
-      source_classifications: urls.map((url) => classifySource(url, sourceOptions)),
-      publication_dates: content.match(/\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b/g) || [],
-      verification_status: urls.length ? "user_reported" : "unverified",
-      selected: currentKind !== GEMINI_ITEM_KIND.RUMOR,
-    });
+    items.push(buildItem(content, currentKind, items.length, sourceOptions));
+  }
+  if (!items.length && originalText) {
+    const paragraphs = originalText.split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
+    for (const paragraph of paragraphs) {
+      items.push(buildItem(paragraph, GEMINI_ITEM_KIND.PROBABLE, items.length, sourceOptions));
+    }
   }
   const urls = extractUrls(originalText);
   const mentionedFixtureIds = [...originalText.matchAll(/fixture(?:\s+id)?\s*[:#-]?\s*(\d+)/gi)].map((match) => Number(match[1]));
@@ -160,6 +197,7 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
     urls,
     domains: urls.map(hostname).filter(Boolean),
     items,
+    counters: countersFor(items),
     valid_for_reanalysis: Boolean(originalText) && !fixtureMismatch && !incompatibleDate,
     validation_errors: errors,
     warnings: [
@@ -171,9 +209,11 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
 
 export function selectGeminiItems(context, selectedIds = []) {
   const allowed = new Set(selectedIds);
+  const items = (context?.items || []).map((item) => ({ ...item, selected: allowed.has(item.id) }));
   return {
     ...context,
-    items: (context?.items || []).map((item) => ({ ...item, selected: allowed.has(item.id) })),
+    items,
     selected_items: (context?.items || []).filter((item) => allowed.has(item.id)),
+    counters: countersFor(items),
   };
 }

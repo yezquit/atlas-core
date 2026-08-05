@@ -18,6 +18,7 @@ export function buildConservativeParlays(candidates = []) {
     item.market_suitability === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS &&
     item.odds_source_status === "verified_provider" &&
     item.freshness === "fresh" &&
+    item.preliminary_probability?.probability_status === "preliminary" &&
     Number(item.decimal_odds) > 1
   );
   if (authorized.length < 6) {

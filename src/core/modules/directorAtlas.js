@@ -531,6 +531,8 @@ export function buildOperationalDirectorVerdict({
   risks = [],
   evidenceRefs = [],
   parlayAuthorization = "unsupported",
+  preliminaryProbability = null,
+  intendedUse = "individual",
   engineVersion = "atlas-operational-v1",
 }) {
   const suitabilityStatus = suitability?.status || MARKET_SUITABILITY.INSUFFICIENT_DATA;
@@ -550,21 +552,68 @@ export function buildOperationalDirectorVerdict({
     viable_with_caution: "Este mercado es viable únicamente para revisión cautelosa; aún requiere verificación adicional.",
     suitable_under_conditions: "Este mercado es apto para consideración a la línea indicada, sujeto a las condiciones informadas.",
   };
+  const selectionLabel = oddsQuote?.selection || marketAssessment?.market_label || "el mercado evaluado";
+  verdicts.suitable_under_conditions = `Sí. Atlas considera apto para consideración ${selectionLabel} a la línea y cuota indicadas, sujeto a las condiciones informadas.`;
+  verdicts.viable_with_caution = `Sí, pero con cautela. ${selectionLabel} conserva respaldo, aunque requiere verificación adicional antes del inicio.`;
+  verdicts.review_only = oddsQuote
+    ? `Todavía no. ${selectionLabel} permanece en revisión hasta completar la evidencia o vigencia requerida.`
+    : `Todavía no. ${selectionLabel} tiene respaldo estadístico, pero falta una línea y cuota vigentes.`;
+  verdicts.not_viable = `No. ${selectionLabel} no es viable con los datos actuales.`;
+  const decisionCodes = {
+    blocked: "blocked",
+    not_viable: "no",
+    insufficient_data: "insufficient",
+    review_only: "not_yet",
+    viable_with_caution: "not_yet",
+    suitable_under_conditions: "yes",
+  };
   const conditions = suitability?.conditions || [];
   const reasons = [
     `Confianza del análisis: ${confidence?.analysis_confidence_score || 0}%, ${String(confidence?.confidence_label || "baja").replaceAll("_", " ")}. Este porcentaje mide calidad y coherencia de evidencia, no probabilidad de acierto.`,
     ...supportingEvidence,
+    ...(preliminaryProbability?.probability_status === "preliminary"
+      ? [`La frecuencia estimada procede de ${preliminaryProbability.sample_size_effective} observaciones efectivas y ajuste hacia la base de liga.`]
+      : []),
   ];
+  const probabilityAvailable = preliminaryProbability?.probability_status === "preliminary";
+  const parlayEligibility = suitabilityStatus === MARKET_SUITABILITY.BLOCKED
+    ? "blocked"
+    : suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS && probabilityAvailable
+      ? "eligible"
+      : [MARKET_SUITABILITY.REVIEW_ONLY, MARKET_SUITABILITY.VIABLE_WITH_CAUTION].includes(suitabilityStatus)
+        ? "review_only"
+        : "not_eligible";
+  const individualEligibility = {
+    [MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS]: "eligible_under_conditions",
+    [MARKET_SUITABILITY.VIABLE_WITH_CAUTION]: "viable_with_caution",
+    [MARKET_SUITABILITY.REVIEW_ONLY]: "review_only",
+    [MARKET_SUITABILITY.NOT_VIABLE]: "not_viable",
+    [MARKET_SUITABILITY.BLOCKED]: "blocked",
+    [MARKET_SUITABILITY.INSUFFICIENT_DATA]: "insufficient_data",
+  }[suitabilityStatus] || "insufficient_data";
+  const nextReviewByPhase = {
+    early_review: "Revisar nuevamente el día anterior al partido o cuando cambien la línea, la cuota o el contexto.",
+    day_before: "Revisar tres horas antes del inicio y al publicarse novedades de alineación.",
+    three_hours_before: "Revisar una hora antes del inicio o ante movimientos de cuota.",
+    one_hour_before: "Revisar treinta minutos antes del inicio y confirmar alineaciones.",
+    thirty_minutes_before: "Hacer la revisión prepartido final si cambian alineaciones o cuota.",
+    final_pre_match: "No reutilizar este dictamen después del inicio; crear una nueva revisión si el partido sigue pendiente.",
+  };
   return {
     contract: "DirectorVerdict",
     version: 3,
     verdict: verdicts[suitabilityStatus],
     display_status: displayStatuses[suitabilityStatus],
+    decision_code: decisionCodes[suitabilityStatus] || "insufficient",
     fixture: fixture ? {
       fixture_id: fixture.fixtureId,
       home_team: fixture.teams?.home?.name || null,
       away_team: fixture.teams?.away?.name || null,
       kickoff: fixture.date?.utc || null,
+      kickoff_utc: fixture.date?.kickoff_utc || fixture.date?.utc || null,
+      kickoff_local: fixture.date?.kickoff_local || null,
+      timezone: fixture.date?.timezone || null,
+      local_calendar_date: fixture.date?.local_calendar_date || null,
       competition: competition?.localName || fixture.competition?.name || null,
       season: fixture.competition?.season || null,
     } : null,
@@ -575,26 +624,50 @@ export function buildOperationalDirectorVerdict({
     line: oddsQuote?.line || marketAssessment?.line || null,
     odds: oddsQuote?.decimal_odds || (marketAssessment?.odds ? Number(marketAssessment.odds) : null),
     odds_source_status: oddsQuote?.verification_status || "unavailable",
+    bookmaker: oddsQuote?.bookmaker_name || null,
+    odds_source: oddsQuote?.source || null,
+    odds_updated_at: oddsQuote?.updated_at || null,
+    odds_consulted_at: oddsQuote?.consulted_at || null,
+    odds_age_minutes: oddsQuote?.age_minutes ?? null,
+    odds_freshness: oddsQuote?.freshness || "unavailable",
+    odds_freshness_limit_minutes: oddsQuote?.freshness_limit_minutes ?? null,
+    odds_stale_reason: oddsQuote?.stale_reason || null,
     implied_probability: oddsQuote?.implied_probability ?? null,
     implied_probability_label: oddsQuote ? "Probabilidad implícita de la cuota" : null,
     analysis_confidence_score: confidence?.analysis_confidence_score || 0,
     confidence_label: confidence?.confidence_label || "baja",
     confidence_is_probability: false,
-    estimated_probability: null,
-    probability_status: "unavailable",
+    estimated_probability: probabilityAvailable ? preliminaryProbability.point_estimate : null,
+    probability_status: probabilityAvailable ? "preliminary" : "unavailable",
+    probability_methodology: preliminaryProbability?.methodology_version || null,
+    probability_uncertainty_low: probabilityAvailable ? preliminaryProbability.uncertainty_low : null,
+    probability_uncertainty_high: probabilityAvailable ? preliminaryProbability.uncertainty_high : null,
+    probability_effective_sample: preliminaryProbability?.sample_size_effective || 0,
+    probability_limitations: preliminaryProbability?.limitations || [],
+    model_validation_status: preliminaryProbability?.model_validation_status || "preliminary_unvalidated",
     market_suitability: suitabilityStatus,
     apt_for_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
     authorizes_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
     reasons: [...new Set(reasons)],
+    primary_reason: reasons[0] || verdicts[suitabilityStatus],
     supporting_evidence: [...new Set(supportingEvidence)],
+    primary_supporting_evidence: supportingEvidence[0] || null,
     opposing_evidence: [...new Set(opposingEvidence)],
+    primary_opposing_evidence: opposingEvidence[0] || null,
     contradictions: [...new Set(contradictions)],
     risks: [...new Set(risks)],
     missing_data: [...new Set(missingData)],
     avoid: ["No presentar el mercado como seguro.", "No confundir probabilidad implícita con probabilidad estimada.", "No perseguir pérdidas ni asumir rentabilidad."],
     conditions: [...new Set(conditions)],
+    blocking_condition: suitabilityStatus === MARKET_SUITABILITY.BLOCKED
+      ? conditions[0] || risks[0] || "Existe una condición crítica sin resolver."
+      : null,
     parlay_authorization: parlayAuthorization,
+    intended_use: ["individual", "parlay", "both"].includes(intendedUse) ? intendedUse : "individual",
+    individual_eligibility: individualEligibility,
+    parlay_eligibility: parlayEligibility,
     next_action: conditions[0] || "La decisión final corresponde al usuario; revisar el contexto antes del inicio.",
+    next_review: nextReviewByPhase[phase] || nextReviewByPhase.early_review,
     evidence_refs: [...new Set(evidenceRefs)].filter(Boolean),
     engine_version: engineVersion,
     can_recommend: false,

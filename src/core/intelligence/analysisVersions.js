@@ -14,6 +14,8 @@ export function buildAnalysisVersion(input, { idFactory, now = () => new Date().
     odds: input.odds,
     geminiContext: input.geminiContext,
     analysisConfidence: input.analysisConfidence,
+    preliminaryProbability: input.preliminaryProbability,
+    parlayCandidate: input.parlayCandidate,
     director: input.director,
     parlay: input.parlay,
     engineVersion: input.engineVersion,
@@ -34,6 +36,8 @@ export function compareAnalysisVersions(previous, current) {
   const removedEvidence = [...previousEvidence.keys()].filter((key) => !currentEvidence.has(key));
   const previousOdds = previous.director?.odds ?? null;
   const currentOdds = current.director?.odds ?? null;
+  const previousRisks = new Set(previous.director?.risks || []);
+  const currentRisks = new Set(current.director?.risks || []);
   const changes = {
     new_evidence: newEvidence,
     removed_or_stale_evidence: removedEvidence,
@@ -44,8 +48,22 @@ export function compareAnalysisVersions(previous, current) {
     line_change: previous.director?.line !== current.director?.line,
     odds_change: previousOdds !== currentOdds,
     confidence_change: (current.analysis_confidence?.analysis_confidence_score || 0) - (previous.analysis_confidence?.analysis_confidence_score || 0),
+    probability_change: (current.preliminary_probability?.point_estimate ?? null) !== (previous.preliminary_probability?.point_estimate ?? null),
+    probability_status_change: current.preliminary_probability?.probability_status !== previous.preliminary_probability?.probability_status,
+    gemini_change: JSON.stringify(previous.gemini_context?.selected_items || []) !== JSON.stringify(current.gemini_context?.selected_items || []),
+    risk_change: JSON.stringify(previous.director?.risks || []) !== JSON.stringify(current.director?.risks || []),
     suitability_change: previous.director?.market_suitability !== current.director?.market_suitability,
     verdict_change: previous.director?.verdict !== current.director?.verdict,
+    preliminary_probability: { previous: previous.preliminary_probability?.point_estimate ?? null, current: current.preliminary_probability?.point_estimate ?? null },
+    analysis_confidence: { previous: previous.analysis_confidence?.analysis_confidence_score ?? null, current: current.analysis_confidence?.analysis_confidence_score ?? null },
+    suitability: { previous: previous.director?.market_suitability || null, current: current.director?.market_suitability || null },
+    verdict: { previous: previous.director?.verdict || null, current: current.director?.verdict || null },
+    line: { previous: previous.director?.line ?? null, current: current.director?.line ?? null },
+    odds: { previous: previousOdds, current: currentOdds },
+    gemini_items_incorporated: current.gemini_context?.selected_items || [],
+    new_risks: [...currentRisks].filter((item) => !previousRisks.has(item)),
+    resolved_risks: [...previousRisks].filter((item) => !currentRisks.has(item)),
+    missing_data: current.director?.missing_data || [],
   };
   const explanations = [];
   if (newEvidence.length) explanations.push(`Se incorporaron ${newEvidence.length} elementos de evidencia.`);
@@ -53,7 +71,11 @@ export function compareAnalysisVersions(previous, current) {
   if (changes.lineup_change) explanations.push("Cambió el estado de las alineaciones.");
   if (changes.injury_change) explanations.push("Cambió el reporte de bajas.");
   if (changes.line_change || changes.odds_change) explanations.push("Cambió la línea o la cuota del mercado.");
+  if (changes.probability_change || changes.probability_status_change) explanations.push("Cambió la estimación deportiva preliminar o su disponibilidad.");
+  if (changes.gemini_change) explanations.push(`Se incorporaron ${changes.gemini_items_incorporated.length} elementos seleccionados del contexto manual de Gemini.`);
+  if (changes.risk_change) explanations.push("Cambió el inventario de riesgos considerado.");
   if (changes.suitability_change || changes.verdict_change) explanations.push("DirectorAtlas actualizó el dictamen según los cambios observados.");
+  if (changes.gemini_change && !changes.suitability_change && !changes.verdict_change) explanations.push("El contexto complementario fue incorporado, pero no aporta evidencia suficiente para modificar el dictamen anterior.");
   if (!explanations.length) explanations.push("No hubo cambios materiales; el dictamen se mantiene.");
   return { contract: "AnalysisVersionDiff", version: 1, comparable: true, previous_analysis_id: previous.analysis_id, current_analysis_id: current.analysis_id, changes, explanation: explanations.join(" ") };
 }

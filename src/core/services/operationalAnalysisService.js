@@ -7,6 +7,7 @@ import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
 import { createManualOdds, normalizeProviderOdds, selectBestComparableOdds } from "../intelligence/oddsIntelligence.js";
 import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
+import { estimatePreliminaryMarketProbability } from "../intelligence/preliminaryMarketModel.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
 import { analyzeSportsFixture } from "./sportsIntelligenceService.js";
 
@@ -60,7 +61,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   if (base.status !== DATA_LOAD_STATUS.SUCCESS || !base.fixture) return { ...base, operational: null };
   const resource = await loadPreMatchResources({ base, gateway, analyzedAt });
   const oddsResult = resource.oddsRaw.status === DATA_LOAD_STATUS.SUCCESS
-    ? normalizeProviderOdds({ response: resource.oddsRaw.response, fixtureId: base.fixture.fixtureId, now: analyzedAt })
+    ? normalizeProviderOdds({ response: resource.oddsRaw.response, fixtureId: base.fixture.fixtureId, now: analyzedAt, kickoff: base.fixture.date?.utc })
     : { contract: "OddsResult", version: 1, fixture_id: base.fixture.fixtureId, status: "unavailable", quotes: [], warnings: [resource.oddsRaw.errorCode || "odds_unavailable"] };
   const manualQuote = createManualOdds({
     fixtureId: base.fixture.fixtureId,
@@ -70,7 +71,9 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     selection: input.manualOdds?.selection,
     line: input.manualOdds?.line ?? input.line,
     decimalOdds: input.manualOdds?.decimalOdds ?? input.odds,
-    receivedAt: analyzedAt,
+    receivedAt: input.manualOdds?.consultedAt || analyzedAt,
+    analyzedAt,
+    kickoff: base.fixture.date?.utc,
   });
   if (manualQuote) oddsResult.quotes.push(manualQuote);
   const requestedLine = input.manualOdds?.line ?? input.line ?? null;
@@ -110,16 +113,31 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   }
   const selectedGemini = geminiContext?.valid_for_reanalysis ? geminiContext.selected_items || [] : [];
   const contradictions = selectedGemini.filter((item) => item.kind === "contradiction").map((item) => item.text);
+  const geminiLimitations = selectedGemini.filter((item) => item.kind === "not_found").map((item) => item.text);
+  const favorableGemini = selectedGemini.filter((item) => item.impact === "favorable").map((item) => item.text);
+  const unfavorableGemini = selectedGemini.filter((item) => item.impact === "unfavorable").map((item) => item.text);
   const requirements = base.selectedMarket?.data_requirements?.length || 0;
   const available = base.selectedMarket?.available_evidence?.length || 0;
   const sampleSize = base.selectedMarket?.sample_size || 0;
   const telemetry = gateway.runtime.snapshot();
+  const preliminaryProbability = estimatePreliminaryMarketProbability({
+    marketFamily: base.selectedMarket?.market_family,
+    selection: selectedOdds?.selection || requestedSelection,
+    line: selectedOdds?.line || requestedLine,
+    leagueProfile: base.leagueProfile,
+    homeTeamProfile: base.homeTeamProfile,
+    awayTeamProfile: base.awayTeamProfile,
+    refereeProfile: base.refereeProfile,
+    contextItems: selectedGemini,
+  });
   const confidence = calculateAnalysisConfidence({
     source_quality: base.status === DATA_LOAD_STATUS.SUCCESS ? 0.9 : 0.2,
     freshness: selectedOdds?.freshness === "fresh" ? 1 : selectedOdds ? 0.55 : 0.35,
     sample_size: ratio(sampleSize, 10),
     variable_coverage: ratio(available, requirements),
-    source_concordance: contradictions.length ? Math.max(0, 1 - contradictions.length * 0.25) : 0.85,
+    source_concordance: contradictions.length
+      ? Math.max(0, 1 - contradictions.length * 0.25)
+      : Math.min(0.92, 0.85 + favorableGemini.length * 0.02),
     contradiction_control: contradictions.length ? 0 : 1,
     contextual_coverage: [context.lineups.status, context.injuries.status, context.standings.status].filter((status) => ["confirmed", "probable", "no_reports", "verified"].includes(status)).length / 3,
     verified_market_data: selectedOdds?.verification_status === "verified_provider" ? 1 : selectedOdds ? 0.45 : 0,
@@ -140,6 +158,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     oddsQuote: selectedOdds,
     contextBlocked: Boolean(geminiContext && !geminiContext.valid_for_reanalysis && input.geminiResponse),
     confidenceScore: confidence.analysis_confidence_score,
+    preliminaryProbability,
   });
   const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
   const prompt = buildGeminiResearchPrompt({
@@ -152,8 +171,14 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     risks: [...(base.selectedMarket?.risk_flags || []), ...(context.lineups.warnings || []), ...(context.injuries.warnings || [])],
     analyzedAt,
   });
-  const supportingEvidence = (base.selectedMarket?.available_evidence || []).map((item) => item.requirement);
-  const opposingEvidence = selectedGemini.filter((item) => ["rumor", "probable"].includes(item.kind)).map((item) => item.text);
+  const supportingEvidence = [
+    ...(base.selectedMarket?.available_evidence || []).map((item) => item.requirement),
+    ...favorableGemini,
+  ];
+  const opposingEvidence = [
+    ...selectedGemini.filter((item) => ["rumor", "probable"].includes(item.kind) && item.impact !== "favorable").map((item) => item.text),
+    ...unfavorableGemini,
+  ];
   const director = buildOperationalDirectorVerdict({
     fixture: base.fixture,
     competition: base.competition,
@@ -166,14 +191,30 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     supportingEvidence,
     opposingEvidence,
     contradictions,
-    missingData: base.selectedMarket?.missing_evidence || [],
-    risks: [...(base.selectedMarket?.risk_flags || []), ...(oddsResult.warnings || [])],
+    missingData: [...(base.selectedMarket?.missing_evidence || []), ...geminiLimitations],
+    risks: [...(base.selectedMarket?.risk_flags || []), ...(oddsResult.warnings || []), ...unfavorableGemini],
     evidenceRefs: base.evidenceRefs,
-    parlayAuthorization: "unsupported",
+    parlayAuthorization: "insufficient_candidates",
+    preliminaryProbability,
+    intendedUse: input.intendedUse || "individual",
   });
   const evidence = asEvidence(base, oddsResult, context, geminiContext);
-  const parlay = buildConservativeParlays(director.apt_for_consideration ? [{ fixture_id: base.fixture.fixtureId, market_family: base.selectedMarket?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability }] : []);
+  const parlay = buildConservativeParlays(director.apt_for_consideration ? [{ fixture_id: base.fixture.fixtureId, market_family: base.selectedMarket?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability }] : []);
   director.parlay_authorization = parlay.status;
+  const parlayCandidate = director.parlay_eligibility === "eligible" ? {
+    fixture_id: base.fixture.fixtureId,
+    market_family: base.selectedMarket?.market_family,
+    selection: director.selection,
+    line: director.line,
+    decimal_odds: director.odds,
+    recorded_at: analyzedAt,
+    analysis_confidence_score: director.analysis_confidence_score,
+    preliminary_probability: preliminaryProbability,
+    risks: director.risks,
+    odds_source_status: director.odds_source_status,
+    freshness: selectedOdds?.freshness,
+    market_suitability: director.market_suitability,
+  } : null;
   const version = buildAnalysisVersion({
     fixture: base.fixture,
     phase: input.phase,
@@ -182,6 +223,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     odds: oddsResult.quotes,
     geminiContext,
     analysisConfidence: confidence,
+    preliminaryProbability,
+    parlayCandidate,
     director,
     parlay,
     engineVersion: OPERATIONAL_ENGINE_VERSION,
@@ -198,6 +241,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     odds_source_status: director.odds_source_status,
     market_suitability: director.market_suitability,
     analysis_confidence_score: director.analysis_confidence_score,
+    preliminary_probability: preliminaryProbability,
     status: director.authorizes_consideration ? "apt_for_consideration" : director.market_suitability,
     conditions: director.conditions,
     reasons: director.reasons,
@@ -215,8 +259,10 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     preMatchContext: context,
     gemini: { prompt, context: geminiContext, applied_items: selectedGemini },
     confidence,
+    preliminaryProbability,
     suitability,
     parlay,
+    parlayCandidate,
     individualPick,
     director,
     analysisVersion: version,
