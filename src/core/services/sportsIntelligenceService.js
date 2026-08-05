@@ -9,6 +9,7 @@ import {
   evaluateSportsMarkets,
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
+import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
 import {
   buildRefereeIntelligence,
   normalizeRefereeName,
@@ -368,21 +369,25 @@ export async function scanSportsJourney(input, gateway) {
     );
     reviewed.push(analysis);
   }
-  const highlighted = reviewed
-    .filter((analysis) => analysis.selectedMarket?.candidate)
-    .sort((left, right) => {
-      const leftMarket = left.selectedMarket;
-      const rightMarket = right.selectedMarket;
-      if (rightMarket.technical_support_score !== leftMarket.technical_support_score) {
-        return rightMarket.technical_support_score - leftMarket.technical_support_score;
-      }
-      if (rightMarket.sample_size !== leftMarket.sample_size) {
-        return rightMarket.sample_size - leftMarket.sample_size;
-      }
-      return leftMarket.risk_flags.length - rightMarket.risk_flags.length;
-    })
-    .slice(0, 5)
-    .map((analysis) => ({
+  const analysisCandidates = reviewed.flatMap((analysis) => {
+    const selection = buildRankedMarketSelection({
+      analysisMode: input.analysisMode === "specific" || requestedMarketIds.length === 1 ? "specific" : "general",
+      requestedMarketId: requestedMarketIds.length === 1 ? requestedMarketIds[0] : null,
+      marketAssessments: analysis.marketAssessments,
+      leagueProfile: analysis.leagueProfile,
+      homeTeamProfile: analysis.homeTeamProfile,
+      awayTeamProfile: analysis.awayTeamProfile,
+      refereeProfile: analysis.refereeProfile,
+    });
+    const bestByFamily = new Map();
+    for (const candidate of selection.ranked_candidates) {
+      if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
+    }
+    return [...bestByFamily.values()].map((candidate) => ({ analysis, candidate }));
+  });
+  const maximumCandidates = Math.max(1, Math.min(10, Number(input.maximumCandidates) || 5));
+  const highlighted = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates)
+    .map(({ analysis, candidate }) => ({
       competition: analysis.competition.localName,
       competitionKey: analysis.competition.key,
       season: analysis.fixture.competition.season,
@@ -392,16 +397,25 @@ export async function scanSportsJourney(input, gateway) {
       kickoffLocal: analysis.fixture.date.kickoff_local,
       timezone: analysis.fixture.date.timezone,
       localCalendarDate: analysis.fixture.date.local_calendar_date,
-      market: analysis.selectedMarket.market_label,
-      marketId: analysis.selectedMarket.market_family,
-      status: analysis.director.status,
-      displayStatus: analysis.director.display_status,
-      technicalSupport: analysis.selectedMarket.technical_support_score,
-      sampleSize: analysis.selectedMarket.sample_size,
-      reasons: analysis.director.reasons,
-      risks: analysis.director.risks,
-      missingData: analysis.director.missing_data,
-      nextAction: analysis.director.next_action,
+      market: analysis.marketAssessments.find((item) => item.market_family === candidate.market_family)?.market_label || candidate.market_family,
+      marketId: candidate.market_family,
+      selection: candidate.selection,
+      direction: candidate.direction,
+      line: candidate.line,
+      probability: candidate.preliminary_probability,
+      uncertaintyLow: candidate.uncertainty_low,
+      uncertaintyHigh: candidate.uncertainty_high,
+      confidence: candidate.sports_score,
+      priceStatus: candidate.price_status,
+      status: candidate.overall_status,
+      displayStatus: candidate.overall_status,
+      technicalSupport: candidate.sports_score,
+      sampleSize: candidate.sample_size_effective,
+      reasons: candidate.rank_reason,
+      risks: candidate.limitations.slice(0, 3),
+      missingData: candidate.price_status === "unavailable" ? ["Cuota actual para la línea exacta"] : [],
+      nextAction: "Abrir el análisis individual y evaluar una cuota actual para la línea exacta.",
+      rankReason: candidate.rank_reason.join(" "),
     }));
   const telemetry = gateway.runtime.snapshot();
   return {
@@ -431,4 +445,25 @@ export async function scanSportsJourney(input, gateway) {
     executionTimeMs: Date.now() - startedAt,
     telemetry,
   };
+}
+
+export function selectDiverseJourneyCandidates(entries = [], maximum = 5, comparableGap = 4) {
+  const remaining = [...entries].sort((left, right) => {
+    if (right.candidate.sports_score !== left.candidate.sports_score) return right.candidate.sports_score - left.candidate.sports_score;
+    if (left.analysis.fixture.fixtureId !== right.analysis.fixture.fixtureId) return left.analysis.fixture.fixtureId - right.analysis.fixture.fixtureId;
+    return left.candidate.candidate_id.localeCompare(right.candidate.candidate_id);
+  });
+  const selected = [];
+  const usedFamilies = new Set();
+  while (remaining.length && selected.length < maximum) {
+    const best = remaining[0];
+    const diverseIndex = usedFamilies.has(best.candidate.market_family)
+      ? remaining.findIndex((entry) => !usedFamilies.has(entry.candidate.market_family) && best.candidate.sports_score - entry.candidate.sports_score <= comparableGap)
+      : -1;
+    const index = diverseIndex > 0 ? diverseIndex : 0;
+    const [chosen] = remaining.splice(index, 1);
+    selected.push(chosen);
+    usedFamilies.add(chosen.candidate.market_family);
+  }
+  return selected;
 }

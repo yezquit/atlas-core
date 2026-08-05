@@ -15,10 +15,14 @@ export function combinedDecimalOdds(selections = []) {
 
 export function buildConservativeParlays(candidates = []) {
   const authorized = candidates.filter((item) =>
-    item.market_suitability === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS &&
-    item.odds_source_status === "verified_provider" &&
+    [MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS, MARKET_SUITABILITY.VIABLE_WITH_CAUTION].includes(item.market_suitability) &&
+    ["verified_provider", "user_reported"].includes(item.odds_source_status) &&
     item.freshness === "fresh" &&
     item.preliminary_probability?.probability_status === "preliminary" &&
+    Number(item.uncertainty_width ?? 0) <= 0.35 &&
+    Number(item.analysis_confidence_score ?? 100) >= 60 &&
+    Boolean(item.candidate_id) &&
+    Boolean(item.ranking_version) &&
     Number(item.decimal_odds) > 1
   );
   if (authorized.length < 6) {

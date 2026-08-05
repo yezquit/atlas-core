@@ -3,11 +3,12 @@ import { OPERATIONAL_ENGINE_VERSION, phaseForKickoff } from "../contracts/operat
 import { calculateAnalysisConfidence } from "../intelligence/analysisConfidence.js";
 import { buildAnalysisVersion, compareAnalysisVersions } from "../intelligence/analysisVersions.js";
 import { buildGeminiResearchPrompt, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
+import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
+import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
 import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
 import { createManualOdds, normalizeProviderOdds, selectBestComparableOdds } from "../intelligence/oddsIntelligence.js";
 import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
-import { estimatePreliminaryMarketProbability } from "../intelligence/preliminaryMarketModel.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
 import { analyzeSportsFixture } from "./sportsIntelligenceService.js";
 
@@ -63,29 +64,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const oddsResult = resource.oddsRaw.status === DATA_LOAD_STATUS.SUCCESS
     ? normalizeProviderOdds({ response: resource.oddsRaw.response, fixtureId: base.fixture.fixtureId, now: analyzedAt, kickoff: base.fixture.date?.utc })
     : { contract: "OddsResult", version: 1, fixture_id: base.fixture.fixtureId, status: "unavailable", quotes: [], warnings: [resource.oddsRaw.errorCode || "odds_unavailable"] };
-  const manualQuote = createManualOdds({
-    fixtureId: base.fixture.fixtureId,
-    bookmaker: input.manualOdds?.bookmaker,
-    marketFamily: base.selectedMarket?.market_family || input.marketId,
-    marketName: base.selectedMarket?.market_label,
-    selection: input.manualOdds?.selection,
-    line: input.manualOdds?.line ?? input.line,
-    decimalOdds: input.manualOdds?.decimalOdds ?? input.odds,
-    receivedAt: input.manualOdds?.consultedAt || analyzedAt,
-    analyzedAt,
-    kickoff: base.fixture.date?.utc,
-  });
-  if (manualQuote) oddsResult.quotes.push(manualQuote);
   const requestedLine = input.manualOdds?.line ?? input.line ?? null;
   const requestedSelection = input.manualOdds?.selection ?? input.selection ?? null;
-  const bestProviderOdds = selectBestComparableOdds(oddsResult.quotes, {
-    marketFamily: base.selectedMarket?.market_family,
-    selection: requestedSelection,
-    line: requestedLine,
-  });
-  const selectedOdds = bestProviderOdds || manualQuote || oddsResult.quotes.find((quote) =>
-    quote.market_family === base.selectedMarket?.market_family && (!requestedLine || quote.line === String(requestedLine))
-  ) || null;
   const context = {
     lineups: resource.coverage.lineupsCovered
       ? normalizeLineups({ response: resource.lineupsRaw.response, fixture: base.fixture, coverageAvailable: true, fetchedAt: resource.lineupsRaw.requestMeta?.fetchedAt || analyzedAt })
@@ -102,7 +82,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     geminiContext = parseGeminiResponse(input.geminiResponse, {
       fixture: base.fixture,
       expectedLine: requestedLine,
-      expectedOdds: selectedOdds?.decimal_odds || input.odds,
+      expectedOdds: input.manualOdds?.decimalOdds ?? input.odds,
       receivedAt: analyzedAt,
     });
   }
@@ -112,24 +92,94 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     geminiContext = { ...geminiContext, selected_items: (geminiContext.items || []).filter((item) => item.selected) };
   }
   const selectedGemini = geminiContext?.valid_for_reanalysis ? geminiContext.selected_items || [] : [];
+  const geminiImpacts = mapGeminiImpacts(selectedGemini);
   const contradictions = selectedGemini.filter((item) => item.kind === "contradiction").map((item) => item.text);
   const geminiLimitations = selectedGemini.filter((item) => item.kind === "not_found").map((item) => item.text);
   const favorableGemini = selectedGemini.filter((item) => item.impact === "favorable").map((item) => item.text);
   const unfavorableGemini = selectedGemini.filter((item) => item.impact === "unfavorable").map((item) => item.text);
-  const requirements = base.selectedMarket?.data_requirements?.length || 0;
-  const available = base.selectedMarket?.available_evidence?.length || 0;
-  const sampleSize = base.selectedMarket?.sample_size || 0;
-  const telemetry = gateway.runtime.snapshot();
-  const preliminaryProbability = estimatePreliminaryMarketProbability({
-    marketFamily: base.selectedMarket?.market_family,
-    selection: selectedOdds?.selection || requestedSelection,
-    line: selectedOdds?.line || requestedLine,
+  const analysisMode = input.analysisMode === "specific" || (input.marketId && input.marketId !== "open") ? "specific" : "general";
+  const initialSelection = buildRankedMarketSelection({
+    analysisMode,
+    requestedMarketId: analysisMode === "specific" ? input.marketId : null,
+    marketAssessments: base.marketAssessments,
     leagueProfile: base.leagueProfile,
     homeTeamProfile: base.homeTeamProfile,
     awayTeamProfile: base.awayTeamProfile,
     refereeProfile: base.refereeProfile,
     contextItems: selectedGemini,
+    contextImpacts: geminiImpacts,
   });
+  const manualMarketFamily = input.manualOdds?.marketFamily || (analysisMode === "specific" ? input.marketId : initialSelection.primary?.market_family);
+  const manualQuote = createManualOdds({
+    fixtureId: base.fixture.fixtureId,
+    bookmaker: input.manualOdds?.bookmaker,
+    marketFamily: manualMarketFamily,
+    marketName: base.marketAssessments.find((item) => item.market_family === manualMarketFamily)?.market_label,
+    selection: requestedSelection,
+    line: requestedLine,
+    decimalOdds: input.manualOdds?.decimalOdds ?? input.odds,
+    receivedAt: input.manualOdds?.consultedAt || analyzedAt,
+    analyzedAt,
+    kickoff: base.fixture.date?.utc,
+  });
+  if (manualQuote) oddsResult.quotes.push(manualQuote);
+  let marketSelection = buildRankedMarketSelection({
+    analysisMode: requestedLine && manualMarketFamily ? "specific" : analysisMode,
+    requestedMarketId: requestedLine && manualMarketFamily ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
+    marketAssessments: base.marketAssessments,
+    leagueProfile: base.leagueProfile,
+    homeTeamProfile: base.homeTeamProfile,
+    awayTeamProfile: base.awayTeamProfile,
+    refereeProfile: base.refereeProfile,
+    contextItems: selectedGemini,
+    contextImpacts: geminiImpacts,
+    exactLine: requestedLine,
+    quotes: oddsResult.quotes,
+  });
+  if (requestedLine && requestedSelection) {
+    const direction = /under|menos/i.test(requestedSelection) ? "under" : /over|más|mas/i.test(requestedSelection) ? "over" : null;
+    const exactCandidate = marketSelection.ranked_candidates.find((candidate) =>
+      candidate.market_family === manualMarketFamily &&
+      Number(candidate.line) === Number(requestedLine) &&
+      (!direction || candidate.direction === direction)
+    );
+    if (exactCandidate) {
+      marketSelection = {
+        ...marketSelection,
+        primary: exactCandidate,
+        alternatives: marketSelection.ranked_candidates.filter((candidate) => candidate.candidate_id !== exactCandidate.candidate_id).slice(0, 3),
+        explanation: `${exactCandidate.selection} se evaluó con su probabilidad exacta porque corresponde a la línea reportada por el usuario.`,
+      };
+    }
+  }
+  const primaryCandidate = marketSelection.primary;
+  const marketAssessment = base.marketAssessments.find((item) => item.market_family === primaryCandidate?.market_family) || null;
+  const bestProviderOdds = primaryCandidate ? selectBestComparableOdds(oddsResult.quotes, {
+    marketFamily: primaryCandidate.market_family,
+    selection: primaryCandidate.selection,
+    line: primaryCandidate.line,
+  }) : null;
+  const selectedOdds = primaryCandidate?.price_quote || bestProviderOdds || null;
+  const preliminaryProbability = primaryCandidate ? {
+    contract: "PreliminaryMarketProbability",
+    version: 1,
+    probability_status: primaryCandidate.probability_status,
+    point_estimate: primaryCandidate.preliminary_probability,
+    uncertainty_low: primaryCandidate.uncertainty_low,
+    uncertainty_high: primaryCandidate.uncertainty_high,
+    sample_size_effective: primaryCandidate.sample_size_effective,
+    exact_line: primaryCandidate.line,
+    selection_direction: primaryCandidate.direction,
+    inputs_used: primaryCandidate.input_sources,
+    limitations: primaryCandidate.limitations,
+    methodology_version: primaryCandidate.methodology_version,
+    model_validation_status: "preliminary_unvalidated",
+    represents_confidence: false,
+  } : null;
+  const requirements = marketAssessment?.data_requirements?.length || 0;
+  const available = marketAssessment?.available_evidence?.length || 0;
+  const sampleSize = primaryCandidate?.sample_size_effective || marketAssessment?.sample_size || 0;
+  const telemetry = gateway.runtime.snapshot();
   const confidence = calculateAnalysisConfidence({
     source_quality: base.status === DATA_LOAD_STATUS.SUCCESS ? 0.9 : 0.2,
     freshness: selectedOdds?.freshness === "fresh" ? 1 : selectedOdds ? 0.55 : 0.35,
@@ -150,11 +200,11 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const suitability = assessMarketSuitability({
     fixtureVerified: Number(base.selectedFixtureId) === Number(base.fixture.fixtureId),
     blocked: telemetry.budgetExhausted || telemetry.quotaStatus === "preventive_block" || !resource.isBeforeKickoff,
-    marketCandidate: base.selectedMarket?.candidate,
+    marketCandidate: Boolean(primaryCandidate && primaryCandidate.sports_score >= 45),
     sampleSufficient: sampleSize >= 5,
-    requiredEvidenceAvailable: requirements > 0 && available === requirements,
+    requiredEvidenceAvailable: requirements > 0 && available / requirements >= 0.7,
     criticalContradictions: contradictions.length,
-    line: selectedOdds?.line || requestedLine,
+    line: primaryCandidate?.line || requestedLine,
     oddsQuote: selectedOdds,
     contextBlocked: Boolean(geminiContext && !geminiContext.valid_for_reanalysis && input.geminiResponse),
     confidenceScore: confidence.analysis_confidence_score,
@@ -164,46 +214,61 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const prompt = buildGeminiResearchPrompt({
     fixture: base.fixture,
     competition: base.competition,
-    market: base.selectedMarket,
+    market: marketAssessment,
     oddsQuote: selectedOdds,
     verifiedData: [`Fixture ${base.fixture.fixtureId} verificado por API-FOOTBALL.`, `${available} de ${requirements} requisitos de mercado disponibles.`],
-    missingData: base.selectedMarket?.missing_evidence || [],
-    risks: [...(base.selectedMarket?.risk_flags || []), ...(context.lineups.warnings || []), ...(context.injuries.warnings || [])],
+    missingData: marketAssessment?.missing_evidence || [],
+    risks: [...(marketAssessment?.risk_flags || []), ...(context.lineups.warnings || []), ...(context.injuries.warnings || [])],
     analyzedAt,
   });
   const supportingEvidence = [
-    ...(base.selectedMarket?.available_evidence || []).map((item) => item.requirement),
+    ...(marketAssessment?.available_evidence || []).map((item) => item.requirement),
     ...favorableGemini,
   ];
   const opposingEvidence = [
     ...selectedGemini.filter((item) => ["rumor", "probable"].includes(item.kind) && item.impact !== "favorable").map((item) => item.text),
     ...unfavorableGemini,
   ];
+  const priorSelection = previousVersion?.director?.sports_verdict?.selection || previousVersion?.director?.selection || null;
+  const currentSelection = primaryCandidate?.selection || null;
+  const contextReanalysisMessage = !selectedGemini.length
+    ? null
+    : geminiImpacts.length === 0
+      ? "El contexto fue procesado, pero no contiene evidencia suficiente para modificar la distribución."
+      : priorSelection && priorSelection !== currentSelection
+        ? `Contexto incorporado. La mejor línea cambia de ${priorSelection} a ${currentSelection}.`
+        : "Contexto incorporado. El candidato principal se mantiene.";
   const director = buildOperationalDirectorVerdict({
     fixture: base.fixture,
     competition: base.competition,
     analyzedAt,
     phase: input.phase || phaseInfo.phase,
-    marketAssessment: base.selectedMarket,
+    marketAssessment,
+    marketCandidate: primaryCandidate,
+    marketSelection,
     oddsQuote: selectedOdds,
     confidence,
     suitability,
     supportingEvidence,
     opposingEvidence,
     contradictions,
-    missingData: [...(base.selectedMarket?.missing_evidence || []), ...geminiLimitations],
-    risks: [...(base.selectedMarket?.risk_flags || []), ...(oddsResult.warnings || []), ...unfavorableGemini],
+    missingData: [...(marketAssessment?.missing_evidence || []), ...geminiLimitations],
+    risks: [...(marketAssessment?.risk_flags || []), ...(oddsResult.warnings || []), ...unfavorableGemini],
     evidenceRefs: base.evidenceRefs,
     parlayAuthorization: "insufficient_candidates",
     preliminaryProbability,
     intendedUse: input.intendedUse || "individual",
+    contextReanalysisMessage,
   });
   const evidence = asEvidence(base, oddsResult, context, geminiContext);
-  const parlay = buildConservativeParlays(director.apt_for_consideration ? [{ fixture_id: base.fixture.fixtureId, market_family: base.selectedMarket?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability }] : []);
+  const parlayInput = director.parlay_eligibility === "eligible" ? [{ fixture_id: base.fixture.fixtureId, candidate_id: primaryCandidate?.candidate_id, ranking_version: primaryCandidate?.ranker_version, market_family: primaryCandidate?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability, uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low, analysis_confidence_score: director.analysis_confidence_score }] : [];
+  const parlay = buildConservativeParlays(parlayInput);
   director.parlay_authorization = parlay.status;
   const parlayCandidate = director.parlay_eligibility === "eligible" ? {
     fixture_id: base.fixture.fixtureId,
-    market_family: base.selectedMarket?.market_family,
+    candidate_id: primaryCandidate?.candidate_id,
+    ranking_version: primaryCandidate?.ranker_version,
+    market_family: primaryCandidate?.market_family,
     selection: director.selection,
     line: director.line,
     decimal_odds: director.odds,
@@ -214,6 +279,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     odds_source_status: director.odds_source_status,
     freshness: selectedOdds?.freshness,
     market_suitability: director.market_suitability,
+    uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low,
   } : null;
   const version = buildAnalysisVersion({
     fixture: base.fixture,
@@ -252,12 +318,15 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     ...base,
     contract: "AtlasOperationalAnalysis",
     version: 3,
-    message: "Análisis operativo finalizado y conservado como una nueva versión inmutable.",
+    message: contextReanalysisMessage || "Análisis operativo finalizado y conservado como una nueva versión inmutable.",
+    analysisMode: marketSelection.analysis_mode,
+    marketSelection,
+    selectedMarket: marketAssessment,
     odds: oddsResult,
     bestComparableOdds: bestProviderOdds,
     selectedOdds,
     preMatchContext: context,
-    gemini: { prompt, context: geminiContext, applied_items: selectedGemini },
+    gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, reanalysis_message: contextReanalysisMessage },
     confidence,
     preliminaryProbability,
     suitability,

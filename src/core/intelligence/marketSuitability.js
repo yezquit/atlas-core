@@ -36,8 +36,8 @@ export function assessMarketSuitability({
     oddsQuote.verification_status === ODDS_VERIFICATION_STATUS.STALE ||
     oddsQuote.freshness === "stale"
   ) {
-    status = MARKET_SUITABILITY.BLOCKED;
-    conditions.push("Actualizar la cuota vencida antes de considerar el mercado.");
+    status = MARKET_SUITABILITY.REVIEW_ONLY;
+    conditions.push("Actualizar la cuota vencida para completar la evaluación económica; el pronóstico deportivo se conserva.");
   } else if (preliminaryProbability?.probability_status !== "preliminary") {
     status = MARKET_SUITABILITY.REVIEW_ONLY;
     conditions.push("Completar la muestra compatible requerida por el modelo preliminar para esta línea exacta.");
