@@ -196,5 +196,15 @@ export function buildTeamRecentIntelligence({
     sourceRefs: recent.map((fixture) => `fixture:${fixture.fixtureId}`),
     warnings,
     eventSamples: general.event_samples,
+    sampleOrigins: recent.map((fixture) => ({
+      fixture_id: fixture.fixtureId,
+      competition_id: fixture.competition?.id ?? null,
+      competition_name: fixture.competition?.name || null,
+      country: fixture.competition?.country || null,
+      season: fixture.competition?.season ?? null,
+      round: fixture.competition?.round || null,
+      condition: Number(fixture?.teams?.home?.id) === Number(teamId) ? "home" : "away",
+      kickoff_utc: fixture.date?.utc || null,
+    })),
   });
 }

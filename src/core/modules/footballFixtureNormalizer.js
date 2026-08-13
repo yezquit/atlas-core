@@ -67,6 +67,12 @@ export function normalizeFootballFixture(item, { timezone } = {}) {
         home: item?.score?.fulltime?.home ?? null,
         away: item?.score?.fulltime?.away ?? null,
       },
+      aggregate: item?.score?.aggregate
+        ? {
+            home: item.score.aggregate.home ?? null,
+            away: item.score.aggregate.away ?? null,
+          }
+        : null,
     },
 
     referee: {

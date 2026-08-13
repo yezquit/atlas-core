@@ -5,6 +5,8 @@ import { buildAnalysisVersion, compareAnalysisVersions } from "../intelligence/a
 import { buildGeminiResearchPrompt, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
 import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
+import { buildOperationalRanking, buildScoutAtlas } from "../intelligence/scoutAtlas.js";
+import { buildAtlasPreflight, buildRedTeamAtlas } from "../intelligence/redTeamAtlas.js";
 import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
 import { createManualOdds, normalizeProviderOdds, selectBestComparableOdds, validateManualOddsInput } from "../intelligence/oddsIntelligence.js";
 import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
@@ -173,7 +175,32 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       };
     }
   }
-  const base = await analyzeSportsFixture(input, gateway);
+  for (const candidateOdds of input.manualCandidateOdds || []) {
+    const validation = validateManualOddsInput({
+      ...candidateOdds,
+      fixtureId: input.fixtureId,
+      direction: candidateOdds.direction || candidateOdds.selection,
+    });
+    if (!validation.valid) {
+      return {
+        status: DATA_LOAD_STATUS.UNAVAILABLE,
+        errorCode: "invalid_candidate_odds",
+        message: "Una cotización de candidato no cumple el contrato requerido.",
+        validationErrors: validation.errors,
+        selectedFixtureId: Number(input.fixtureId) || null,
+        fixture: null,
+        operational: null,
+      };
+    }
+  }
+  const base = await analyzeSportsFixture({
+    ...input,
+    odds: null,
+    manualOdds: null,
+    manualCandidateOdds: [],
+    prematchOnly: true,
+    analyzedAt,
+  }, gateway);
   if (base.status !== DATA_LOAD_STATUS.SUCCESS || !base.fixture) return { ...base, operational: null };
   const resource = await loadPreMatchResources({ base, gateway, analyzedAt });
   const oddsResult = resource.oddsRaw.status === DATA_LOAD_STATUS.SUCCESS
@@ -238,6 +265,11 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextItems: selectedGemini,
     contextImpacts: geminiImpacts,
   });
+  const scout = buildScoutAtlas({
+    marketSelection: initialSelection,
+    marketAssessments: base.marketAssessments,
+    lineOrigin,
+  });
   const manualMarketFamily = input.manualOdds?.marketFamily || reusableActiveQuote?.market_family || (analysisMode === "specific" ? input.marketId : initialSelection.primary?.market_family);
   const manualQuote = input.manualOdds ? createManualOdds({
     fixtureId: base.fixture.fixtureId,
@@ -254,14 +286,35 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     timezone: input.manualOdds.timezone || input.timezone,
     analysisVersion: input.manualOdds.analysisVersion || previousVersion?.analysis_id || "initial",
   }) : null;
+  const candidateManualQuotes = (input.manualCandidateOdds || []).map((candidateOdds) => createManualOdds({
+    fixtureId: base.fixture.fixtureId,
+    bookmaker: candidateOdds.bookmaker,
+    marketFamily: candidateOdds.marketFamily,
+    marketName: base.marketAssessments.find((item) => item.market_family === candidateOdds.marketFamily)?.market_label,
+    selection: candidateOdds.selection,
+    direction: candidateOdds.direction,
+    line: candidateOdds.line,
+    decimalOdds: candidateOdds.decimalOdds,
+    receivedAt: candidateOdds.consultedAt,
+    analyzedAt,
+    kickoff: base.fixture.date?.utc,
+    timezone: candidateOdds.timezone || input.timezone,
+    analysisVersion: candidateOdds.analysisVersion || previousVersion?.analysis_id || "initial",
+  })).filter(Boolean);
   const preferredQuote = manualQuote || reusableActiveQuote;
   if (preferredQuote && !oddsResult.quotes.some((quote) => quote.quote_id === preferredQuote.quote_id)) {
     oddsResult.quotes.push(preferredQuote);
   }
+  for (const quote of candidateManualQuotes) {
+    if (!oddsResult.quotes.some((current) => current.quote_id === quote.quote_id)) {
+      oddsResult.quotes.push(quote);
+    }
+  }
   if (oddsResult.quotes.length) oddsResult.status = "available";
+  const hasCandidateOdds = candidateManualQuotes.length > 0 && !manualQuote;
   let marketSelection = buildRankedMarketSelection({
-    analysisMode: requestedLine && manualMarketFamily ? "specific" : analysisMode,
-    requestedMarketId: requestedLine && manualMarketFamily ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
+    analysisMode: requestedLine && manualMarketFamily && !hasCandidateOdds ? "specific" : analysisMode,
+    requestedMarketId: requestedLine && manualMarketFamily && !hasCandidateOdds ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
     marketAssessments: base.marketAssessments,
     leagueProfile: base.leagueProfile,
     homeTeamProfile: base.homeTeamProfile,
@@ -269,24 +322,41 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     refereeProfile: base.refereeProfile,
     contextItems: selectedGemini,
     contextImpacts: geminiImpacts,
-    exactLine: requestedLine,
+    exactLine: hasCandidateOdds ? null : requestedLine,
     quotes: oddsResult.quotes,
     preferredQuote,
   });
-  marketSelection = selectExactRequestedCandidate(marketSelection, {
-    marketFamily: manualMarketFamily,
-    requestedLine,
-    requestedSelection,
-    lineOrigin,
+  if (!hasCandidateOdds) {
+    marketSelection = selectExactRequestedCandidate(marketSelection, {
+      marketFamily: manualMarketFamily,
+      requestedLine,
+      requestedSelection,
+      lineOrigin,
+    });
+  }
+  const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
+  const operationalRanking = buildOperationalRanking({
+    scout,
+    quotes: oddsResult.quotes,
+    phase: input.phase || phaseInfo.phase,
   });
-  const primaryCandidate = marketSelection.primary;
+  const operationalCandidate = operationalRanking.candidates[0]?.candidate || null;
+  const shouldUseOperationalCandidate = !input.manualOdds &&
+    analysisMode === "general" &&
+    (input.manualCandidateOdds?.length || 0) > 0;
+  const primaryCandidate = shouldUseOperationalCandidate && operationalCandidate
+    ? operationalCandidate
+    : marketSelection.primary;
   const marketAssessment = base.marketAssessments.find((item) => item.market_family === primaryCandidate?.market_family) || null;
   const bestProviderOdds = primaryCandidate ? selectBestComparableOdds(oddsResult.quotes, {
     marketFamily: primaryCandidate.market_family,
     selection: primaryCandidate.selection,
     line: primaryCandidate.line,
   }) : null;
-  const selectedOdds = primaryCandidate?.price_quote || bestProviderOdds || null;
+  const operationalSelectedOdds = operationalRanking.candidates.find(
+    (item) => item.candidate.candidate_id === primaryCandidate?.candidate_id
+  )?.quote || null;
+  const selectedOdds = operationalSelectedOdds || primaryCandidate?.price_quote || bestProviderOdds || null;
   const preliminaryProbability = primaryCandidate ? {
     contract: "PreliminaryMarketProbability",
     version: 1,
@@ -307,7 +377,6 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const available = marketAssessment?.available_evidence?.length || 0;
   const sampleSize = primaryCandidate?.sample_size_effective || marketAssessment?.sample_size || 0;
   const telemetry = gateway.runtime.snapshot();
-  const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
   const confidence = calculateAnalysisConfidence({
     source_quality: base.status === DATA_LOAD_STATUS.SUCCESS ? 0.9 : 0.2,
     freshness: selectedOdds?.freshness === "fresh" ? 1 : selectedOdds ? 0.55 : 0.35,
@@ -394,6 +463,35 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextReanalysisMessage,
   });
   attachLineOriginToDirector(director, lineOrigin, contextSummary);
+  const redTeam = buildRedTeamAtlas({
+    candidate: primaryCandidate,
+    marketAssessment,
+    competitiveContext: base.competitiveContext,
+    preMatchContext: context,
+    opposingEvidence,
+    contradictions,
+  });
+  const preflight = buildAtlasPreflight({
+    fixture: base.fixture,
+    candidate: primaryCandidate,
+    competitiveContext: base.competitiveContext,
+    oddsQuote: selectedOdds,
+    preMatchContext: context,
+    blocked: suitability.status === "blocked",
+  });
+  director.red_team = redTeam;
+  director.preflight = preflight;
+  director.scout = {
+    primary_candidate_id: scout.primary_candidate_id,
+    candidate_count: scout.candidates.length,
+    price_inputs_used: false,
+  };
+  director.operational_ranking = {
+    candidate_count: operationalRanking.candidates.length,
+    primary_candidate_id: operationalRanking.primary_candidate_id,
+    differs_from_sports_ranking: operationalRanking.differs_from_sports_ranking,
+    explanation: operationalRanking.explanation,
+  };
   const evidence = asEvidence(base, oddsResult, context, geminiContext);
   const eligibleForParlayReview = ["eligible", "eligible_with_caution"].includes(director.parlay_eligibility);
   const parlayInput = eligibleForParlayReview ? [{ fixture_id: base.fixture.fixtureId, candidate_id: primaryCandidate?.candidate_id, ranking_version: primaryCandidate?.ranker_version, market_family: primaryCandidate?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability, uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low, analysis_confidence_score: director.analysis_confidence_score, price_status: director.price_assessment.status, price_gap: director.price_assessment.price_gap }] : [];
@@ -460,6 +558,10 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     message: contextReanalysisMessage || "Análisis operativo finalizado y conservado como una nueva versión inmutable.",
     analysisMode: marketSelection.analysis_mode,
     marketSelection,
+    scout,
+    operationalRanking,
+    redTeam,
+    preflight,
     selectedMarket: marketAssessment,
     odds: oddsResult,
     bestComparableOdds: bestProviderOdds,

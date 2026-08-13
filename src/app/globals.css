@@ -277,6 +277,108 @@ h1 {
   }
 }
 
+.p2-glossary,
+.p2-stage-card {
+  margin: 1rem 0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 1rem;
+}
+
+.p2-glossary > summary {
+  cursor: pointer;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.p2-glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.p2-glossary-grid article {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+}
+
+.p2-help-term {
+  display: inline-block;
+  position: relative;
+}
+
+.p2-help-term > summary {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  cursor: help;
+  font-weight: 800;
+  list-style: none;
+}
+
+.p2-help-term > p {
+  position: absolute;
+  z-index: 10;
+  width: min(18rem, 80vw);
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: #0f172a;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+
+.p2-help-term:not([open]):hover > p,
+.p2-help-term:not([open]):focus-within > p {
+  display: block;
+}
+
+.p2-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.p2-candidate-quote {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.p2-candidate-quote label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.p2-preflight ul {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0;
+  list-style: none;
+}
+
+.p2-preflight li[data-state="confirmed"] { color: #86efac; }
+.p2-preflight li[data-state="pending"] { color: #fde68a; }
+.p2-preflight li[data-state="blocking"] { color: #fca5a5; }
+
+.p2-danger-button {
+  border-color: rgba(248, 113, 113, 0.7) !important;
+  color: #fecaca !important;
+}
+
+@media (max-width: 720px) {
+  .p2-stage-card,
+  .p2-glossary {
+    padding: 0.8rem;
+  }
+}
+
 .analysis-form input:focus,
 .analysis-form select:focus {
   border-color: var(--accent);

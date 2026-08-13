@@ -28,6 +28,9 @@ export function createPersistencePort(adapter) {
     provider: adapter.provider || "server_local_append_only",
     appendAnalysis: adapter.appendAnalysis.bind(adapter),
     appendDeletion: adapter.appendDeletion.bind(adapter),
+    appendArchiveAll: typeof adapter.appendArchiveAll === "function"
+      ? adapter.appendArchiveAll.bind(adapter)
+      : async () => { throw new Error("history_archive_not_supported"); },
     appendResult: adapter.appendResult.bind(adapter),
     list: adapter.list.bind(adapter),
     listResults: adapter.listResults.bind(adapter),

@@ -85,6 +85,7 @@ export function createTeamRecentProfile(input = {}) {
     source_refs: input.sourceRefs || [],
     warnings: input.warnings || [],
     event_samples: input.eventSamples || {},
+    sample_origins: input.sampleOrigins || [],
   };
 }
 

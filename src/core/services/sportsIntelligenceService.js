@@ -16,6 +16,8 @@ import {
 } from "../intelligence/refereeIntelligence.js";
 import { buildTeamRecentIntelligence } from "../intelligence/teamRecentIntelligence.js";
 import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js";
+import { buildCompetitiveContext } from "../intelligence/competitiveContext.js";
+import { assessPrematchEligibility, filterPrematchFixtures } from "../intelligence/prematchEligibility.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
 import { normalizeTimeZone } from "../intelligence/dateTimeContext.js";
@@ -207,6 +209,23 @@ export async function analyzeSportsFixture(input, gateway) {
       selectedFixtureId: fixtureId,
     };
   }
+  if (input.prematchOnly) {
+    const prematch = assessPrematchEligibility(fixture, {
+      now: input.analyzedAt || input.now || new Date().toISOString(),
+    });
+    if (!prematch.eligible) {
+      return {
+        ...failure({
+          status: DATA_LOAD_STATUS.BLOCKED,
+          errorCode: "prematch_fixture_closed",
+          message: prematch.message,
+          runtime: gateway.runtime,
+        }),
+        selectedFixtureId: fixtureId,
+        prematchEligibility: prematch,
+      };
+    }
+  }
   const windowEnd = dateShift(input.date, -1);
   const windowStart = dateShift(input.date, -PROFILE_WINDOW_DAYS);
   const [leagueWindow, homeRecent, awayRecent] = await Promise.all([
@@ -275,12 +294,19 @@ export async function analyzeSportsFixture(input, gateway) {
     leagueProfile,
   });
   const venueWeatherContext = buildVenueWeatherContext({ fixture });
+  const competitiveContext = buildCompetitiveContext({
+    fixture,
+    competition: fixture.competition,
+    homeTeamProfile,
+    awayTeamProfile,
+  });
   const marketAssessments = evaluateSportsMarkets({
     leagueProfile,
     homeTeamProfile,
     awayTeamProfile,
     refereeProfile,
     venueWeatherContext,
+    competitiveContext,
     line: input.line || null,
     odds: input.odds || null,
   });
@@ -390,6 +416,7 @@ export async function scanSportsJourney(input, gateway) {
     };
   }
   const maximumFixtures = Math.max(1, Math.min(10, Number(input.maximumFixtures) || 5));
+  const referenceNow = input.now || `${input.date}T00:00:00.000Z`;
   const fixtures = [];
   const warnings = [];
   for (const competition of competitions) {
@@ -414,8 +441,22 @@ export async function scanSportsJourney(input, gateway) {
     }
   }
 
+  const eligibility = filterPrematchFixtures(
+    fixtures.map((item) => item.fixture),
+    { now: referenceNow }
+  );
+  const eligibleIds = new Set(eligibility.eligible.map((fixture) => Number(fixture.fixtureId)));
+  const eligibleFixtures = fixtures.filter((item) => eligibleIds.has(Number(item.fixture.fixtureId)));
+  const exclusionsByReason = new Map();
+  for (const excluded of eligibility.excluded) {
+    exclusionsByReason.set(excluded.assessment.reason, (exclusionsByReason.get(excluded.assessment.reason) || 0) + 1);
+  }
+  for (const [reason, count] of exclusionsByReason) {
+    warnings.push(`${count} partido(s) excluido(s) del flujo prepartido: ${reason}.`);
+  }
+
   const reviewed = [];
-  for (const item of fixtures.slice(0, maximumFixtures)) {
+  for (const item of eligibleFixtures.slice(0, maximumFixtures)) {
     if (gateway.runtime.snapshot().budgetExhausted) break;
     const analysis = await analyzeSportsFixture(
       {
@@ -426,6 +467,8 @@ export async function scanSportsJourney(input, gateway) {
         marketId: requestedMarketIds.length === 1 ? requestedMarketIds[0] : "open",
         marketIds: requestedMarketIds,
         timezone: input.timezone,
+        prematchOnly: true,
+        analyzedAt: referenceNow,
       },
       gateway
     );
@@ -484,6 +527,7 @@ export async function scanSportsJourney(input, gateway) {
       familiesCompared: comparison.families_compared,
       familyComparison: comparison.best_by_family,
       whyMarketWon: comparison.why_market_won,
+      competitiveContext: analysis.competitiveContext,
       transferredCandidate: {
         fixture_id: analysis.fixture.fixtureId,
         analysis_mode: "specific",
@@ -506,7 +550,7 @@ export async function scanSportsJourney(input, gateway) {
       rankReason: candidate.rank_reason.join(" "),
     }));
   const telemetry = gateway.runtime.snapshot();
-  const outcome = deriveJourneyOutcome({ fixturesFound: fixtures.length, candidates: highlighted, telemetry });
+  const outcome = deriveJourneyOutcome({ fixturesFound: eligibleFixtures.length, candidates: highlighted, telemetry });
   return {
     contract: "JourneyExplorationResult",
     version: 2,
@@ -518,8 +562,10 @@ export async function scanSportsJourney(input, gateway) {
     timezone: normalizeTimeZone(input.timezone),
     competitionsQueried: competitions.map((item) => item.localName),
     fixturesFound: fixtures.length,
+    prematchFixturesFound: eligibleFixtures.length,
     fixturesReviewed: reviewed.length,
-    fixturesDiscarded: Math.max(0, reviewed.length - highlighted.length),
+    fixturesDiscarded: eligibility.excluded.length + Math.max(0, reviewed.length - highlighted.length),
+    fixturesExcludedBeforeKickoff: eligibility.excluded.length,
     analyzableFixtures: reviewed.filter(
       (analysis) => analysis.director.status !== "insufficient_data"
     ).length,

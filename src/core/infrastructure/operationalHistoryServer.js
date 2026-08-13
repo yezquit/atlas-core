@@ -42,6 +42,11 @@ export function createFileOperationalHistory() {
         await persist(memory.events.at(-1));
         return true;
       },
+      async appendArchiveAll(confirmation) {
+        const result = await memory.appendArchiveAll(confirmation);
+        await persist(memory.events.at(-1));
+        return result;
+      },
       async appendResult(result) {
         await memory.appendResult(result);
         await persist(memory.events.at(-1));

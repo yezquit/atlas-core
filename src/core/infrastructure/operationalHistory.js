@@ -9,6 +9,10 @@ function analysisLocalDate(item) {
 
 export function createMemoryOperationalHistory(initialEvents = []) {
   const events = [...initialEvents];
+  const activeEvents = () => {
+    const lastArchiveIndex = events.map((event) => event.type).lastIndexOf("history_archived_all");
+    return lastArchiveIndex >= 0 ? events.slice(lastArchiveIndex + 1) : events;
+  };
   return {
     async appendAnalysis(version) {
       if (events.some((event) => event.type === "analysis_finalized" && event.payload.analysis_id === version.analysis_id)) {
@@ -22,6 +26,17 @@ export function createMemoryOperationalHistory(initialEvents = []) {
       events.push({ type: "analysis_deleted", schema_version: 1, recorded_at: new Date().toISOString(), payload: { analysis_id: analysisId } });
       return true;
     },
+    async appendArchiveAll(confirmation) {
+      if (confirmation !== "BORRAR HISTORIAL") throw new Error("explicit_history_archive_confirmation_required");
+      const affectedCount = (await this.list()).length;
+      events.push({
+        type: "history_archived_all",
+        schema_version: 1,
+        recorded_at: new Date().toISOString(),
+        payload: { affected_count: affectedCount, storage_strategy: "append_only_archive_marker" },
+      });
+      return { affectedCount, recoverableFromAppendOnlyLog: true };
+    },
     async appendResult(result) {
       if (!result?.analysis_id) throw new TypeError("prediction_result_requires_analysis_id");
       if (!events.some((event) => event.type === "analysis_finalized" && event.payload.analysis_id === result.analysis_id)) {
@@ -32,16 +47,17 @@ export function createMemoryOperationalHistory(initialEvents = []) {
     },
     async listResults() {
       const latest = new Map();
-      for (const event of events.filter((item) => item.type === "prediction_result_recorded")) latest.set(event.payload.analysis_id, event.payload);
+      for (const event of activeEvents().filter((item) => item.type === "prediction_result_recorded")) latest.set(event.payload.analysis_id, event.payload);
       return [...latest.values()];
     },
     async calibration() {
       return calculateCalibration(await this.listResults());
     },
     async list(filters = {}) {
-      const deleted = new Set(events.filter((event) => event.type === "analysis_deleted").map((event) => event.payload.analysis_id));
+      const active = activeEvents();
+      const deleted = new Set(active.filter((event) => event.type === "analysis_deleted").map((event) => event.payload.analysis_id));
       const results = new Map((await this.listResults()).map((item) => [item.analysis_id, item]));
-      return events.filter((event) => event.type === "analysis_finalized" && !deleted.has(event.payload.analysis_id)).map((event) => ({ ...event.payload, prediction_result: results.get(event.payload.analysis_id) || null })).filter((item) =>
+      return active.filter((event) => event.type === "analysis_finalized" && !deleted.has(event.payload.analysis_id)).map((event) => ({ ...event.payload, prediction_result: results.get(event.payload.analysis_id) || null })).filter((item) =>
         (!filters.fixtureId || Number(item.fixture_id) === Number(filters.fixtureId)) &&
         (!filters.phase || item.phase === filters.phase) &&
         (!filters.market || item.director?.market_evaluated?.family === filters.market) &&

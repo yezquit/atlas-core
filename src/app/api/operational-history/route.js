@@ -47,10 +47,17 @@ export async function DELETE(request) {
   } catch {
     return Response.json({ status: "unavailable", errorCode: "invalid_json" }, { status: 400 });
   }
+  const repository = await getOperationalHistoryRepository();
+  if (input?.scope === "all") {
+    if (input.confirmation !== "BORRAR HISTORIAL") {
+      return Response.json({ status: "blocked", errorCode: "explicit_history_archive_confirmation_required", message: "Escribe BORRAR HISTORIAL para confirmar." }, { status: 400 });
+    }
+    const result = await repository.appendArchiveAll(input.confirmation);
+    return Response.json({ status: "success", ...result, configurationPreserved: true });
+  }
   if (!input?.analysisId || input.confirmation !== "DELETE") {
     return Response.json({ status: "blocked", errorCode: "explicit_deletion_confirmation_required", message: "La eliminación requiere confirmación explícita." }, { status: 400 });
   }
-  const repository = await getOperationalHistoryRepository();
   await repository.appendDeletion(input.analysisId, input.confirmation);
   return Response.json({ status: "success", deletedAnalysisId: input.analysisId, recoverableFromAppendOnlyLog: true });
 }
