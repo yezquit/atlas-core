@@ -55,6 +55,13 @@ export function localDateTimeToUtcIso(value, requestedTimeZone = DEFAULT_ATLAS_T
   return localDateTimeToUtc({ year: Number(year), month: Number(month), day: Number(day), hour: Number(hour), minute: Number(minute), second: Number(second) }, normalizeTimeZone(requestedTimeZone)).toISOString();
 }
 
+export function utcIsoToLocalDateTimeInput(value, requestedTimeZone = DEFAULT_ATLAS_TIMEZONE) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const parts = zonedParts(parsed, normalizeTimeZone(requestedTimeZone));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
 function nextCalendarDate(date) {
   const [year, month, day] = date.split("-").map(Number);
   const next = new Date(Date.UTC(year, month - 1, day + 1));

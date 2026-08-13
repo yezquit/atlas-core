@@ -1,5 +1,6 @@
 import { getOperationalHistoryRepository, recordOperationalResult } from "@/core/services/operationalAnalysisServer";
 import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
+import { buildFixtureQuoteLedger } from "@/core/intelligence/fixtureQuoteLedger";
 
 function filters(url) {
   return Object.fromEntries([...url.searchParams.entries()].filter(([, value]) => value));
@@ -9,6 +10,17 @@ export async function GET(request) {
   if (!isLocalRequest(request)) return localAccessDeniedResponse();
   const url = new URL(request.url);
   const repository = await getOperationalHistoryRepository();
+  if (url.searchParams.get("view") === "fixture_quotes") {
+    const fixtureId = Number(url.searchParams.get("fixtureId"));
+    if (!Number.isInteger(fixtureId) || fixtureId <= 0) {
+      return Response.json({ status: "unavailable", errorCode: "invalid_fixture_id" }, { status: 400 });
+    }
+    const analyses = await repository.list({ fixtureId });
+    return Response.json({
+      status: "success",
+      ledger: buildFixtureQuoteLedger(analyses, { fixtureId }),
+    });
+  }
   if (url.searchParams.get("format") === "json") {
     const json = await repository.exportJson(filters(url));
     return new Response(json, { headers: { "content-type": "application/json", "content-disposition": "attachment; filename=atlas-history.json" } });

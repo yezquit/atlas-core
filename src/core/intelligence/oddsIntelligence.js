@@ -22,6 +22,17 @@ export function parseDecimalOdds(value) {
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
 }
 
+export function manualOddsCopyWarning({ line, decimalOdds } = {}) {
+  const parsedLine = numericToken(line);
+  const parsedOdds = parseDecimalOdds(decimalOdds);
+  if (parsedOdds === null) return null;
+  const repeatsHighLine = Number.isFinite(parsedLine) && parsedLine >= 4 && parsedOdds === parsedLine;
+  if (!repeatsHighLine && parsedOdds < 6) return null;
+  return repeatsHighLine
+    ? `Verificación sugerida: la cuota ${parsedOdds} coincide con la línea ${parsedLine}. Confirma que copiaste la cuota decimal exacta de la casa y no repetiste la línea. Atlas no la corrige ni la rechaza.`
+    : `Verificación sugerida: la cuota ${parsedOdds} es inusualmente alta. Confirma la copia exacta en la casa. Atlas no la corrige ni la rechaza.`;
+}
+
 function normalized(value) {
   return String(value || "")
     .normalize("NFD")
@@ -296,7 +307,11 @@ export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketNam
       ? `La cuota manual fue consultada hace ${freshnessResult.age_minutes} minutos y supera el límite de ${policy.limit_minutes} minutos para esta fase.`
       : null,
     verification_status: ODDS_VERIFICATION_STATUS.USER_REPORTED,
-    warnings: ["manual_odds_unverified", ...(freshnessResult.freshness === "stale" ? ["odds_stale"] : [])],
+    warnings: [
+      "manual_odds_unverified",
+      ...(manualOddsCopyWarning({ line: normalizedLine, decimalOdds: parsedOdds }) ? ["manual_odds_unusual_copy"] : []),
+      ...(freshnessResult.freshness === "stale" ? ["odds_stale"] : []),
+    ],
   };
 }
 

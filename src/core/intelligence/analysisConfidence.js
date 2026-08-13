@@ -37,7 +37,7 @@ export function calculateAnalysisConfidence(input = {}) {
     analysis_confidence_score: score,
     confidence_label: confidenceLabel(score),
     represents_probability: false,
-    formula: "Suma ponderada de calidad de fuente (18), actualidad (14), muestra (14), cobertura (14), concordancia (10), control de contradicciones (10), contexto (8), línea/cuota verificadas (8) y estabilidad del proveedor (4).",
+    formula: "Suma ponderada de calidad de fuente (18), actualidad de la evidencia deportiva (14), muestra (14), cobertura (14), concordancia (10), control de contradicciones (10), contexto (8), datos deportivos de mercado verificados (8) y estabilidad del proveedor (4). La cuota no altera esta confianza.",
     cap_applied: !extraordinary && rawScore > 92,
     extraordinary_evidence: extraordinary,
     components,

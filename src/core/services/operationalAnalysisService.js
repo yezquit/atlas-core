@@ -26,6 +26,43 @@ function probabilityLabel(value) {
   return `${Number((Number(value) * 100).toFixed(1))}%`;
 }
 
+export function buildOperationalCompleteness({ oddsQuote = null, priceEvaluation = null } = {}) {
+  if (!oddsQuote) {
+    return {
+      contract: "OperationalCompleteness",
+      version: 1,
+      status: "pending_price",
+      complete: false,
+      message: "La tesis deportiva está disponible; falta una cuota actual para completar la evaluación operativa.",
+    };
+  }
+  if (!isCurrentOddsQuote(oddsQuote)) {
+    return {
+      contract: "OperationalCompleteness",
+      version: 1,
+      status: "stale_price",
+      complete: false,
+      message: "La cotización se conserva como histórica y no completa la evaluación operativa.",
+    };
+  }
+  return {
+    contract: "OperationalCompleteness",
+    version: 1,
+    status: "price_evaluated",
+    complete: Boolean(priceEvaluation && priceEvaluation.status !== "unavailable"),
+    message: "La cuota actual fue evaluada por separado de la confianza deportiva.",
+  };
+}
+
+export function calculateSportsAnalysisConfidence(input = {}) {
+  return calculateAnalysisConfidence({
+    ...input,
+    freshness: 0.35,
+    verified_market_data: 0,
+    verifiedOdds: false,
+  });
+}
+
 export function buildGeminiEconomicReanalysisMessage({
   selectedItems = [],
   impacts = [],
@@ -391,9 +428,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const available = marketAssessment?.available_evidence?.length || 0;
   const sampleSize = primaryCandidate?.sample_size_effective || marketAssessment?.sample_size || 0;
   const telemetry = gateway.runtime.snapshot();
-  const confidence = calculateAnalysisConfidence({
+  const confidence = calculateSportsAnalysisConfidence({
     source_quality: base.status === DATA_LOAD_STATUS.SUCCESS ? 0.9 : 0.2,
-    freshness: selectedOdds?.freshness === "fresh" ? 1 : selectedOdds ? 0.55 : 0.35,
     sample_size: ratio(sampleSize, 10),
     variable_coverage: ratio(available, requirements),
     source_concordance: contradictions.length
@@ -401,11 +437,9 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       : Math.min(0.92, 0.85 + favorableGemini.length * 0.02),
     contradiction_control: contradictions.length ? 0 : 1,
     contextual_coverage: [context.lineups.status, context.injuries.status, context.standings.status].filter((status) => ["confirmed", "probable", "no_reports", "verified"].includes(status)).length / 3,
-    verified_market_data: selectedOdds?.verification_status === "verified_provider" ? 1 : selectedOdds ? 0.45 : 0,
     provider_stability: telemetry.budgetExhausted || telemetry.quotaStatus === "preventive_block" ? 0 : 1,
     extraordinaryEvidence: false,
     confirmedLineup: context.lineups.status === "confirmed",
-    verifiedOdds: selectedOdds?.verification_status === "verified_provider",
     criticalContradictions: contradictions.length,
   });
   const suitability = assessMarketSuitability({
@@ -422,6 +456,10 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     preliminaryProbability,
     sampleSize,
     phase: input.phase || phaseInfo.phase,
+  });
+  const operationalCompleteness = buildOperationalCompleteness({
+    oddsQuote: selectedOdds,
+    priceEvaluation: suitability.price_evaluation,
   });
   const prompt = buildGeminiResearchPrompt({
     fixture: base.fixture,
@@ -477,6 +515,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     contextReanalysisMessage,
   });
   attachLineOriginToDirector(director, lineOrigin, contextSummary);
+  director.operational_completion = operationalCompleteness;
   const redTeam = buildRedTeamAtlas({
     candidate: primaryCandidate,
     marketAssessment,
@@ -587,6 +626,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     preMatchContext: context,
     gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, reanalysis_message: contextReanalysisMessage },
     confidence,
+    operationalCompleteness,
     preliminaryProbability,
     suitability,
     parlay,

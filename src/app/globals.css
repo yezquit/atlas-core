@@ -5043,6 +5043,26 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   margin: 16px 0;
 }
 
+.p2-quote-warning {
+  display: block;
+  margin-top: 8px;
+  color: #fde68a;
+  line-height: 1.45;
+}
+
+.p2-operational-ranking {
+  display: grid;
+  gap: 12px;
+  padding-left: 22px;
+}
+
+.p2-operational-ranking li,
+.p2-price-reason {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+}
+
 @media (max-width: 900px) {
   .p2-competition-groups,
   .p2-candidate-grid,
