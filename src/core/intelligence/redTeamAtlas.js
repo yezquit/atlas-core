@@ -41,7 +41,7 @@ export function buildRedTeamAtlas({ candidate = null, marketAssessment = null, c
   };
 }
 
-export function buildAtlasPreflight({ fixture = null, candidate = null, competitiveContext = null, oddsQuote = null, preMatchContext = null, blocked = false } = {}) {
+export function buildAtlasPreflight({ fixture = null, candidate = null, competitiveContext = null, oddsQuote = null, preMatchContext = null, manualContext = null, blocked = false } = {}) {
   const entries = [
     { key: "fixture", label: "Fixture confirmado", state: fixture?.fixtureId && !blocked ? "confirmed" : "blocking" },
     { key: "sports", label: "Datos deportivos suficientes", state: candidate?.probability_status === "preliminary" ? "confirmed" : "pending" },
@@ -50,6 +50,7 @@ export function buildAtlasPreflight({ fixture = null, candidate = null, competit
     { key: "price", label: "Cuota actual", state: oddsQuote && oddsQuote.freshness !== "stale" ? "confirmed" : "pending" },
     { key: "lineups", label: "Alineaciones confirmadas", state: preMatchContext?.lineups?.status === "confirmed" ? "confirmed" : "pending" },
   ];
+  if (manualContext) entries.push({ key: "manual_context", label: "Investigación manual revisada", state: manualContext.valid_for_reanalysis ? "confirmed" : "blocking" });
   return {
     contract: "AtlasPreflight",
     version: 1,

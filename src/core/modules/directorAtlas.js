@@ -835,3 +835,101 @@ export function buildOperationalDirectorVerdict({
     can_recommend: false,
   };
 }
+
+function currentSimplePrice(price) {
+  return price?.freshness === "fresh" && ["verified_current", "user_reported_current"].includes(price?.source_status);
+}
+
+function concreteGeminiBlocker(items, marketFamily) {
+  return items.find((item) => {
+    const relevantMarket = !item?.affected_markets?.length || item.affected_markets.includes(marketFamily);
+    const text = String(item?.summary || item?.text || "");
+    return item?.impact === "limiting" && item?.kind !== "contradiction" && relevantMarket &&
+      /alineaci[oó]n|dato imprescindible|parte m[eé]dico/i.test(text) &&
+      /a[uú]n no|todav[ií]a no|no (?:est[aá]n?|ha[n]? sido) publicad|pendiente|por confirmar|se publicar[aá]/i.test(text);
+  }) || null;
+}
+
+export function buildSimpleDirectorPresentation(director, { geminiItems = [], historicalQuote = null } = {}) {
+  const price = director?.price_assessment || null;
+  const marketFamily = director?.market_evaluated?.family || null;
+  const contradiction = geminiItems.find((item) => item?.kind === "contradiction") || null;
+  const blocker = concreteGeminiBlocker(geminiItems, marketFamily);
+  const sportsCandidate = director?.sports_verdict?.status === "sports_candidate";
+  let analysisDecision;
+  if (["blocked", "insufficient"].includes(director?.decision_code)) {
+    analysisDecision = {
+      status: "wait",
+      icon: "🟡",
+      label: "ESPERAR",
+      explanation: director?.blocking_condition || director?.conditions?.[0] || "Falta un dato imprescindible para completar el análisis.",
+    };
+  } else if (blocker) {
+    analysisDecision = {
+      status: "wait",
+      icon: "🟡",
+      label: "ESPERAR",
+      explanation: `${blocker.summary || blocker.text} Actualiza el análisis cuando el dato esté disponible.`,
+    };
+  } else if (contradiction || !sportsCandidate) {
+    analysisDecision = {
+      status: "no",
+      icon: "🔴",
+      label: "NO ME GUSTA ESTA OPCIÓN",
+      explanation: contradiction?.summary || contradiction?.text || director?.primary_opposing_evidence || "La evidencia disponible no sostiene suficientemente esta selección.",
+    };
+  } else {
+    analysisDecision = {
+      status: "yes",
+      icon: "🟢",
+      label: "SÍ, ME GUSTA ESTA OPCIÓN",
+      explanation: director?.primary_supporting_evidence || director?.simple_reasons?.[0] || "La evidencia disponible sostiene esta selección.",
+    };
+  }
+
+  const hasCurrentPrice = currentSimplePrice(price);
+  const staleQuote = !hasCurrentPrice && historicalQuote ? historicalQuote : null;
+  let priceDecision = null;
+  if (staleQuote) {
+    priceDecision = {
+      status: "wait",
+      icon: "🟡",
+      label: "ESPERAR",
+      explanation: "Cuota vencida — actualízala para tomar una decisión.",
+    };
+  } else if (hasCurrentPrice) {
+    const rejectsPrice = price?.status === "unfavorable" || analysisDecision.status === "no";
+    const authorizesPrice = ["favorable_preliminary", "marginal"].includes(price?.status) || ["yes", "caution"].includes(director?.decision_code);
+    if (rejectsPrice) {
+      priceDecision = {
+        status: "no",
+        icon: "🔴",
+        label: "NO APOSTAR",
+        explanation: price?.status === "unfavorable"
+          ? "El mercado puede gustarme, pero esta cuota exige demasiado para la estimación actual de Atlas."
+          : "La opción no supera el análisis deportivo completo.",
+      };
+    } else if (analysisDecision.status === "wait") {
+      priceDecision = {
+        status: "wait",
+        icon: "🟡",
+        label: "ESPERAR",
+        explanation: analysisDecision.explanation,
+      };
+    } else if (authorizesPrice && analysisDecision.status === "yes") {
+      priceDecision = {
+        status: "yes",
+        icon: "🟢",
+        label: "APOSTAR",
+        explanation: price?.message || "La cuota supera la evaluación económica existente de Atlas.",
+      };
+    }
+  }
+
+  return {
+    analysis_decision: analysisDecision,
+    price_decision: priceDecision,
+    has_current_price: hasCurrentPrice,
+    stale_quote: staleQuote,
+  };
+}

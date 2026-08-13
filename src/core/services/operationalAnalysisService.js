@@ -399,8 +399,9 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const operationalSelectedOdds = operationalRanking.candidates.find(
     (item) => item.candidate.candidate_id === primaryCandidate?.candidate_id
   )?.quote || null;
-  const selectedOdds = [operationalSelectedOdds, primaryCandidate?.price_quote, bestProviderOdds]
-    .find(isCurrentOddsQuote) || null;
+  const selectedOdds = input.evaluatePrice === false
+    ? null
+    : [operationalSelectedOdds, primaryCandidate?.price_quote, bestProviderOdds].find(isCurrentOddsQuote) || null;
   const compatibleHistoricalOdds = (oddsResult.quotes || []).filter((quote) =>
     !isCurrentOddsQuote(quote) &&
     quote.market_family === primaryCandidate?.market_family &&
@@ -451,7 +452,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     criticalContradictions: contradictions.length,
     line: primaryCandidate?.line || requestedLine,
     oddsQuote: selectedOdds,
-    contextBlocked: Boolean(geminiContext && !geminiContext.valid_for_reanalysis && input.geminiResponse),
+    contextBlocked: Boolean(geminiContext && !geminiContext.valid_for_reanalysis),
     confidenceScore: confidence.analysis_confidence_score,
     preliminaryProbability,
     sampleSize,
@@ -465,6 +466,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     fixture: base.fixture,
     competition: base.competition,
     market: marketAssessment,
+    selection: primaryCandidate,
+    competitiveContext: base.competitiveContext,
     oddsQuote: selectedOdds,
     verifiedData: [`Fixture ${base.fixture.fixtureId} verificado por API-FOOTBALL.`, `${available} de ${requirements} requisitos de mercado disponibles.`],
     missingData: marketAssessment?.missing_evidence || [],
@@ -492,6 +495,30 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   }) || (selectedGemini.length && priorSelection && priorSelection !== currentSelection
     ? `Contexto incorporado. La mejor línea cambia de ${priorSelection} a ${currentSelection}.`
     : null);
+  const directorRisks = [
+    ...(marketAssessment?.risk_flags || []),
+    ...(context.lineups.warnings || []),
+    ...(context.injuries.warnings || []),
+    ...(oddsResult.warnings || []),
+    ...unfavorableGemini,
+  ];
+  const redTeam = buildRedTeamAtlas({
+    candidate: primaryCandidate,
+    marketAssessment,
+    competitiveContext: base.competitiveContext,
+    preMatchContext: context,
+    opposingEvidence,
+    contradictions,
+  });
+  const preflight = buildAtlasPreflight({
+    fixture: base.fixture,
+    candidate: primaryCandidate,
+    competitiveContext: base.competitiveContext,
+    oddsQuote: selectedOdds,
+    preMatchContext: context,
+    manualContext: geminiContext,
+    blocked: suitability.status === "blocked",
+  });
   const director = buildOperationalDirectorVerdict({
     fixture: base.fixture,
     competition: base.competition,
@@ -507,7 +534,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     opposingEvidence,
     contradictions,
     missingData: [...(marketAssessment?.missing_evidence || []), ...geminiLimitations],
-    risks: [...(marketAssessment?.risk_flags || []), ...(context.lineups.warnings || []), ...(context.injuries.warnings || []), ...(oddsResult.warnings || []), ...unfavorableGemini],
+    risks: directorRisks,
     evidenceRefs: base.evidenceRefs,
     parlayAuthorization: "insufficient_candidates",
     preliminaryProbability,
@@ -516,22 +543,6 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   });
   attachLineOriginToDirector(director, lineOrigin, contextSummary);
   director.operational_completion = operationalCompleteness;
-  const redTeam = buildRedTeamAtlas({
-    candidate: primaryCandidate,
-    marketAssessment,
-    competitiveContext: base.competitiveContext,
-    preMatchContext: context,
-    opposingEvidence,
-    contradictions,
-  });
-  const preflight = buildAtlasPreflight({
-    fixture: base.fixture,
-    candidate: primaryCandidate,
-    competitiveContext: base.competitiveContext,
-    oddsQuote: selectedOdds,
-    preMatchContext: context,
-    blocked: suitability.status === "blocked",
-  });
   director.red_team = redTeam;
   director.preflight = preflight;
   director.scout = {

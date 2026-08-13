@@ -119,12 +119,11 @@ function buildItem(content, kind, index, sourceOptions) {
   const recognizedSource = classifications.some((classification) => TRUSTED_SOURCE_CLASSES.has(classification));
   const sourceIsCurrent = dates.length > 0 || /actualizad|vigente|hoy|ultima hora|última hora/.test(normalize(content));
   const relevantImpact = markets.length > 0 && !isAlreadyKnownFixtureData(content);
-  const selected = recognizedSource && sourceIsCurrent && relevantImpact && !genericSupportPage &&
-    !isPredictionOpinion(content, domains) && ![
+  const eligibleForSelection = urls.length > 0 && !genericSupportPage && !isPredictionOpinion(content, domains) && ![
       GEMINI_ITEM_KIND.RUMOR,
-      GEMINI_ITEM_KIND.CONTRADICTION,
       GEMINI_ITEM_KIND.NOT_FOUND,
     ].includes(kind);
+  const selected = recognizedSource && sourceIsCurrent && relevantImpact && eligibleForSelection && kind !== GEMINI_ITEM_KIND.CONTRADICTION;
   return {
     id: `gemini-${index + 1}`,
     kind,
@@ -146,7 +145,14 @@ function buildItem(content, kind, index, sourceOptions) {
     affected_markets: markets,
     impact,
     impact_explanation: impactExplanation(kind, impact, markets),
-    selection_warning: kind === GEMINI_ITEM_KIND.CONTRADICTION ? "Revisa esta contradicción antes de utilizarla." : null,
+    eligible_for_selection: eligibleForSelection,
+    selection_warning: kind === GEMINI_ITEM_KIND.CONTRADICTION
+      ? eligibleForSelection
+        ? "Revisa esta contradicción antes de utilizarla."
+        : "Esta contradicción no cumple los requisitos de fuente, vigencia y relevancia."
+      : eligibleForSelection
+        ? null
+        : "Este elemento no cumple los requisitos de fuente, vigencia y relevancia y no puede incorporarse.",
     selected,
   };
 }
@@ -185,7 +191,7 @@ export function classifySource(url, { officialClubDomains = [], officialCompetit
   return SOURCE_CLASSIFICATION.UNKNOWN;
 }
 
-export function buildGeminiResearchPrompt({ fixture, competition, market, oddsQuote, verifiedData = [], missingData = [], risks = [], analyzedAt = new Date().toISOString() }) {
+export function buildGeminiResearchPrompt({ fixture, competition, market, selection = null, competitiveContext = null, oddsQuote, verifiedData = [], missingData = [], risks = [], analyzedAt = new Date().toISOString() }) {
   if (!fixture?.fixtureId) throw new TypeError("El prompt Gemini requiere un fixture verificado.");
   const home = fixture.teams?.home?.name || "Equipo local no disponible";
   const away = fixture.teams?.away?.name || "Equipo visitante no disponible";
@@ -198,9 +204,13 @@ export function buildGeminiResearchPrompt({ fixture, competition, market, oddsQu
     `Fecha y hora UTC: ${fixture.date?.utc || "No disponible"}`,
     `Partido: ${home} vs ${away}`,
     `Mercado: ${market?.market_label || market?.market_family || "Abierto"}`,
-    `Selección actual: ${oddsQuote?.selection || "No disponible"}`,
-    `Línea actual: ${oddsQuote?.line || market?.line || "No disponible"}`,
+    `Selección exacta que Atlas está estudiando: ${selection?.selection || oddsQuote?.selection || "No disponible"}`,
+    `Línea exacta: ${selection?.line || oddsQuote?.line || market?.line || "No disponible"}`,
     `Cuota actual: ${oddsQuote?.decimal_odds || market?.odds || "No disponible"}`,
+    `Fase o ronda: ${competitiveContext?.competition?.round || fixture.competition?.round || "No disponible"}`,
+    `Formato: ${competitiveContext?.leg || "No disponible"}`,
+    `Marcador agregado: ${competitiveContext?.aggregate ? `${competitiveContext.aggregate.home}-${competitiveContext.aggregate.away}` : "No disponible"}`,
+    `Próxima competición conocida: ${competitiveContext?.next_competition || "No disponible"}`,
     `Hora exacta del análisis: ${analyzedAt}`,
     "",
     "DATOS YA VERIFICADOS POR API:",
@@ -212,7 +222,9 @@ export function buildGeminiResearchPrompt({ fixture, competition, market, oddsQu
     "RIESGOS DETECTADOS:",
     ...(risks.length ? risks.map((item) => `- ${item}`) : ["- Ninguno identificado."]),
     "",
-    "Investiga información vigente y cita URL y fecha de publicación para cada hecho. Verifica lesiones, sanciones, alineaciones probables o confirmadas, rotaciones, árbitro, declaraciones de entrenadores, prioridad competitiva, descanso, viajes, clima, estado del campo, noticias de última hora y movimientos de cuotas.",
+    "Pregunta central: ¿hay algo actualmente verificable que pueda fortalecer, debilitar o invalidar esta selección exacta?",
+    "Investiga solo información material para esa pregunta y cita URL y fecha de publicación para cada hecho. Revisa, cuando corresponda: alineaciones probables o confirmadas; lesionados y suspendidos; rotaciones y cambios de arquero; delanteros, creadores u otros jugadores relevantes para el mercado; declaraciones recientes; partido anterior y siguiente; días de descanso; importancia competitiva; fase, grupo o eliminación directa; ida, vuelta y marcador agregado; necesidad de remontar o proteger un resultado; contexto local/visitante; clima, árbitro y noticias recientes si pueden afectar este mercado.",
+    "No añadas información genérica para completar secciones. Explica de forma breve cómo cada hecho podría fortalecer, debilitar, invalidar o dejar sin cambio la selección, sin inventar porcentajes, coeficientes ni una recomendación de apuesta.",
     "Separa la respuesta exactamente en: HECHOS CONFIRMADOS, INFORMACIÓN PROBABLE, RUMORES, CONTRADICCIONES y DATOS NO ENCONTRADOS.",
     "Para cada elemento incluye fuente, URL y fecha. Si no puedes verificar algo, indícalo. No cambies el fixture, los equipos, la línea ni la cuota proporcionados.",
   ].join("\n");
@@ -299,11 +311,12 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
 
 export function selectGeminiItems(context, selectedIds = []) {
   const allowed = new Set(selectedIds);
-  const items = (context?.items || []).map((item) => ({ ...item, selected: allowed.has(item.id) }));
+  const canSelect = (item) => item?.eligible_for_selection !== false;
+  const items = (context?.items || []).map((item) => ({ ...item, selected: allowed.has(item.id) && canSelect(item) }));
   return {
     ...context,
     items,
-    selected_items: (context?.items || []).filter((item) => allowed.has(item.id)),
+    selected_items: (context?.items || []).filter((item) => allowed.has(item.id) && canSelect(item)),
     counters: countersFor(items),
   };
 }
