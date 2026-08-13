@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { buildConservativeParlays } from "@/core/intelligence/parlayPolicy";
 import { localDateTimeToUtcIso, utcIsoToLocalDateTimeInput } from "@/core/intelligence/dateTimeContext";
 import { manualOddsCopyWarning } from "@/core/intelligence/oddsIntelligence";
-import { buildJourneyOperationalRanking, findFixtureQuoteEntry } from "@/core/intelligence/fixtureQuoteLedger";
+import { buildJourneyOperationalRanking, findFixtureQuoteEntry, summarizeJourneyQuoteCoverage } from "@/core/intelligence/fixtureQuoteLedger";
 
 const LOAD_STATES = new Set([
   "loading",
@@ -107,6 +107,8 @@ const STATUS_LABELS = Object.freeze({
   pending_price: "Pendiente de precio",
   stale_price: "Precio vencido",
   price_evaluated: "Precio evaluado",
+  operational_partial: "Evaluación operativa parcial",
+  operational_available: "Evaluación operativa disponible",
   favorable_preliminary: "Favorable preliminar",
   marginal: "Marginal",
   unfavorable: "Desfavorable",
@@ -1272,6 +1274,13 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     () => buildJourneyOperationalRanking(journey?.candidates || [], fixtureQuoteLedgers),
     [journey, fixtureQuoteLedgers]
   );
+  const journeyQuoteCoverage = useMemo(
+    () => summarizeJourneyQuoteCoverage(journey?.candidates || [], fixtureQuoteLedgers),
+    [journey, fixtureQuoteLedgers]
+  );
+  const journeyHeaderState = journey?.candidates?.length
+    ? { ...journeyState, tone: journeyQuoteCoverage.tone, message: journeyQuoteCoverage.message }
+    : journeyState;
 
   function clearTemporaryQuote() {
     setLine("");
@@ -1736,7 +1745,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           <button type="button" className="primary-button p2-primary" onClick={scanJourney} disabled={journeyState.status === "loading"}>
             {journeyState.status === "loading" ? "Escaneando jornada…" : "Escanear jornada"}
           </button>
-          <StatusNotice value={journeyState} />
+          <StatusNotice value={journeyHeaderState} />
 
           {journey ? (
             <section className="p2-journey-result" aria-labelledby="journey-summary-title">
@@ -1756,6 +1765,18 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               <div className="p2-candidate-grid">
                 {(journey.candidates || []).map((candidate) => {
                   const operation = findFixtureQuoteEntry(fixtureQuoteLedgers[String(candidate.fixtureId)], candidate);
+                  const currentQuote = operation?.active_quote || null;
+                  const staleQuote = operation?.quote_state === "stale" ? operation.latest_known_quote : null;
+                  const quoteStatus = currentQuote
+                    ? `${currentQuote.bookmaker_name} @${currentQuote.decimal_odds}`
+                    : staleQuote
+                      ? `${staleQuote.bookmaker_name} @${staleQuote.decimal_odds} · Cuota vencida — actualizar precio`
+                      : "Pendiente de precio";
+                  const operationalStatus = currentQuote
+                    ? operation.operational_decision
+                    : staleQuote
+                      ? "Cuota vencida — actualizar precio"
+                      : "Pendiente de precio";
                   return <article key={`${candidate.fixtureId}-${candidate.marketId}`} className="p2-candidate-card">
                     <p className="eyebrow">{candidate.competition}</p>
                     {candidate.generalRank === 1 ? <span className="p2-chip p2-chip-candidate">Mejor opción deportiva</span> : null}
@@ -1768,9 +1789,9 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                       ["Línea", candidate.line],
                       ["Probabilidad preliminar", percentage(candidate.probability)],
                       ["Incertidumbre", `${percentage(candidate.uncertaintyLow)}–${percentage(candidate.uncertaintyHigh)}`],
-                      ["Estado de cuota", operation?.active_quote ? `${operation.active_quote.bookmaker_name} @${operation.active_quote.decimal_odds}` : "Pendiente de precio"],
-                      ["Decisión operativa", operation?.active_quote ? operation.operational_decision : "Pendiente de precio"],
-                      ["Evaluación económica", operation?.active_quote ? displayStatus(operation.price_status) : null],
+                      ["Estado de cuota", quoteStatus],
+                      ["Decisión operativa", operationalStatus],
+                      ["Evaluación económica", operation?.quote_state === "current" ? displayStatus(operation.price_status) : staleQuote ? "Vencida" : null],
                       ["Estado deportivo", candidate.displayStatus],
                       ["Respaldo deportivo", `${candidate.technicalSupport}/100`],
                       ["Muestra efectiva ponderada", formatEffectiveSample(candidate.sampleSize, 1)],
@@ -1790,7 +1811,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                     <ListBlock title="Razones" items={candidate.reasons} />
                     <ListBlock title="Riesgos" items={candidate.risks} />
                     <ListBlock title="Datos faltantes" items={candidate.missingData} />
-                    {operation?.active_quote ? <p className="p2-price-reason"><strong>Lectura del precio:</strong> {operation.reason}</p> : null}
+                    {operation?.quote_state === "current" ? <p className="p2-price-reason"><strong>Lectura del precio:</strong> {operation.reason}</p> : null}
+                    {staleQuote ? <p className="p2-price-reason p2-price-stale"><strong>Cuota vencida — actualizar precio.</strong> {operation.ranking_exclusion_reason}</p> : null}
                     <div className="p2-next-action"><small>Próxima acción</small><strong>{candidate.nextAction}</strong></div>
                     <button type="button" className="secondary-button" onClick={() => openCandidate(candidate)}>Abrir análisis profundo</button>
                   </article>

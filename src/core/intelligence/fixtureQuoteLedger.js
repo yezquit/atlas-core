@@ -57,6 +57,10 @@ function priceDecision(price) {
   return "Pendiente de precio";
 }
 
+function quoteObservationTime(quote) {
+  return quote?.updated_at || quote?.consulted_at || null;
+}
+
 function quotesFromVersion(version) {
   const quotes = [...(version.odds || [])];
   if (version.active_quote && !quotes.some((quote) => quote.quote_id === version.active_quote.quote_id)) {
@@ -68,6 +72,13 @@ function quotesFromVersion(version) {
 function latestCompatibleVersion(versions, selectionKey) {
   return [...versions]
     .filter((version) => versionSelectionKey(version) === selectionKey)
+    .sort((left, right) => timestamp(right.created_at) - timestamp(left.created_at))[0] || null;
+}
+
+function latestVersionContainingQuote(versions, quoteId) {
+  if (!quoteId) return null;
+  return [...versions]
+    .filter((version) => quotesFromVersion(version).some((quote) => quote.quote_id === quoteId))
     .sort((left, right) => timestamp(right.created_at) - timestamp(left.created_at))[0] || null;
 }
 
@@ -136,6 +147,14 @@ export function buildFixtureQuoteLedger(analyses = [], { fixtureId, now = new Da
       .filter((quote) => quote.quote_id !== activeQuote?.quote_id)
       .sort((left, right) => timestamp(right.updated_at || right.consulted_at) - timestamp(left.updated_at || left.consulted_at))
       .map((quote) => ({ ...quote, active: false, superseded: true }));
+    const latestKnownQuote = activeQuote || historicalQuotes[0] || null;
+    const quoteSourceVersion = latestVersionContainingQuote(versions, latestKnownQuote?.quote_id);
+    const quoteState = activeQuote ? "current" : latestKnownQuote ? "stale" : "never_quoted";
+    const exclusionReason = quoteState === "stale"
+      ? latestKnownQuote.stale_reason || "La cotización compatible ya no está vigente."
+      : quoteState === "never_quoted"
+        ? "No existe una cotización compatible registrada para esta selección exacta."
+        : null;
     const [entryFixtureId, marketFamily, direction, line] = selectionKey.split(":");
     return {
       selection_key: selectionKey,
@@ -145,13 +164,18 @@ export function buildFixtureQuoteLedger(analyses = [], { fixtureId, now = new Da
       line,
       selection: latestVersion?.director?.sports_verdict?.selection || activeQuote?.selection || `${direction === "under" ? "Under" : "Over"} ${line}`,
       active_quote: activeQuote ? { ...activeQuote, active: true, superseded: false } : null,
+      latest_known_quote: latestKnownQuote,
       historical_quotes: historicalQuotes,
-      price_status: price?.status || PRICE_EVALUATION_STATUS.UNAVAILABLE,
+      quote_state: quoteState,
+      price_status: price?.status || (quoteState === "stale" ? PRICE_EVALUATION_STATUS.STALE : PRICE_EVALUATION_STATUS.UNAVAILABLE),
       price_gap: price?.price_gap ?? null,
-      operational_decision: priceDecision(price),
-      reason: price?.message || "No existe una cuota actual para evaluar el precio.",
+      operational_decision: quoteState === "stale" ? "Cuota vencida — actualizar precio" : priceDecision(price),
+      reason: price?.message || exclusionReason || "No existe una cuota actual para evaluar el precio.",
+      ranking_included: quoteState === "current",
+      ranking_exclusion_reason: exclusionReason,
       sports_confidence_score: latestVersion?.analysis_confidence?.analysis_confidence_score ?? null,
       source_analysis_id: latestVersion?.analysis_id || null,
+      quote_source_analysis_id: quoteSourceVersion?.analysis_id || null,
     };
   }).sort((left, right) => left.selection_key.localeCompare(right.selection_key));
 
@@ -168,6 +192,82 @@ export function buildFixtureQuoteLedger(analyses = [], { fixtureId, now = new Da
 export function findFixtureQuoteEntry(ledger, candidate) {
   const key = fixtureSelectionKey(candidate);
   return ledger?.entries?.find((entry) => entry.selection_key === key) || null;
+}
+
+export function diagnoseFixtureQuoteEntry(analyses = [], { fixtureId, candidate, now, kickoff = null } = {}) {
+  const ledger = buildFixtureQuoteLedger(analyses, { fixtureId, now, kickoff });
+  const entry = findFixtureQuoteEntry(ledger, candidate);
+  if (!entry) {
+    return {
+      identity_key: fixtureSelectionKey({ ...candidate, fixtureId }),
+      persisted_state: "not_found",
+      queried_state: "never_quoted",
+      ranking_included: false,
+      ranking_exclusion_reason: "No existe una versión compatible para esta selección exacta.",
+    };
+  }
+  const latestKnownQuote = entry.latest_known_quote;
+  const sourceVersion = analyses.find((version) => version.analysis_id === entry.quote_source_analysis_id) || null;
+  const persistedQuote = sourceVersion?.active_quote?.quote_id === latestKnownQuote?.quote_id
+    ? sourceVersion.active_quote
+    : (sourceVersion?.odds || []).find((quote) => quote.quote_id === latestKnownQuote?.quote_id) || latestKnownQuote;
+  return {
+    analysis_id: entry.quote_source_analysis_id,
+    evaluation_analysis_id: entry.source_analysis_id,
+    quote_id: latestKnownQuote?.quote_id || null,
+    observed_at: quoteObservationTime(latestKnownQuote),
+    identity_key: entry.selection_key,
+    persisted_state: sourceVersion?.active_quote?.quote_id === latestKnownQuote?.quote_id ? "active_quote" : latestKnownQuote ? "historical_quote" : "never_quoted",
+    persisted_verification_status: persistedQuote?.verification_status || null,
+    persisted_freshness: persistedQuote?.freshness || null,
+    queried_state: entry.quote_state,
+    queried_verification_status: latestKnownQuote?.verification_status || null,
+    queried_freshness: latestKnownQuote?.freshness || null,
+    queried_age_minutes: latestKnownQuote?.age_minutes ?? null,
+    freshness_limit_minutes: latestKnownQuote?.freshness_limit_minutes ?? null,
+    ranking_included: entry.ranking_included,
+    ranking_exclusion_reason: entry.ranking_exclusion_reason,
+  };
+}
+
+export function summarizeJourneyQuoteCoverage(candidates = [], ledgersByFixture = {}) {
+  const states = candidates.map((candidate) =>
+    findFixtureQuoteEntry(ledgersByFixture[String(candidate.fixtureId)], candidate)?.quote_state || "never_quoted"
+  );
+  const current = states.filter((value) => value === "current").length;
+  const stale = states.filter((value) => value === "stale").length;
+  const pending = states.length - current - stale;
+  if (current === 0) {
+    return {
+      status: "pending",
+      tone: "warning",
+      message: "Candidatos deportivos encontrados — evaluación de precio pendiente",
+      total: states.length,
+      current,
+      stale,
+      pending,
+    };
+  }
+  if (current < states.length) {
+    return {
+      status: "partial",
+      tone: "operational_partial",
+      message: "Hay opciones con precio evaluado y otras pendientes.",
+      total: states.length,
+      current,
+      stale,
+      pending,
+    };
+  }
+  return {
+    status: "available",
+    tone: "operational_available",
+    message: "Todas las opciones relevantes tienen precio vigente evaluado.",
+    total: states.length,
+    current,
+    stale,
+    pending,
+  };
 }
 
 const OPERATIONAL_PRIORITY = Object.freeze({

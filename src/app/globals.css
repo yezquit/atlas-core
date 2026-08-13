@@ -4607,6 +4607,24 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   color: #fde68a;
 }
 
+.p2-status-operational_partial {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(59, 130, 246, 0.09);
+}
+
+.p2-status-operational_partial strong {
+  color: #93c5fd;
+}
+
+.p2-status-operational_available {
+  border-color: rgba(74, 222, 128, 0.42);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.p2-status-operational_available strong {
+  color: #86efac;
+}
+
 .p2-status-neutral,
 .p2-status-empty {
   border-color: rgba(148, 163, 184, 0.35);
@@ -5061,6 +5079,11 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px;
+}
+
+.p2-price-stale {
+  border-color: rgba(250, 204, 21, 0.45);
+  background: rgba(250, 204, 21, 0.06);
 }
 
 @media (max-width: 900px) {
