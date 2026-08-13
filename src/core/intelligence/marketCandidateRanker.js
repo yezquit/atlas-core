@@ -6,6 +6,10 @@ export const OVERALL_STATUS = Object.freeze({ SUITABLE: "suitable_for_considerat
 
 function clamp(value, minimum = 0, maximum = 100) { return Math.max(minimum, Math.min(maximum, value)); }
 function round(value, decimals = 1) { return Number(Number(value).toFixed(decimals)); }
+function average(values = []) {
+  const numeric = values.map(Number).filter(Number.isFinite);
+  return numeric.length ? round(numeric.reduce((sum, value) => sum + value, 0) / numeric.length) : null;
+}
 function normalizedDirection(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (/^(over|mas de|más de)\b/.test(normalized)) return "over";
@@ -79,14 +83,63 @@ function rankReason(candidate) {
   ];
 }
 
-export function rankMarketCandidates(candidates = [], { quotes = [], preferredQuote = null, marketAssessments = [], confidenceScore = null, blocked = false } = {}) {
+function observedRoleReason(candidate, source, teamName, roleLabel) {
+  const input = candidate.input_sources?.find((item) => item.source === source);
+  if (!input || !Number.isFinite(Number(input.hits)) || !Number.isFinite(Number(input.sample_size)) || Number(input.sample_size) <= 0) return null;
+  return `En la muestra de ${teamName} ${roleLabel}, ${candidate.selection} se dio en ${input.hits} de ${input.sample_size} partidos (${round(Number(input.observed_rate) * 100)}%).`;
+}
+
+function productionReason(candidate, homeTeamProfile, awayTeamProfile) {
+  const family = candidate.market_family;
+  const labels = {
+    goals: ["goles", "marca", "concede"],
+    corners: ["córners", "genera", "concede"],
+    total_shots: ["remates", "produce", "concede"],
+    shots_on_goal: ["remates a puerta", "produce", "concede"],
+    cards: ["tarjetas", "recibe", "provoca en sus rivales"],
+  }[family];
+  if (!labels) return null;
+  const homeRole = homeTeamProfile?.as_home?.sample_size ? homeTeamProfile.as_home : homeTeamProfile?.general;
+  const awayRole = awayTeamProfile?.as_away?.sample_size ? awayTeamProfile.as_away : awayTeamProfile?.general;
+  const homeFor = average(homeRole?.event_samples?.[family]?.for || []);
+  const awayConceded = average(awayRole?.event_samples?.[family]?.conceded || []);
+  if (!Number.isFinite(homeFor) && !Number.isFinite(awayConceded)) return null;
+  const homeName = homeTeamProfile?.team_name || "el equipo local";
+  const awayName = awayTeamProfile?.team_name || "el equipo visitante";
+  const parts = [
+    Number.isFinite(homeFor) ? `${homeName} ${labels[1]} ${homeFor} ${labels[0]} por partido como local` : null,
+    Number.isFinite(awayConceded) ? `${awayName} ${labels[2]} ${awayConceded} como visitante` : null,
+  ].filter(Boolean);
+  return `${parts.join("; ")}.`;
+}
+
+export function buildSimpleSportsReasons(candidate, { homeTeamProfile = null, awayTeamProfile = null } = {}) {
+  if (!candidate) return [];
+  const homeName = homeTeamProfile?.team_name || "el equipo local";
+  const awayName = awayTeamProfile?.team_name || "el equipo visitante";
+  return [...new Set([
+    observedRoleReason(candidate, "home_role", homeName, "como local"),
+    observedRoleReason(candidate, "away_role", awayName, "como visitante"),
+    productionReason(candidate, homeTeamProfile, awayTeamProfile),
+  ].filter(Boolean))].slice(0, 3);
+}
+
+export function rankMarketCandidates(candidates = [], { quotes = [], preferredQuote = null, marketAssessments = [], confidenceScore = null, blocked = false, homeTeamProfile = null, awayTeamProfile = null } = {}) {
   const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
-  return candidates.map((candidate) => {
+  const sorted = candidates.map((candidate) => {
     const marketAssessment = assessmentByFamily.get(candidate.market_family) || null;
     const sportsScore = calculateSportsScore(candidate, { marketAssessment, confidenceScore });
     const price = selectCandidateQuote(candidate, quotes, preferredQuote);
     const enriched = { ...candidate, sports_score: sportsScore };
-    return { ...enriched, price_status: price.status, price_quote: price.quote, overall_status: overallStatus(enriched, price.status, blocked), rank_reason: rankReason(enriched), ranker_version: MARKET_CANDIDATE_RANKER_VERSION };
+    return {
+      ...enriched,
+      price_status: price.status,
+      price_quote: price.quote,
+      overall_status: overallStatus(enriched, price.status, blocked),
+      rank_reason: rankReason(enriched),
+      simple_sports_reasons: buildSimpleSportsReasons(enriched, { homeTeamProfile, awayTeamProfile }),
+      ranker_version: MARKET_CANDIDATE_RANKER_VERSION,
+    };
   }).sort((left, right) => {
     if (right.sports_score !== left.sports_score) return right.sports_score - left.sports_score;
     const leftWidth = left.uncertainty_high - left.uncertainty_low;
@@ -97,7 +150,13 @@ export function rankMarketCandidates(candidates = [], { quotes = [], preferredQu
     if (familyOrder) return familyOrder;
     if (left.line !== right.line) return left.line - right.line;
     return left.direction.localeCompare(right.direction);
-  }).map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  });
+  const familyRanks = new Map();
+  return sorted.map((candidate, index) => {
+    const familyRank = (familyRanks.get(candidate.market_family) || 0) + 1;
+    familyRanks.set(candidate.market_family, familyRank);
+    return { ...candidate, rank: index + 1, overall_rank: index + 1, family_rank: familyRank };
+  });
 }
 
 function lineProfiles(ranked) {
@@ -116,12 +175,20 @@ export function buildRankedMarketSelection(input = {}) {
     awayTeamProfile: input.awayTeamProfile, refereeProfile: input.refereeProfile, contextItems: input.contextItems,
     contextImpacts: input.contextImpacts, exactLine: input.exactLine,
   }));
-  const ranked = rankMarketCandidates(generated.flatMap((result) => result.candidates), { quotes: input.quotes, preferredQuote: input.preferredQuote, marketAssessments: assessments, confidenceScore: input.confidenceScore, blocked: input.blocked });
+  const ranked = rankMarketCandidates(generated.flatMap((result) => result.candidates), {
+    quotes: input.quotes,
+    preferredQuote: input.preferredQuote,
+    marketAssessments: assessments,
+    confidenceScore: input.confidenceScore,
+    blocked: input.blocked,
+    homeTeamProfile: input.homeTeamProfile,
+    awayTeamProfile: input.awayTeamProfile,
+  });
   const primary = ranked[0] || null;
   return {
     contract: "RankedMarketSelection", version: 1, analysis_mode: analysisMode,
     requested_market_family: analysisMode === "specific" ? input.requestedMarketId : null,
     generated, ranked_candidates: ranked, primary, alternatives: ranked.slice(1, 4), line_profiles: lineProfiles(ranked),
-    explanation: primary ? `${primary.selection} ocupa el primer lugar por equilibrio deportivo; la cuota no intervino en sports_score.` : "No se generaron candidatos compatibles con la muestra disponible.",
+    explanation: primary ? `${primary.selection}: posición general Scout #${primary.overall_rank} y posición dentro de ${primary.market_family} #${primary.family_rank}; la cuota no intervino en el ranking deportivo.` : "No se generaron candidatos compatibles con la muestra disponible.",
   };
 }

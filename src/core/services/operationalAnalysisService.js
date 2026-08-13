@@ -8,7 +8,7 @@ import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanke
 import { buildOperationalRanking, buildScoutAtlas } from "../intelligence/scoutAtlas.js";
 import { buildAtlasPreflight, buildRedTeamAtlas } from "../intelligence/redTeamAtlas.js";
 import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
-import { createManualOdds, normalizeProviderOdds, selectBestComparableOdds, validateManualOddsInput } from "../intelligence/oddsIntelligence.js";
+import { createManualOdds, isCurrentOddsQuote, normalizeProviderOdds, refreshStoredOddsQuote, selectBestComparableOdds, validateManualOddsInput } from "../intelligence/oddsIntelligence.js";
 import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
@@ -207,9 +207,12 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     ? normalizeProviderOdds({ response: resource.oddsRaw.response, fixtureId: base.fixture.fixtureId, now: analyzedAt, kickoff: base.fixture.date?.utc })
     : { contract: "OddsResult", version: 1, fixture_id: base.fixture.fixtureId, status: "unavailable", quotes: [], warnings: [resource.oddsRaw.errorCode || "odds_unavailable"] };
   const previousActiveQuote = Number(previousVersion?.fixture_id) === Number(base.fixture.fixtureId)
-    ? previousVersion?.active_quote || null
+    ? refreshStoredOddsQuote(previousVersion?.active_quote || null, { now: analyzedAt, kickoff: base.fixture.date?.utc })
     : null;
-  const reusableActiveQuote = input.reanalysis ? previousActiveQuote : null;
+  const reusableActiveQuote = input.reanalysis && isCurrentOddsQuote(previousActiveQuote) ? previousActiveQuote : null;
+  const previousHistoricalQuote = input.reanalysis && previousActiveQuote && !isCurrentOddsQuote(previousActiveQuote)
+    ? previousActiveQuote
+    : null;
   const rawRequestedLine = input.manualOdds?.line ?? input.line ?? reusableActiveQuote?.line ?? null;
   const requestedLine = rawRequestedLine === null || rawRequestedLine === undefined
     ? null
@@ -310,6 +313,9 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       oddsResult.quotes.push(quote);
     }
   }
+  if (previousHistoricalQuote && !oddsResult.quotes.some((quote) => quote.quote_id === previousHistoricalQuote.quote_id)) {
+    oddsResult.quotes.push(previousHistoricalQuote);
+  }
   if (oddsResult.quotes.length) oddsResult.status = "available";
   const hasCandidateOdds = candidateManualQuotes.length > 0 && !manualQuote;
   let marketSelection = buildRankedMarketSelection({
@@ -356,7 +362,15 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const operationalSelectedOdds = operationalRanking.candidates.find(
     (item) => item.candidate.candidate_id === primaryCandidate?.candidate_id
   )?.quote || null;
-  const selectedOdds = operationalSelectedOdds || primaryCandidate?.price_quote || bestProviderOdds || null;
+  const selectedOdds = [operationalSelectedOdds, primaryCandidate?.price_quote, bestProviderOdds]
+    .find(isCurrentOddsQuote) || null;
+  const compatibleHistoricalOdds = (oddsResult.quotes || []).filter((quote) =>
+    !isCurrentOddsQuote(quote) &&
+    quote.market_family === primaryCandidate?.market_family &&
+    normalizedDirection(quote.direction || quote.selection) === primaryCandidate?.direction &&
+    Number(quote.line) === Number(primaryCandidate?.line)
+  ).sort((left, right) => Number(left.age_minutes ?? Infinity) - Number(right.age_minutes ?? Infinity));
+  const historicalQuote = compatibleHistoricalOdds[0] || null;
   const preliminaryProbability = primaryCandidate ? {
     contract: "PreliminaryMarketProbability",
     version: 1,
@@ -567,6 +581,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     bestComparableOdds: bestProviderOdds,
     selectedOdds,
     activeQuote: selectedOdds,
+    historicalOdds: compatibleHistoricalOdds,
+    historicalQuote,
     lineOrigin,
     preMatchContext: context,
     gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, reanalysis_message: contextReanalysisMessage },

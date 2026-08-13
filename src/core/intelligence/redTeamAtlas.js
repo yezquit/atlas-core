@@ -2,13 +2,27 @@ function unique(items = []) {
   return [...new Set(items.filter(Boolean))];
 }
 
+export function isModelLimitation(value) {
+  return /modelo|metodolog|calibr|distribuci[oó]n emp[ií]rica|submuestras|valor esperado|observaciones independientes|muestra efectiva fue penalizada|[uú]ltimos 5 est[aá]n contenidas|dispersi[oó]n relevante entre submuestras/i.test(String(value || ""));
+}
+
 export function buildRedTeamAtlas({ candidate = null, marketAssessment = null, competitiveContext = null, preMatchContext = null, opposingEvidence = [], contradictions = [] } = {}) {
+  const candidateLimitations = candidate?.limitations || [];
+  const marketRisks = marketAssessment?.risk_flags || [];
+  const modelLimitations = unique([
+    ...candidateLimitations.filter(isModelLimitation),
+    ...marketRisks.filter(isModelLimitation),
+  ]);
+  const rotationRisk = ["confirmed", "reported_risk"].includes(competitiveContext?.rotation?.status)
+    ? competitiveContext.rotation.message
+    : null;
   const risks = unique([
     ...contradictions,
     ...opposingEvidence,
-    ...(marketAssessment?.risk_flags || []),
-    ...(candidate?.limitations || []),
+    ...marketRisks.filter((item) => !isModelLimitation(item)),
+    ...candidateLimitations.filter((item) => !isModelLimitation(item)),
     ...(competitiveContext?.warnings || []),
+    rotationRisk,
     ...(preMatchContext?.lineups?.warnings || []),
     ...(preMatchContext?.injuries?.warnings || []),
   ]);
@@ -22,6 +36,7 @@ export function buildRedTeamAtlas({ candidate = null, marketAssessment = null, c
     version: 1,
     items: items.slice(0, 3),
     full_risks: risks,
+    model_limitations: modelLimitations,
     alternative_probability_model: false,
   };
 }

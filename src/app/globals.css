@@ -4554,6 +4554,21 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   margin: 16px 0;
 }
 
+.p2-operational-pending,
+.p2-historical-quote {
+  margin: 14px 0;
+}
+
+.p2-operational-pending {
+  border-color: rgba(250, 204, 21, 0.48);
+  background: rgba(250, 204, 21, 0.06);
+}
+
+.p2-historical-quote {
+  border-style: dashed;
+  opacity: 0.88;
+}
+
 .p2-primary {
   margin-top: 4px;
 }
@@ -4572,12 +4587,14 @@ body[data-atlas-view="technical"] .view-mode-buttons {
   color: var(--accent);
 }
 
-.p2-status-success {
+.p2-status-success,
+.p2-status-transferred_ready {
   border-color: rgba(74, 222, 128, 0.42);
   background: rgba(34, 197, 94, 0.08);
 }
 
-.p2-status-success strong {
+.p2-status-success strong,
+.p2-status-transferred_ready strong {
   color: #86efac;
 }
 

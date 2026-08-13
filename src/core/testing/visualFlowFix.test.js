@@ -227,7 +227,7 @@ test("2. jornada pendiente de cuotas muestra estado amarillo", () => {
 
 test("3. comparación de familias visible", async () => {
   const source = await readFile(clientPath, "utf8");
-  assert.match(source, /Por qué ganó este mercado/);
+  assert.match(source, /Por qué Atlas destacó esta opción/);
   assert.match(source, /Ver comparación de mercados/);
 });
 
@@ -236,7 +236,7 @@ test("4. goles gana por puntaje, no por orden", () => {
   const goals = sportsCandidate({ sports_score: 88.5, rank: 1 });
   const comparison = buildJourneyFamilyComparison({ primary: goals, generated: [{ market_family: "corners", candidates: [corners] }, { market_family: "goals", candidates: [goals] }], ranked_candidates: [goals, corners] }, [{ market_family: "corners", market_label: "Córners" }, { market_family: "goals", market_label: "Goles" }]);
   assert.equal(comparison.best_by_family[1].best_score, 88.5);
-  assert.match(comparison.why_market_won, /sports_score.*no por el orden inicial/i);
+  assert.match(comparison.why_market_won, /respaldo deportivo.*no por el orden inicial/i);
 });
 
 test("5. formato de muestra efectiva 26.6", async () => {

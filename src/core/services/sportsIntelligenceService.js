@@ -17,6 +17,7 @@ import {
 import { buildTeamRecentIntelligence } from "../intelligence/teamRecentIntelligence.js";
 import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js";
 import { buildCompetitiveContext } from "../intelligence/competitiveContext.js";
+import { isModelLimitation } from "../intelligence/redTeamAtlas.js";
 import { assessPrematchEligibility, filterPrematchFixtures } from "../intelligence/prematchEligibility.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
@@ -62,12 +63,13 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
   });
   return {
     general_rank: winner?.rank ?? null,
+    family_rank: winner?.family_rank ?? null,
     sports_score: winner?.sports_score ?? null,
     families_compared: families.map((item) => item.market_label),
     best_by_family: families,
     why_market_won: winner
-      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} ganó por sports_score (${winner.sports_score}/100), no por el orden inicial.`
-      : "No hubo un candidato ganador.",
+      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por su respaldo deportivo (${winner.sports_score}/100), no por el orden inicial.`
+      : "No hubo un candidato destacado.",
   };
 }
 
@@ -523,6 +525,7 @@ export async function scanSportsJourney(input, gateway) {
       sampleSize: candidate.sample_size_effective,
       methodologyVersion: candidate.methodology_version,
       generalRank: candidate.rank,
+      familyRank: candidate.family_rank,
       sportsScore: candidate.sports_score,
       familiesCompared: comparison.families_compared,
       familyComparison: comparison.best_by_family,
@@ -539,12 +542,14 @@ export async function scanSportsJourney(input, gateway) {
         uncertainty: { low: candidate.uncertainty_low, high: candidate.uncertainty_high },
         sports_score: candidate.sports_score,
         rank: candidate.rank,
-        reasons: candidate.rank_reason,
-        risks: candidate.limitations.slice(0, 3),
+        overall_rank: candidate.overall_rank || candidate.rank,
+        family_rank: candidate.family_rank,
+        reasons: candidate.simple_sports_reasons,
+        risks: candidate.limitations.filter((item) => !isModelLimitation(item)).slice(0, 3),
         methodology_version: candidate.methodology_version,
       },
-      reasons: candidate.rank_reason,
-      risks: candidate.limitations.slice(0, 3),
+      reasons: candidate.simple_sports_reasons,
+      risks: candidate.limitations.filter((item) => !isModelLimitation(item)).slice(0, 3),
       missingData: candidate.price_status === "unavailable" ? ["Cuota actual para la línea exacta"] : [],
       nextAction: "Abrir el análisis individual y evaluar una cuota actual para la línea exacta.",
       rankReason: candidate.rank_reason.join(" "),

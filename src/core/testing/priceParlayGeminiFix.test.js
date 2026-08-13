@@ -138,7 +138,7 @@ test("6. encabezado, respuesta directa, aptitud y parlay son coherentes", () => 
   assert.equal(director.decision_code, "no");
   assert.equal(director.individual_eligibility, "not_viable_at_this_price");
   assert.equal(director.parlay_eligibility, "not_eligible");
-  assert.match(director.sports_verdict.message, /conserva respaldo deportivo provisional/);
+  assert.match(director.sports_verdict.message, /respalda deportivamente|conserva respaldo deportivo/);
 });
 
 test("7. una cuota baja no activa elegibilidad automáticamente", () => {

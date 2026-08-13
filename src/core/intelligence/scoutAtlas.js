@@ -1,14 +1,18 @@
 import { PRICE_EVALUATION_STATUS } from "../contracts/operationalContracts.js";
 import { evaluateMarketPrice } from "./marketSuitability.js";
 import { selectCandidateQuote } from "./marketCandidateRanker.js";
+import { isModelLimitation } from "./redTeamAtlas.js";
 
 function unique(items = []) {
   return [...new Set(items.filter(Boolean))];
 }
 
 function candidateSignals(candidate, assessment) {
-  const favorable = unique((assessment?.available_evidence || []).map((item) => item.requirement));
-  const contrary = unique([...(assessment?.risk_flags || []), ...(candidate.limitations || [])]);
+  const favorable = unique(candidate.simple_sports_reasons || []);
+  const contrary = unique([
+    ...(assessment?.risk_flags || []).filter((item) => !isModelLimitation(item)),
+    ...(candidate.limitations || []).filter((item) => !isModelLimitation(item)),
+  ]);
   const pending = unique(assessment?.missing_evidence || []);
   return {
     favorable,
@@ -38,7 +42,7 @@ export function buildScoutAtlas({ marketSelection, marketAssessments = [], lineO
       labels,
       sports_support: candidate.sports_score,
       signals,
-      primary_risk: signals.contrary[0] || "No se identificó un riesgo específico adicional.",
+      primary_risk: signals.contrary[0] || null,
       missing_data: signals.pending,
       line_origin: candidate.line_origin || lineOrigin,
       confidence_quality: assessment?.quality_status || "unavailable",

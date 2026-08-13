@@ -13,6 +13,7 @@ const LOAD_STATES = new Set([
   "insufficient_data",
   "provider_error",
   "blocked",
+  "transferred_ready",
 ]);
 
 const ComparisonVisibilityContext = createContext(true);
@@ -29,6 +30,7 @@ const STATUS_LABELS = Object.freeze({
   candidate_for_market_review: "Candidato para revisar línea y cuota",
   viable_with_caution: "Viable con cautela",
   blocked: "Análisis bloqueado",
+  transferred_ready: "Candidato listo para analizar",
   warning: "Evaluación pendiente",
   neutral: "Sin candidatos",
   verified: "Verificado",
@@ -135,6 +137,7 @@ const STATUS_LABELS = Object.freeze({
   single_or_group_match: "Partido único o de grupo",
   over: "Más de",
   under: "Menos de",
+  pending_price: "Pendiente de precio",
 });
 
 const METRIC_LABELS = Object.freeze({
@@ -260,6 +263,9 @@ function HelpTerm({ label, definition }) {
 }
 
 const ATLAS_GLOSSARY = Object.freeze([
+  ["Veredicto deportivo", "Lo que Atlas piensa de la selección basándose en el partido y los datos deportivos, sin utilizar la cuota."],
+  ["Decisión operativa", "Indica si la selección merece consideración con la cuota actual disponible."],
+  ["Limitaciones del modelo", "Advertencias sobre la metodología de Atlas; no son riesgos específicos del partido."],
   ["Probabilidad preliminar", "Estimación actual de Atlas sobre la posibilidad de que ocurra la selección. No es una garantía."],
   ["Intervalo de incertidumbre", "Rango alrededor de la estimación. Un intervalo más amplio significa mayor incertidumbre."],
   ["Confianza del análisis", "Mide calidad, cobertura y coherencia de la información. No es la probabilidad de acertar."],
@@ -462,26 +468,35 @@ function GeminiContextSummary({ analysis, onShowExpert }) {
 }
 
 const SCOUT_LABELS = Object.freeze({
-  best_sports_support: "Mejor respaldo deportivo",
+  best_sports_support: "Mejor opción deportiva",
   highest_probability: "Mayor probabilidad",
   relevant_alternative: "Alternativa relevante",
 });
 
 function CompetitiveContextResult({ context }) {
   if (!context) return null;
+  const entries = [
+    ["Competición", context.competition?.name],
+    ["Tipo", context.competition?.type && context.competition.type !== "unknown" ? displayStatus(context.competition.type) : null],
+    ["Fase o ronda", context.competition?.round],
+    ["Formato", context.leg && context.leg !== "unknown" ? displayStatus(context.leg) : null],
+    ["Marcador agregado", context.aggregate ? `${context.aggregate.home}–${context.aggregate.away}` : null],
+    ["Local", context.fixture_role?.home_team],
+    ["Visitante", context.fixture_role?.away_team],
+    ["Descanso del local", Number.isFinite(Number(context.rest_days?.home_days)) ? `${context.rest_days.home_days} días` : null],
+    ["Descanso del visitante", Number.isFinite(Number(context.rest_days?.away_days)) ? `${context.rest_days.away_days} días` : null],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+  const contextItems = [
+    ["confirmed", "reported_risk"].includes(context.rotation?.status) ? context.rotation.message : null,
+    ...(context.warnings || []),
+  ].filter(Boolean).slice(0, 3);
   return (
     <section className="p2-stage-card" aria-labelledby="competitive-context-title">
       <p className="eyebrow">1 · Partido</p>
-      <h3 id="competitive-context-title">Contexto competitivo</h3>
-      <DefinitionGrid entries={[
-        ["Competición", context.competition?.name],
-        ["Tipo", displayStatus(context.competition?.type)],
-        ["Ronda o jornada", context.competition?.round],
-        ["Ida o vuelta", displayStatus(context.leg)],
-        ["Marcador agregado", context.aggregate ? `${context.aggregate.home}–${context.aggregate.away}` : "No disponible"],
-        ["Descanso local / visitante", `${formatValue(context.rest_days?.home_days)} / ${formatValue(context.rest_days?.away_days)} días`],
-      ]} />
-      <ListBlock title="Lectura contextual" items={[context.rotation?.message, ...(context.warnings || [])].slice(0, 3)} empty="Sin alertas contextuales materiales." />
+      <h3 id="competitive-context-title">Contexto del partido</h3>
+      <DefinitionGrid entries={entries} />
+      {context.competition?.type === "international" ? <p>Es una competición internacional; el contexto se utiliza como señal de riesgo, no como ajuste automático de probabilidad.</p> : null}
+      <ListBlock title="Lectura contextual" items={contextItems} empty="Sin alertas contextuales materiales." />
     </section>
   );
 }
@@ -548,7 +563,8 @@ function RedTeamResult({ redTeam }) {
     <section className="p2-stage-card" aria-labelledby="red-team-title">
       <p className="eyebrow">3 · Red Team</p>
       <h3 id="red-team-title">Qué podría hacer fallar esta opción</h3>
-      <ul>{(redTeam.items || []).slice(0, 3).map((item) => <li key={item.text}><strong>{item.status === "neutral" ? "Neutral / no concluyente" : "Riesgo"}:</strong> {displayStatus(item.text)}</li>)}</ul>
+      {(redTeam.items || []).length ? <ul>{redTeam.items.slice(0, 3).map((item) => <li key={item.text}><strong>{item.status === "neutral" ? "Neutral / no concluyente" : "Riesgo"}:</strong> {displayStatus(item.text)}</li>)}</ul> : <p>No se identificó un riesgo específico del partido con los datos disponibles.</p>}
+      {(redTeam.model_limitations || []).length ? <details className="p2-source-details"><summary>Limitaciones del modelo</summary><ul>{redTeam.model_limitations.map((item) => <li key={item}>{item}</li>)}</ul></details> : null}
     </section>
   );
 }
@@ -569,31 +585,46 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
   const [candidateSaved, setCandidateSaved] = useState(false);
   if (!director) return null;
   const decision = DIRECTOR_DECISIONS[director.market_suitability] || DIRECTOR_DECISIONS.insufficient_data;
-  const oddsStatus = director.odds_freshness === "stale"
-    ? "Cuota vencida — no utilizar para decidir"
-    : director.odds
-      ? `${displayStatus(director.odds_source_status)}${Number.isFinite(director.odds_age_minutes) ? ` · consultada hace ${director.odds_age_minutes} min` : ""}`
-      : "Cuota no disponible";
   const isUpdated = Boolean(analysis.changesSincePrevious?.comparable || analysis.analysisVersion?.inputs?.reanalysis);
   const sports = director.sports_verdict;
   const price = director.price_assessment;
+  const hasCurrentPrice = price?.freshness === "fresh" && ["verified_current", "user_reported_current"].includes(price?.source_status);
+  const pricePending = Boolean(director.price_pending && !hasCurrentPrice);
+  const sportsHeading = sports?.message || `${sports?.selection || director.selection || "La selección"} conserva respaldo deportivo.`;
+  const operationalDecision = pricePending
+    ? "Pendiente de precio"
+    : director.decision_code === "yes"
+      ? "Sí"
+      : director.decision_code === "no"
+        ? "No"
+        : director.decision_code === "caution"
+          ? "Sí, pero con cautela"
+          : "Esperar / revisar";
+  const fixtureRisks = (director.red_team?.items || []).filter((item) => item.status === "risk").map((item) => item.text).slice(0, 3);
+  const modelLimitations = [...new Set([
+    ...(director.red_team?.model_limitations || []),
+    ...(director.probability_limitations || []),
+    price?.model_notice,
+  ].filter(Boolean))];
+  const historicalQuote = analysis.historicalQuote;
   return (
     <section className={`director-atlas-panel functional-director p2-director p2-director-${decision.tone}`} aria-label="Dictamen del Director Atlas" aria-labelledby="director-atlas-title">
       <div className="p2-director-kicker">DICTAMEN DEL DIRECTOR ATLAS · {isUpdated ? "Dictamen actualizado" : displayStatus(director.temporal_status)}</div>
       <div className="p2-decision-banner">
         <span className="p2-decision-icon" aria-hidden="true">{decision.icon}</span>
         <div className="p2-director-heading">
-          <h2 id="director-atlas-title" ref={headingRef} tabIndex="-1">{director.display_status || decision.title}</h2>
-          <p>{director.verdict}</p>
+          <h2 id="director-atlas-title" ref={headingRef} tabIndex="-1">{pricePending ? sportsHeading : director.display_status || decision.title}</h2>
+          <p>{pricePending ? "Atlas mantiene una tesis deportiva; la decisión económica se evalúa por separado." : director.verdict}</p>
         </div>
       </div>
+      {pricePending ? <section className="p2-verdict-block p2-operational-pending" aria-label="Decisión operativa"><p className="eyebrow">DECISIÓN OPERATIVA</p><h3>Pendiente de precio</h3><p>Introduce una cuota actual para decidir si esta opción compensa el riesgo.</p></section> : null}
       <div className="p2-director-summary">
-        <div><small>Respuesta directa</small><strong>{director.decision_code === "yes" ? "Sí" : director.decision_code === "no" ? "No" : director.decision_code === "caution" ? "Solo con cautela" : "Todavía no"}</strong></div>
+        <div><small>Decisión operativa</small><strong>{operationalDecision}</strong></div>
         <div><small>Opción seleccionada</small><strong>{sports?.selection || director.selection || "Sin selección"}</strong></div>
         <div><small>Probabilidad preliminar</small><strong>{percentage(sports?.preliminary_probability ?? director.estimated_probability)}</strong><span>{sports ? `${percentage(sports.uncertainty_low)}–${percentage(sports.uncertainty_high)}` : "Sin intervalo"}</span></div>
         <div><small>Confianza del análisis</small><strong>{director.analysis_confidence_score || 0}%</strong><span>No es probabilidad de acierto.</span></div>
-        <div><small>Precio</small><strong>{displayStatus(price?.status || director.odds_freshness)}</strong><span>{price?.bookmaker || "Casa pendiente"}</span></div>
-        <div><small>Parlay</small><strong>{displayStatus(director.parlay_eligibility)}</strong></div>
+        <div><small>Precio actual</small><strong>{pricePending ? "No reportado" : price.decimal_odds}</strong><span>{pricePending ? "Evaluación pendiente" : price.bookmaker}</span></div>
+        <div><small>Parlay</small><strong>{pricePending ? "Pendiente de precio" : displayStatus(director.parlay_eligibility)}</strong></div>
       </div>
       <div className="p2-split p2-verdict-split">
         <section className="p2-verdict-block">
@@ -603,6 +634,8 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
             ["Selección y línea", sports?.selection || director.selection],
             ["Probabilidad preliminar", percentage(sports?.preliminary_probability)],
             ["Incertidumbre", `${percentage(sports?.uncertainty_low)}–${percentage(sports?.uncertainty_high)}`],
+            ["Respaldo deportivo", `${sports?.sports_score ?? 0}/100`],
+            ["Confianza", `${director.analysis_confidence_score || 0}% · ${displayStatus(director.confidence_label)}`],
             ["Muestra efectiva ponderada", formatEffectiveSample(director.probability_effective_sample, 1)],
           ]} />
           <p className="p2-sample-note">Las submuestras pueden solaparse y no equivalen a partidos independientes.</p>
@@ -611,45 +644,50 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
           {director.user_requested_option ? <p><strong>Opción evaluada por solicitud del usuario.</strong></p> : null}
         </section>
         <section className="p2-verdict-block">
-          <p className="eyebrow">EVALUACIÓN DE PRECIO</p>
-          <DefinitionGrid entries={[
-            ["Estado", displayStatus(price?.status)],
+          <p className="eyebrow">DECISIÓN OPERATIVA</p>
+          <DefinitionGrid entries={pricePending ? [
+            ["Cuota actual", "No reportada"],
+            ["Evaluación de precio", "Pendiente"],
+          ] : [
+            ["Evaluación de precio", displayStatus(price?.status)],
             ["Casa", price?.bookmaker],
-            ["Cuota activa", price?.decimal_odds],
+            ["Cuota actual", price?.decimal_odds],
             ["Probabilidad implícita", price?.implied_probability === null || price?.implied_probability === undefined ? null : `${(price.implied_probability * 100).toFixed(2)}%`],
           ]} />
-          <p>{price?.message}</p>
-          <p className="p2-sample-note">{price?.model_notice}</p>
+          <p>{pricePending ? "Introduce una cuota actual para decidir si esta opción compensa el riesgo." : price?.message}</p>
         </section>
         <section className="p2-verdict-block">
           <p className="eyebrow">APTITUD INDIVIDUAL</p>
-          <h3>{displayStatus(director.individual_eligibility)}</h3>
-          <p>{director.individual_eligibility_reason}</p>
+          <h3>{pricePending ? "Pendiente de precio" : displayStatus(director.individual_eligibility)}</h3>
+          <p>{pricePending ? "La tesis deportiva está disponible; falta una cuota actual para resolver la aptitud operativa." : director.individual_eligibility_reason}</p>
         </section>
         <section className="p2-verdict-block">
           <p className="eyebrow">ELEGIBILIDAD PARA PARLAY</p>
-          <h3>{displayStatus(director.parlay_eligibility)}</h3>
-          <p>{director.parlay_eligibility_reason}</p>
+          <h3>{pricePending ? "Pendiente de precio" : displayStatus(director.parlay_eligibility)}</h3>
+          <p>{pricePending ? "La política de parlay necesita una cuota actual para completar la evaluación." : director.parlay_eligibility_reason}</p>
         </section>
       </div>
+      {historicalQuote ? <aside className="p2-verdict-block p2-historical-quote" aria-label="Cotización anterior no utilizada"><p className="eyebrow">COTIZACIÓN ANTERIOR — NO UTILIZADA</p><p><strong>{historicalQuote.bookmaker_name || "Casa no informada"} · {historicalQuote.decimal_odds} · vencida</strong></p><p>Se conserva únicamente como trazabilidad histórica y no participa en la decisión actual.</p></aside> : null}
       <DefinitionGrid entries={[
           ["Selección", director.selection],
           ["Probabilidad preliminar", percentage(director.estimated_probability)],
           ["Intervalo", director.probability_status === "preliminary" ? `${percentage(director.probability_uncertainty_low)}–${percentage(director.probability_uncertainty_high)}` : "No disponible"],
           ["Confianza", `${director.analysis_confidence_score || 0}% · ${displayStatus(director.confidence_label)}`],
-          ["Cuota", director.odds ? `${director.odds} · ${director.bookmaker || "Casa no informada"}` : oddsStatus],
-          ["Probabilidad implícita", director.implied_probability === null || director.implied_probability === undefined ? null : `${(director.implied_probability * 100).toFixed(2)}%`],
+          ["Posición general Scout", director.market_ranking?.overall_rank ? `#${director.market_ranking.overall_rank}` : null],
+          ["Posición dentro de la familia", director.market_ranking?.family_rank ? `#${director.market_ranking.family_rank}` : null],
+          ["Cuota actual", pricePending ? "No reportada" : `${director.odds} · ${director.bookmaker || "Casa no informada"}`],
+          ["Probabilidad implícita actual", pricePending || director.implied_probability === null || director.implied_probability === undefined ? null : `${(director.implied_probability * 100).toFixed(2)}%`],
         ]} />
         <p className="p2-confidence-note">{director.temporal_message}</p>
         {director.context_reanalysis_message ? <p className="p2-confidence-note"><strong>{director.context_reanalysis_message}</strong></p> : null}
         <div className="p2-four-columns">
           <ListBlock title="Por qué" items={(director.simple_reasons || director.reasons || []).slice(0, 3)} />
-          <ListBlock title="Qué podría salir mal" items={(director.red_team?.items || []).map((item) => item.text).slice(0, 3)} />
-          <ListBlock title="Precio" items={[price?.message]} />
+          <ListBlock title="Qué podría hacer fallar esta opción" items={fixtureRisks} empty="No se identificó un riesgo específico del partido con los datos disponibles." />
+          <ListBlock title="Precio" items={[pricePending ? "Introduce una cuota actual para completar la decisión operativa." : price?.message]} />
           <ListBlock title="Qué falta" items={(director.missing_data || []).slice(0, 3)} />
         </div>
         <p className="p2-confidence-note">Confianza del análisis: {director.analysis_confidence_score || 0}% — {displayStatus(director.confidence_label)}. Este porcentaje mide calidad y coherencia de la evidencia; no es una probabilidad de acierto ni representa la probabilidad de ganar. <HelpTerm label="Confianza del análisis" definition="Mide calidad, cobertura y coherencia de la información. No es la probabilidad de acertar." /></p>
-        {director.probability_status === "preliminary" ? <p className="p2-confidence-note">Modelo preliminar, aún no validado con suficiente historial. La estimación no afirma valor esperado.</p> : <p className="p2-confidence-note">La probabilidad deportiva no está disponible porque la línea, la cobertura o la muestra no cumplen la metodología documentada.</p>}
+        {modelLimitations.length ? <details className="p2-source-details"><summary>Limitaciones del modelo</summary><ul>{modelLimitations.map((item) => <li key={item}>{item}</li>)}</ul></details> : null}
         <div className="p2-director-actions">
           <div className="p2-next-action"><small>Próxima acción</small><strong>{director.next_action}</strong></div>
           <div className="p2-next-action"><small>Cuándo reanalizar</small><strong>{director.next_review}</strong></div>
@@ -1534,6 +1572,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       uncertainty: { low: candidate.uncertaintyLow, high: candidate.uncertaintyHigh },
       sports_score: candidate.sportsScore ?? candidate.technicalSupport,
       rank: candidate.generalRank,
+      overall_rank: candidate.generalRank,
+      family_rank: candidate.familyRank,
       reasons: candidate.reasons,
       risks: candidate.risks,
       methodology_version: candidate.methodologyVersion,
@@ -1556,7 +1596,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     setSelectedFixtureId(String(candidate.fixtureId));
     setFixturesState(state("Candidato transferido. El fixture ID permanece inmutable.", "success"));
     setAnalysis(null);
-    setAnalysisState(state("Candidato completo transferido. Continúa con este candidato para crear el análisis individual."));
+    setAnalysisState(state("La opción seleccionada desde la jornada fue transferida correctamente. Puedes continuar con el análisis profundo o introducir una cuota actual.", "transferred_ready"));
   }
 
   return (
@@ -1616,7 +1656,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                   {market.label}
                 </label>
               ))}
-              <small>Todos están seleccionados inicialmente. El respaldo técnico no es probabilidad.</small>
+              <small>Todos están seleccionados inicialmente. El respaldo deportivo no es probabilidad.</small>
             </fieldset>
             <label>
               <span>4 · Máximo de partidos a revisar</span>
@@ -1649,6 +1689,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                 {(journey.candidates || []).map((candidate) => (
                   <article key={`${candidate.fixtureId}-${candidate.marketId}`} className="p2-candidate-card">
                     <p className="eyebrow">{candidate.competition}</p>
+                    {candidate.generalRank === 1 ? <span className="p2-chip p2-chip-candidate">Mejor opción deportiva</span> : null}
                     <h3>{candidate.fixture}</h3>
                     <p>{formatDate(candidate.kickoff, candidate.timezone || defaultTimezone)} · {candidate.timezone === "America/Bogota" || !candidate.timezone ? "Hora de Colombia" : candidate.timezone}</p>
                     <small className="p2-secondary-id">Fixture ID {candidate.fixtureId}</small>
@@ -1660,14 +1701,15 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                       ["Incertidumbre", `${percentage(candidate.uncertaintyLow)}–${percentage(candidate.uncertaintyHigh)}`],
                       ["Estado de cuota", displayStatus(candidate.priceStatus)],
                       ["Estado", candidate.displayStatus],
-                      ["Respaldo técnico", `${candidate.technicalSupport}/100`],
+                      ["Respaldo deportivo", `${candidate.technicalSupport}/100`],
                       ["Muestra efectiva ponderada", formatEffectiveSample(candidate.sampleSize, 1)],
                     ]} />
                     <p className="p2-sample-note">Las submuestras pueden solaparse y no equivalen a partidos independientes.</p>
-                    <section className="p2-market-comparison" aria-label="Por qué ganó este mercado">
-                      <h4>Por qué ganó este mercado</h4>
+                    <section className="p2-market-comparison" aria-label="Por qué Atlas destacó esta opción">
+                      <h4>Por qué Atlas destacó esta opción</h4>
                       <DefinitionGrid entries={[
-                        ["Posición en el ranking general", candidate.generalRank],
+                        ["Posición general Scout", candidate.generalRank ? `#${candidate.generalRank}` : null],
+                        ["Posición dentro de la familia", candidate.familyRank ? `#${candidate.familyRank}` : null],
                         ["Respaldo deportivo", `${candidate.sportsScore ?? candidate.technicalSupport}/100`],
                         ["Familias comparadas", candidate.familiesCompared?.join(", ")],
                       ]} />
@@ -1704,7 +1746,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                 ["Probabilidad preliminar", percentage(transferredCandidate.preliminary_probability)],
                 ["Incertidumbre", `${percentage(transferredCandidate.uncertainty?.low)}–${percentage(transferredCandidate.uncertainty?.high)}`],
                 ["Respaldo deportivo", `${transferredCandidate.sports_score}/100`],
-                ["Posición general", transferredCandidate.rank],
+                ["Posición general Scout", transferredCandidate.overall_rank || transferredCandidate.rank ? `#${transferredCandidate.overall_rank || transferredCandidate.rank}` : null],
+                ["Posición dentro de la familia", transferredCandidate.family_rank ? `#${transferredCandidate.family_rank}` : null],
               ]} />
               <div className="p2-inline-actions">
                 <button type="button" className="primary-button" onClick={() => runOperationalAnalysis({ reanalysis: false })} disabled={analysisState.status === "loading"}>Continuar con este candidato</button>
@@ -1796,7 +1839,6 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           {analysis?.director ? <div className="p2-inline-actions"><button type="button" className="secondary-button" onClick={() => runOperationalAnalysis({ reanalysis: true })} disabled={analysisState.status === "loading"}>Repetir análisis</button><button type="button" className="primary-button" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>{analysisMode === "specific" ? "Analizar esta opción y cuota" : "Evaluar el precio encontrado"}</button></div> : null}
           <StatusNotice value={analysisState} />
           {analysis?.director ? <AnalysisResult key={`${analysis.selectedFixtureId}-${analysis.analysisVersion?.analysis_id || "result"}`} analysis={analysis} candidateQuotes={candidateQuotes} onQuoteChange={updateCandidateQuote} onEvaluatePrices={() => runOperationalAnalysis({ reanalysis: true })} showComparison={showActiveComparison} /> : null}
-          {analysis?.selectedOdds?.freshness === "stale" ? <div className="p2-stale-action"><p>La cotización anterior venció. Introduce arriba la casa, la cuota y la hora actuales para la misma opción.</p><button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>Evaluar el precio encontrado</button></div> : null}
           <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} />
         </section>
       ) : <HistoryView timezone={defaultTimezone} />}

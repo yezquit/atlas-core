@@ -118,6 +118,44 @@ function freshnessFor(updatedAt, now, staleAfterMinutes) {
   };
 }
 
+export function isCurrentOddsQuote(quote) {
+  return Boolean(
+    quote &&
+    quote.freshness === "fresh" &&
+    !quote.stale &&
+    ["verified_current", "user_reported_current"].includes(quote.source_status)
+  );
+}
+
+export function refreshStoredOddsQuote(quote, { now = new Date().toISOString(), kickoff = null } = {}) {
+  if (!quote) return null;
+  const source = quote.source === "manual_user_input" ? "manual_user_input" : "provider";
+  const policy = oddsFreshnessPolicy({ kickoff, now, source });
+  const observedAt = quote.updated_at || quote.consulted_at;
+  const result = freshnessFor(observedAt, now, policy.limit_minutes);
+  const current = result.freshness === "fresh";
+  const currentSourceStatus = source === "manual_user_input" ? "user_reported_current" : "verified_current";
+  const currentVerificationStatus = source === "manual_user_input"
+    ? ODDS_VERIFICATION_STATUS.USER_REPORTED
+    : ODDS_VERIFICATION_STATUS.VERIFIED_PROVIDER;
+  return {
+    ...quote,
+    freshness: current ? "fresh" : "stale",
+    age_minutes: result.age_minutes,
+    freshness_limit_minutes: policy.limit_minutes,
+    freshness_phase: policy.phase,
+    stale: !current,
+    source_status: current ? currentSourceStatus : "stale",
+    verification_status: current ? currentVerificationStatus : ODDS_VERIFICATION_STATUS.STALE,
+    stale_reason: current
+      ? null
+      : Number.isFinite(result.age_minutes)
+        ? `La cotización tiene ${result.age_minutes} minutos y supera el límite de ${policy.limit_minutes} minutos para esta fase.`
+        : "No fue posible verificar la vigencia temporal de la cotización anterior.",
+    warnings: [...new Set([...(quote.warnings || []).filter((item) => item !== "odds_stale"), ...(!current ? ["odds_stale"] : [])])],
+  };
+}
+
 function quoteId(parts) {
   return parts.map((item) => normalized(item).replace(/[^a-z0-9.-]/g, "-")).join(":");
 }

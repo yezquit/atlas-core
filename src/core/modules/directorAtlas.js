@@ -549,13 +549,13 @@ export function buildOperationalDirectorVerdict({
       : oddsQuote.verification_status === "verified_provider"
         ? "verified_current"
         : "user_reported_current")
-    : marketCandidate?.price_status || "unavailable";
+    : "unavailable";
   const priceEvaluation = suitability?.price_evaluation || {
     status: ["unavailable", "stale"].includes(quoteStatus) ? quoteStatus : "marginal",
     message: quoteStatus === "stale"
       ? "La cuota anterior no se usa para evaluar el precio. El pronóstico deportivo se mantiene."
       : quoteStatus === "unavailable"
-        ? "Atlas ya identificó la mejor opción deportiva. Falta una cuota actual para evaluar el precio."
+        ? "Introduce una cuota actual para decidir si esta opción compensa el riesgo."
         : "La cuota está disponible, pero la comparación deportiva permanece limitada.",
     price_gap: null,
     price_gap_percentage_points: null,
@@ -576,7 +576,7 @@ export function buildOperationalDirectorVerdict({
     blocked: "Análisis bloqueado",
     not_viable: priceStatus === "unfavorable" ? "No — la cuota no compensa la incertidumbre" : "No — mercado no viable",
     insufficient_data: "Información insuficiente",
-    review_only: "Todavía no — falta evaluar la cuota",
+    review_only: pricePending ? "Pendiente de precio" : "Esperar / revisar",
     viable_with_caution: "Solo con cautela",
     suitable_under_conditions: "Sí — apto para consideración",
   };
@@ -591,9 +591,9 @@ export function buildOperationalDirectorVerdict({
   const selectionLabel = marketCandidate?.selection || oddsQuote?.selection || marketAssessment?.market_label || "el mercado evaluado";
   verdicts.suitable_under_conditions = `Sí. Atlas considera apto para consideración ${selectionLabel} a la línea y cuota indicadas, sujeto a las condiciones informadas.`;
   verdicts.viable_with_caution = `Sí, pero con cautela. ${selectionLabel} conserva respaldo, aunque requiere verificación adicional antes del inicio.`;
-  verdicts.review_only = priceStatus === "stale"
-    ? `Todavía no. La cuota anterior no se usa para evaluar el precio; el pronóstico deportivo ${selectionLabel} se mantiene.`
-    : `Todavía no. ${selectionLabel} es el candidato deportivo actual, pero falta una cuota vigente y compatible.`;
+  verdicts.review_only = pricePending
+    ? `Decisión operativa pendiente de precio. Introduce una cuota actual para decidir si ${selectionLabel} compensa el riesgo.`
+    : `Esperar o revisar. ${selectionLabel} necesita completar las condiciones operativas indicadas.`;
   verdicts.not_viable = priceStatus === "unfavorable"
     ? `No. ${selectionLabel} conserva respaldo deportivo provisional, pero no es viable a la cuota actual.`
     : `No. ${selectionLabel} no es viable con los datos actuales.`;
@@ -607,9 +607,15 @@ export function buildOperationalDirectorVerdict({
   };
   const conditions = [...new Set(suitability?.conditions || [])];
   if (pricePending && !conditions.some((item) => /cuota/i.test(item))) conditions.unshift("Introducir una cuota actual para la línea exacta seleccionada.");
-  const sportsReason = marketCandidate
-    ? `${selectionLabel} ocupa el primer lugar por su frecuencia estimada, estabilidad entre submuestras y menor incertidumbre relativa.`
-    : null;
+  const rankScopes = marketCandidate ? [
+    Number.isFinite(Number(marketCandidate.overall_rank ?? marketCandidate.rank))
+      ? `Posición general Scout #${marketCandidate.overall_rank ?? marketCandidate.rank}`
+      : null,
+    Number.isFinite(Number(marketCandidate.family_rank))
+      ? `posición dentro de ${marketAssessment?.market_label || marketCandidate.market_family} #${marketCandidate.family_rank}`
+      : null,
+  ].filter(Boolean) : [];
+  const sportsReason = rankScopes.length ? `${rankScopes.join("; ")}.` : null;
   const reasons = [
     sportsReason,
     ...supportingEvidence,
@@ -680,7 +686,9 @@ export function buildOperationalDirectorVerdict({
     confidence_score: confidence?.analysis_confidence_score || 0,
     temporal_status: temporalStatus,
     provisional: !["final_pre_match_forecast", "pre_match_closed"].includes(temporalStatus),
-    message: `${selectionLabel} conserva respaldo deportivo provisional.`,
+    message: (marketCandidate.sports_score ?? 0) >= 58
+      ? `Atlas respalda deportivamente ${selectionLabel}.`
+      : `${selectionLabel} conserva respaldo deportivo.`,
     explanation: marketSelection?.explanation || "Candidato ordenado por calidad deportiva sin usar la cuota.",
   } : {
     status: "insufficient_information",
@@ -719,11 +727,8 @@ export function buildOperationalDirectorVerdict({
     "Alineaciones, bajas o rotaciones relevantes",
     "Clima, estado del campo o una nueva cuota",
   ])].slice(0, 3);
-  const simpleReasons = [...new Set([
-    sportsReason,
-    marketSelection?.explanation,
-    marketCandidate ? `La línea queda en ${marketCandidate.sports_score}/100 de equilibrio deportivo.` : null,
-  ].filter(Boolean))].slice(0, 3);
+  const simpleReasons = [...new Set(marketCandidate?.simple_sports_reasons || [])].slice(0, 3);
+  const operationalPricePending = Boolean(pricePending && marketCandidate && suitabilityStatus === MARKET_SUITABILITY.REVIEW_ONLY);
   return {
     contract: "DirectorVerdict",
     version: 3,
@@ -777,6 +782,8 @@ export function buildOperationalDirectorVerdict({
     market_ranking: marketSelection ? {
       analysis_mode: marketSelection.analysis_mode,
       explanation: marketSelection.explanation,
+      overall_rank: marketCandidate?.overall_rank || marketCandidate?.rank || null,
+      family_rank: marketCandidate?.family_rank || null,
       alternatives: marketSelection.alternatives,
       line_profiles: marketSelection.line_profiles,
     } : null,
@@ -784,6 +791,7 @@ export function buildOperationalDirectorVerdict({
     temporal_message: "Este es el dictamen con la información disponible ahora. Puede cambiar por alineaciones, bajas, árbitro, clima o cuotas.",
     context_reanalysis_message: contextReanalysisMessage,
     market_suitability: suitabilityStatus,
+    price_pending: operationalPricePending,
     apt_for_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
     authorizes_consideration: suitabilityStatus === MARKET_SUITABILITY.SUITABLE_UNDER_CONDITIONS,
     reasons: [...new Set(reasons)],
