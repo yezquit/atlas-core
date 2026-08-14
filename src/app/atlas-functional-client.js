@@ -819,9 +819,10 @@ function ExpertResult({ analysis }) {
 
       <Accordion id="expert-odds" title="Líneas, cuotas y bookmakers" summary={`${analysis.odds?.quotes?.length || 0} cotizaciones disponibles`}>
         <DefinitionGrid entries={[
-          ["Casa", analysis.selectedOdds?.bookmaker_name],
+          ["Casa activa", analysis.selectedOdds?.bookmaker_name],
+          ["Cuota activa", analysis.selectedOdds?.decimal_odds],
           ["Mercado", analysis.selectedOdds?.market_name],
-          ["Mejor cuota comparable", analysis.bestComparableOdds?.decimal_odds],
+          ["Mejor cuota comparable (referencia)", analysis.bestComparableOdds?.decimal_odds],
           ["Selección", analysis.selectedOdds?.selection],
           ["Línea", analysis.selectedOdds?.line],
           ["Estado", displayStatus(analysis.selectedOdds?.verification_status)],

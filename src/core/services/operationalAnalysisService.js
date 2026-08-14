@@ -100,6 +100,27 @@ function normalizedDirection(value) {
   return null;
 }
 
+function isExactCurrentQuoteForCandidate(quote, { fixtureId, candidate } = {}) {
+  return Boolean(
+    isCurrentOddsQuote(quote) &&
+    Number(quote.fixture_id) === Number(fixtureId) &&
+    quote.market_family === candidate?.market_family &&
+    normalizedDirection(quote.direction || quote.selection) === candidate?.direction &&
+    Number(quote.line) === Number(candidate?.line)
+  );
+}
+
+function selectActiveOddsQuote({ fixtureId, candidate, manualQuote = null, fallbacks = [] } = {}) {
+  const justReportedManualQuote = manualQuote?.source === "manual_user_input" &&
+    manualQuote?.source_status === "user_reported_current" &&
+    isExactCurrentQuoteForCandidate(manualQuote, { fixtureId, candidate })
+    ? manualQuote
+    : null;
+  return justReportedManualQuote || fallbacks.find((quote) =>
+    isExactCurrentQuoteForCandidate(quote, { fixtureId, candidate })
+  ) || null;
+}
+
 export function resolveLineOrigin(input = {}, previousVersion = null, { requestedLine = null, requestedSelection = null } = {}) {
   const validOrigins = new Set(Object.values(LINE_ORIGIN));
   const previousOrigin = previousVersion?.line_origin;
@@ -401,7 +422,12 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   )?.quote || null;
   const selectedOdds = input.evaluatePrice === false
     ? null
-    : [operationalSelectedOdds, primaryCandidate?.price_quote, bestProviderOdds].find(isCurrentOddsQuote) || null;
+    : selectActiveOddsQuote({
+      fixtureId: base.fixture.fixtureId,
+      candidate: primaryCandidate,
+      manualQuote,
+      fallbacks: [operationalSelectedOdds, primaryCandidate?.price_quote, bestProviderOdds],
+    });
   const compatibleHistoricalOdds = (oddsResult.quotes || []).filter((quote) =>
     !isCurrentOddsQuote(quote) &&
     quote.market_family === primaryCandidate?.market_family &&
