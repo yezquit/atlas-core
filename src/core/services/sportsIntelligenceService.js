@@ -298,7 +298,12 @@ export async function analyzeSportsFixture(input, gateway) {
   const venueWeatherContext = buildVenueWeatherContext({ fixture });
   const competitiveContext = buildCompetitiveContext({
     fixture,
-    competition: fixture.competition,
+    competition: {
+      ...fixture.competition,
+      name: competition.localName || fixture.competition?.name || null,
+      country: fixture.competition?.country || competition.country || null,
+      season: fixture.competition?.season ?? season,
+    },
     homeTeamProfile,
     awayTeamProfile,
   });
@@ -366,6 +371,7 @@ export async function analyzeSportsFixture(input, gateway) {
     awayTeamProfile,
     refereeProfile,
     venueWeatherContext,
+    competitiveContext,
     marketAssessments,
     selectedMarket,
     evidenceRefs: [...new Set(evidenceRefs)],

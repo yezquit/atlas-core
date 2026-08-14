@@ -611,6 +611,19 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
   const presentation = buildSimpleDirectorPresentation(director, { geminiItems, historicalQuote: analysis.historicalQuote });
   const analysisDecision = presentation.analysis_decision;
   const priceDecision = presentation.price_decision;
+  const simplePriceMessage = presentation.stale_quote
+    ? "Cuota vencida — actualízala para tomar una decisión."
+    : priceDecision?.status === "yes"
+      ? price?.status === "favorable_preliminary"
+        ? "La cuota actual acompaña bien la lectura de Atlas."
+        : "La cuota actual es suficiente para esta opción según el análisis de Atlas."
+      : priceDecision?.status === "no"
+        ? analysisDecision.status === "yes"
+          ? "Me gusta el mercado, pero no lo jugaría a esta cuota."
+          : "Atlas no recomienda esta opción a la cuota actual."
+        : priceDecision?.status === "wait"
+          ? priceDecision.explanation
+          : "Introduce una cuota actual después de completar la tesis.";
   const contextSummary = analysis.gemini?.summary || director.context_summary || {};
   const baseReasons = (director.simple_reasons || director.reasons || []).slice(0, 3);
   const decisionReasons = analysisDecision.status === "no"
@@ -645,9 +658,9 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
       <section className="p2-simple-price" aria-labelledby="simple-price-title">
         <p className="eyebrow">CUOTA</p>
         <h3 id="simple-price-title">{presentation.has_current_price ? `${price.bookmaker} @${price.decimal_odds}` : presentation.stale_quote ? `${presentation.stale_quote.bookmaker_name} @${presentation.stale_quote.decimal_odds}` : "Todavía no informada"}</h3>
-        <p>{presentation.has_current_price ? price.message : presentation.stale_quote ? "Cuota vencida — actualízala para tomar una decisión." : "Introduce una cuota actual después de completar la tesis."}</p>
+        <p>{simplePriceMessage}</p>
       </section>
-      {priceDecision ? <section className={`p2-simple-final p2-simple-decision-${priceDecision.status}`} aria-label="Decisión final"><small>DECISIÓN FINAL</small><h3><span aria-hidden="true">{priceDecision.icon}</span> {priceDecision.label}</h3><p>{priceDecision.explanation}</p></section> : null}
+      {priceDecision ? <section className={`p2-simple-final p2-simple-decision-${priceDecision.status}`} aria-label="Decisión final"><small>DECISIÓN FINAL</small><h3><span aria-hidden="true">{priceDecision.icon}</span> {priceDecision.label}</h3><p>{simplePriceMessage}</p></section> : null}
       <button type="button" className="secondary-button" onClick={() => onShowExpert(displayStatus(director.parlay_eligibility))}>Ver análisis completo</button>
     </section>
   );
