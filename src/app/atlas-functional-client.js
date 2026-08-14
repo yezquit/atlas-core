@@ -946,7 +946,7 @@ function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleI
                 <span>
                   <strong>{displayStatus(item.kind)}</strong>
                   {item.summary || "Sin resumen disponible."}
-                  <small>Fuente: {item.source || "No informada"}</small>
+                  <small>Fuente: {item.source_name || item.source || "No informada"}</small>
                   <small>Dominio: {item.domain || item.domains?.join(", ") || "No disponible"} · Fecha: {item.publication_date || "No informada"}</small>
                   <small>Clasificación de fuente: {displayStatus(item.source_classification)} · Validación: {displayStatus(item.validation_status || item.verification_status)}</small>
                   <small>Mercados afectados: {item.affected_markets?.length ? item.affected_markets.map(displayStatus).join(", ") : "Ninguno determinado"} · Impacto: {displayStatus(item.impact)}</small>

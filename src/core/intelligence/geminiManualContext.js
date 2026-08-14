@@ -30,6 +30,13 @@ function extractUrls(text) {
     .map((url) => url.replace(/[.,;:]+$/, ""));
 }
 
+function extractPublicationDates(text) {
+  const value = String(text || "");
+  const numeric = value.match(/\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b/g) || [];
+  const written = value.match(/\b\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+20\d{2}\b/gi) || [];
+  return [...new Set([...numeric, ...written])];
+}
+
 function hostname(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
@@ -72,12 +79,16 @@ function affectedMarkets(content) {
   return [...markets];
 }
 
-function inferImpact(kind, content) {
+function inferImpact(kind, content, declaredImpact = null) {
   if (kind === GEMINI_ITEM_KIND.CONTRADICTION || kind === GEMINI_ITEM_KIND.NOT_FOUND) return "limiting";
   if (kind === GEMINI_ITEM_KIND.RUMOR) return "neutral";
-  const candidate = normalize(content);
-  if (/favorece|respalda|beneficia/.test(candidate)) return "favorable";
-  if (/perjudica|debilita|contrario a|en contra de/.test(candidate)) return "unfavorable";
+  const candidate = normalize(declaredImpact || content);
+  const strengthens = /fortalece|favorece|respalda|beneficia/.test(candidate);
+  const weakens = /debilita|perjudica|invalida|contrario a|en contra de/.test(candidate);
+  if (strengthens && weakens) return "neutral";
+  if (/sin cambio|no cambia|neutral/.test(candidate)) return "neutral";
+  if (strengthens) return "favorable";
+  if (weakens) return "unfavorable";
   if (/lesion|baja|sancion|ausencia|rotacion|fatiga|suspendid|duda|probable|sin confirmar|mal estado/.test(candidate)) return "limiting";
   return "neutral";
 }
@@ -108,13 +119,14 @@ function impactExplanation(kind, impact, markets) {
   return "No existe comparación suficiente para asignar una dirección deportiva sin inventarla.";
 }
 
-function buildItem(content, kind, index, sourceOptions) {
+function buildItem(content, kind, index, sourceOptions, structured = null) {
   const urls = extractUrls(content);
-  const dates = content.match(/\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b/g) || [];
+  const dates = extractPublicationDates(content);
   const domains = urls.map(hostname).filter(Boolean);
   const classifications = urls.map((url) => classifySource(url, sourceOptions));
-  const markets = affectedMarkets(content);
-  const impact = inferImpact(kind, content);
+  const semanticContent = structured ? [structured.fact, structured.impact].filter(Boolean).join(" ") : content;
+  const markets = affectedMarkets(semanticContent);
+  const impact = inferImpact(kind, semanticContent, structured?.impact);
   const genericSupportPage = isGenericSupportPage(domains);
   const recognizedSource = classifications.some((classification) => TRUSTED_SOURCE_CLASSES.has(classification));
   const sourceIsCurrent = dates.length > 0 || /actualizad|vigente|hoy|ultima hora|última hora/.test(normalize(content));
@@ -128,13 +140,17 @@ function buildItem(content, kind, index, sourceOptions) {
     id: `gemini-${index + 1}`,
     kind,
     category: kind,
-    summary: summarize(content),
+    summary: summarize(structured?.fact || content),
     text: content,
+    fact: structured?.fact || null,
+    impact_text: structured?.impact || null,
+    source_name: structured?.source || null,
+    source_url: urls[0] || null,
     source: urls[0] || null,
     urls,
     domain: urls[0] ? hostname(urls[0]) : null,
     domains,
-    publication_date: dates[0] || null,
+    publication_date: structured?.date || dates[0] || null,
     publication_dates: dates,
     provenance: "manual_gemini_paste",
     source_classification: classifications[0] || SOURCE_CLASSIFICATION.UNKNOWN,
@@ -235,21 +251,85 @@ function sectionFromLine(line) {
   return SECTION_ALIASES[candidate] || null;
 }
 
+function structuredFieldFromLine(line) {
+  const match = String(line || "").match(/^\s*(?:[-*•]\s*)?(HECHO|IMPACTO|FUENTE|URL|FECHA)\s*:\s*(.*)$/i);
+  if (!match) return null;
+  const key = {
+    hecho: "fact",
+    impacto: "impact",
+    fuente: "source",
+    url: "url",
+    fecha: "date",
+  }[normalize(match[1])];
+  return { key, value: match[2].trim() };
+}
+
+function isEmptySectionValue(line) {
+  const candidate = normalize(String(line || "").replace(/^\s*[-*•]+\s*/, "").replace(/[.!]+$/, ""));
+  return /^(?:ninguno|ninguna|ningun|none|sin elementos|no hay)$/.test(candidate);
+}
+
+function structuredContent(fields) {
+  return [
+    fields.fact ? `HECHO: ${fields.fact}` : null,
+    fields.impact ? `IMPACTO: ${fields.impact}` : null,
+    fields.source ? `FUENTE: ${fields.source}` : null,
+    fields.url ? `URL: ${fields.url}` : null,
+    fields.date ? `FECHA: ${fields.date}` : null,
+  ].filter(Boolean).join("\n");
+}
+
 export function parseGeminiResponse(text, { fixture, expectedLine = null, expectedOdds = null, receivedAt = new Date().toISOString(), sourceOptions = {} } = {}) {
   const originalText = String(text || "").trim();
   const items = [];
   let currentKind = null;
+  let currentFields = null;
+  let activeField = null;
+  let sawSection = false;
+
+  function flushStructuredItem() {
+    if (currentFields?.fact) {
+      items.push(buildItem(structuredContent(currentFields), currentKind, items.length, sourceOptions, currentFields));
+    }
+    currentFields = null;
+    activeField = null;
+  }
+
   for (const rawLine of originalText.split(/\r?\n/)) {
     const heading = sectionFromLine(rawLine);
     if (heading) {
+      flushStructuredItem();
       currentKind = heading;
+      sawSection = true;
       continue;
     }
-    const content = rawLine.replace(/^\s*[-*\d.)]+\s*/, "").trim();
-    if (!currentKind || !content) continue;
+    const trimmed = rawLine.trim();
+    if (!currentKind || !trimmed) continue;
+    if (isEmptySectionValue(trimmed)) continue;
+    const field = structuredFieldFromLine(rawLine);
+    if (field?.key === "fact") {
+      flushStructuredItem();
+      currentFields = { fact: field.value, impact: "", source: "", url: "", date: "" };
+      activeField = "fact";
+      continue;
+    }
+    if (field) {
+      if (currentFields) {
+        currentFields[field.key] = field.value;
+        activeField = field.key;
+      }
+      continue;
+    }
+    if (currentFields) {
+      if (activeField) currentFields[activeField] = [currentFields[activeField], trimmed].filter(Boolean).join(" ");
+      continue;
+    }
+    const content = rawLine.replace(/^\s*[-*•\d.)]+\s*/, "").trim();
+    if (!content) continue;
     items.push(buildItem(content, currentKind, items.length, sourceOptions));
   }
-  if (!items.length && originalText) {
+  flushStructuredItem();
+  if (!items.length && originalText && !sawSection) {
     const paragraphs = originalText.split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
     for (const paragraph of paragraphs) {
       items.push(buildItem(paragraph, GEMINI_ITEM_KIND.PROBABLE, items.length, sourceOptions));
