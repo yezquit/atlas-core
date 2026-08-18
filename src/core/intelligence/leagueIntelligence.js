@@ -73,8 +73,7 @@ export function buildLeagueIntelligence({
     .filter(
       (fixture) =>
         fixture?.status?.isFinished &&
-        Number(fixture?.competition?.id) === Number(competition?.id) &&
-        Number(fixture?.competition?.season) === Number(season)
+        Number(fixture?.competition?.id) === Number(competition?.id)
     )
     .sort((left, right) => Date.parse(left.date.utc) - Date.parse(right.date.utc));
   const scores = scoreValues(included);

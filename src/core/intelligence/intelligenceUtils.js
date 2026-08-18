@@ -90,14 +90,19 @@ export function rateMetric(fixtures, predicate, minimumSample) {
   });
 }
 
-export function finishedBefore(fixtures, targetDate, season) {
+export function finishedBefore(fixtures, targetDate, season = null) {
   const targetTime = Date.parse(targetDate);
   return fixtures
     .filter((fixture) => {
       const fixtureTime = Date.parse(fixture?.date?.utc);
+      const seasonMatches =
+        season === null ||
+        season === undefined ||
+        Number(fixture?.competition?.season) === Number(season);
+
       return (
         fixture?.status?.isFinished &&
-        Number(fixture?.competition?.season) === Number(season) &&
+        seasonMatches &&
         Number.isFinite(fixtureTime) &&
         fixtureTime < targetTime
       );

@@ -202,7 +202,7 @@ test("forma reciente excluye partidos futuros", () => {
   assert.equal(profile.fixture_ids.includes(future.fixtureId), false);
 });
 
-test("forma reciente no mezcla temporadas silenciosamente", () => {
+test("forma reciente puede cruzar temporadas y conserva el origen de la muestra", () => {
   const previous = fixture(21, { season: 2025, date: "2026-07-30T20:00:00Z" });
   const profile = buildTeamRecentIntelligence({
     teamId: 10,
@@ -212,8 +212,14 @@ test("forma reciente no mezcla temporadas silenciosamente", () => {
     statisticsByFixture,
   });
 
-  assert.equal(profile.fixture_ids.includes(previous.fixtureId), false);
+  assert.equal(profile.fixture_ids.includes(previous.fixtureId), true);
   assert.equal(profile.season, 2026);
+
+  const origin = profile.sample_origins.find(
+    (item) => Number(item.fixture_id) === Number(previous.fixtureId)
+  );
+
+  assert.equal(origin?.season, 2025);
 });
 
 test("árbitro confirmado con muestra suficiente", () => {

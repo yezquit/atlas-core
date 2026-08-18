@@ -83,7 +83,7 @@ export function createProviderRuntime({
   quotaWarningRatio = 0.15,
   quotaBlockRatio = 0.05,
 } = {}) {
-  const configuredBudget = Math.max(1, Math.min(150, Number(budget) || 40));
+  const configuredBudget = Math.max(1, Math.min(3000, Number(budget) || 40));
   const metrics = {
     requestsUsed: 0,
     budgetStops: 0,

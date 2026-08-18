@@ -148,7 +148,7 @@ export function buildTeamRecentIntelligence({
   statisticsByFixture = new Map(),
   minimumSample = 5,
 }) {
-  const recent = finishedBefore(fixtures, targetDate, season).filter(
+  const recent = finishedBefore(fixtures, targetDate).filter(
     (fixture) =>
       Number(fixture?.teams?.home?.id) === Number(teamId) ||
       Number(fixture?.teams?.away?.id) === Number(teamId)

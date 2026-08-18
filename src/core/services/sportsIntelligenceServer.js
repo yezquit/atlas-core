@@ -10,7 +10,7 @@ import {
 
 export const SPORTS_REQUEST_BUDGETS = Object.freeze({
   individual: 45,
-  journey: 90,
+  journey: 2500,
   profile: 30,
   reanalysis: 60,
 });
@@ -21,7 +21,7 @@ function configuredBudget(kind) {
   const environmentName = `ATLAS_${kind.toUpperCase()}_REQUEST_BUDGET`;
   const configured = Number(process.env[environmentName]);
   return Number.isInteger(configured) && configured > 0
-    ? Math.min(configured, 150)
+    ? Math.min(configured, 3000)
     : SPORTS_REQUEST_BUDGETS[kind];
 }
 

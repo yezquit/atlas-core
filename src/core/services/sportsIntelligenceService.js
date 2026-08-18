@@ -423,7 +423,7 @@ export async function scanSportsJourney(input, gateway) {
       telemetry: gateway.runtime.snapshot(),
     };
   }
-  const maximumFixtures = Math.max(1, Math.min(10, Number(input.maximumFixtures) || 5));
+  const maximumFixtures = Math.max(1, Math.min(50, Number(input.maximumFixtures) || 50));
   const referenceNow = input.now || `${input.date}T00:00:00.000Z`;
   const fixtures = [];
   const warnings = [];
@@ -482,6 +482,8 @@ export async function scanSportsJourney(input, gateway) {
     );
     reviewed.push(analysis);
   }
+  const analysisDiagnostics = [];
+
   const analysisCandidates = reviewed.flatMap((analysis) => {
     const selection = buildRankedMarketSelection({
       analysisMode: input.analysisMode === "specific" || requestedMarketIds.length === 1 ? "specific" : "general",
@@ -492,6 +494,23 @@ export async function scanSportsJourney(input, gateway) {
       awayTeamProfile: analysis.awayTeamProfile,
       refereeProfile: analysis.refereeProfile,
     });
+
+    analysisDiagnostics.push({
+      competition: analysis?.competition?.localName || "Desconocida",
+      fixtureId: analysis?.fixture?.fixtureId || null,
+      fixture: analysis?.fixture
+        ? `${analysis.fixture.teams.home.name} vs ${analysis.fixture.teams.away.name}`
+        : null,
+      analysisStatus: analysis?.director?.status || analysis?.status || null,
+      rankedCandidateCount: selection?.ranked_candidates?.length || 0,
+      marketAssessmentCount: analysis?.marketAssessments?.length || 0,
+      marketStatuses: (analysis?.marketAssessments || []).map((item) => ({
+        marketFamily: item.market_family,
+        status: item.quality_status || item.status || null,
+        candidate: item.candidate ?? null,
+      })),
+    });
+
     const bestByFamily = new Map();
     for (const candidate of selection.ranked_candidates) {
       if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
@@ -502,7 +521,33 @@ export async function scanSportsJourney(input, gateway) {
       comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
     }));
   });
-  const maximumCandidates = Math.max(1, Math.min(10, Number(input.maximumCandidates) || 5));
+  const candidateDiagnosticsByCompetition = Object.fromEntries(
+    [...analysisCandidates.reduce((map, entry) => {
+      const competition = entry.analysis?.competition?.localName || "Desconocida";
+      const current = map.get(competition);
+
+      if (
+        !current ||
+        Number(entry.candidate?.sports_score || 0) > Number(current.sportsScore || 0)
+      ) {
+        map.set(competition, {
+          fixtureId: entry.analysis?.fixture?.fixtureId || null,
+          fixture: entry.analysis?.fixture
+            ? `${entry.analysis.fixture.teams.home.name} vs ${entry.analysis.fixture.teams.away.name}`
+            : null,
+          selection: entry.candidate?.selection || null,
+          marketFamily: entry.candidate?.market_family || null,
+          sportsScore: entry.candidate?.sports_score ?? null,
+          overallStatus: entry.candidate?.overall_status || null,
+          rank: entry.candidate?.rank ?? null,
+        });
+      }
+
+      return map;
+    }, new Map())]
+  );
+
+  const maximumCandidates = Math.max(1, Math.min(50, Number(input.maximumCandidates) || 50));
   const highlighted = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates)
     .map(({ analysis, candidate, comparison }) => ({
       competition: analysis.competition.localName,
@@ -560,6 +605,14 @@ export async function scanSportsJourney(input, gateway) {
       nextAction: "Abrir el análisis individual y evaluar una cuota actual para la línea exacta.",
       rankReason: candidate.rank_reason.join(" "),
     }));
+  const fixturesByCompetition = Object.fromEntries(
+    [...fixtures.reduce((map, item) => {
+      const name = item.competition.localName;
+      map.set(name, (map.get(name) || 0) + 1);
+      return map;
+    }, new Map())]
+  );
+
   const telemetry = gateway.runtime.snapshot();
   const outcome = deriveJourneyOutcome({ fixturesFound: eligibleFixtures.length, candidates: highlighted, telemetry });
   return {
@@ -573,6 +626,7 @@ export async function scanSportsJourney(input, gateway) {
     timezone: normalizeTimeZone(input.timezone),
     competitionsQueried: competitions.map((item) => item.localName),
     fixturesFound: fixtures.length,
+    fixturesByCompetition,
     prematchFixturesFound: eligibleFixtures.length,
     fixturesReviewed: reviewed.length,
     fixturesDiscarded: eligibility.excluded.length + Math.max(0, reviewed.length - highlighted.length),
@@ -580,6 +634,8 @@ export async function scanSportsJourney(input, gateway) {
     analyzableFixtures: reviewed.filter(
       (analysis) => analysis.director.status !== "insufficient_data"
     ).length,
+    candidateDiagnosticsByCompetition,
+    analysisDiagnostics,
     candidates: highlighted,
     warnings,
     executionTimeMs: Date.now() - startedAt,

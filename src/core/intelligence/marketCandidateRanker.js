@@ -86,7 +86,7 @@ function rankReason(candidate) {
 function observedRoleReason(candidate, source, teamName, roleLabel) {
   const input = candidate.input_sources?.find((item) => item.source === source);
   if (!input || !Number.isFinite(Number(input.hits)) || !Number.isFinite(Number(input.sample_size)) || Number(input.sample_size) <= 0) return null;
-  return `En la muestra de ${teamName} ${roleLabel}, ${candidate.selection} se dio en ${input.hits} de ${input.sample_size} partidos (${round(Number(input.observed_rate) * 100)}%).`;
+  return `En la muestra de ${teamName} ${roleLabel}, ${candidate.selection.replace(/^Under\b/i, "Menos de").replace(/^Over\b/i, "Más de")} se dio en ${input.hits} de ${input.sample_size} partidos (${round(Number(input.observed_rate) * 100)}%).`;
 }
 
 function productionReason(candidate, homeTeamProfile, awayTeamProfile) {

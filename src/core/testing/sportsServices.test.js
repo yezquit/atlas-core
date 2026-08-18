@@ -159,7 +159,7 @@ test("explorador sin partidos retorna empty", async () => {
   assert.deepEqual(result.candidates, []);
 });
 
-test("explorador devuelve candidatos y nunca más de cinco", async () => {
+test("explorador respeta el máximo de candidatos solicitado", async () => {
   const dayFixtures = Array.from({ length: 7 }, (_, index) => targetFixture(7_000 + index));
   const result = await scanSportsJourney(
     {
@@ -167,13 +167,14 @@ test("explorador devuelve candidatos y nunca más de cinco", async () => {
       competitionKeys: ["colombiaPrimeraA"],
       marketIds: ["goals"],
       maximumFixtures: 7,
+      maximumCandidates: 7,
     },
     gateway({ fixturesForDate: dayFixtures })
   );
 
   assert.equal(result.status, DATA_LOAD_STATUS.SUCCESS);
   assert.equal(result.fixturesReviewed, 7);
-  assert.equal(result.candidates.length, 5);
+  assert.equal(result.candidates.length, 7);
   assert.ok(result.candidates.every((candidate) => candidate.fixtureId));
 });
 

@@ -184,6 +184,27 @@ function displayStatus(value) {
   return STATUS_LABELS[value] || String(value || "No disponible").replaceAll("_", " ");
 }
 
+function displaySelection(value) {
+  const text = String(value || "").trim();
+  if (!text) return "No disponible";
+
+  return text
+    .replace(/^Under\b/i, "Menos de")
+    .replace(/^Over\b/i, "Más de");
+}
+function displayMarket(value) {
+  const text = String(value || "").trim();
+
+  const markets = {
+    goals: "Goles",
+    total_shots: "Remates totales",
+    shots_on_goal: "Remates a puerta",
+    corners: "Córners",
+    cards: "Tarjetas",
+  };
+
+  return markets[text] || text || "Mercado no disponible";
+}
 function formatDate(value, timezone = "America/Bogota") {
   if (!value) return "Fecha no disponible";
   const date = new Date(value);
@@ -527,7 +548,7 @@ function ScoutResult({ analysis, candidateQuotes, onQuoteChange, onEvaluatePrice
           return (
             <article key={candidate.candidate_id} className="p2-candidate-card">
               <div className="p2-chip-row">{candidate.labels.map((label) => <span className="p2-chip" key={label}>{SCOUT_LABELS[label]}</span>)}</div>
-              <h4>{candidate.selection}</h4>
+              <h4>{displaySelection(candidate.selection)}</h4>
               <DefinitionGrid entries={[
                 ["Probabilidad preliminar", percentage(candidate.preliminary_probability)],
                 ["Intervalo", `${percentage(candidate.uncertainty_low)}–${percentage(candidate.uncertainty_high)}`],
@@ -564,7 +585,7 @@ function OperationalRankingResult({ ranking }) {
       <p>{ranking.explanation}</p>
       <ol className="p2-operational-ranking">{ranking.candidates.map((item) => (
         <li key={item.candidate.candidate_id}>
-          <strong>#{item.operational_rank} · {item.candidate.selection}</strong>
+          <strong>#{item.operational_rank} · {displaySelection(item.candidate.selection)}</strong>
           <DefinitionGrid entries={[
             ["Línea", item.candidate.line],
             ["Casa", item.quote.bookmaker_name],
@@ -632,13 +653,14 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
   const fixtureRisks = (director.red_team?.items || []).filter((item) => item.status === "risk").map((item) => item.text).slice(0, 3);
   const simpleRisks = [...new Set([...(contextSummary.unfavorable || []), ...fixtureRisks])].slice(0, 2);
   const fixture = director.fixture || {};
+
   return (
     <section className={`director-atlas-panel functional-director p2-director p2-simple-director p2-simple-director-${analysisDecision.status}`} aria-label="Dictamen del Director Atlas" aria-labelledby="director-atlas-title">
       <p className="p2-director-kicker">ANÁLISIS COMPLETO</p>
       <header className="p2-simple-fixture">
         <p>{fixture.competition}</p>
         <h2 id="director-atlas-title" ref={headingRef} tabIndex="-1">{fixture.home_team} vs {fixture.away_team}</h2>
-        <strong>{director.selection || director.market_evaluated?.label}</strong>
+        <strong>{displaySelection(director.selection || director.market_evaluated?.label)}</strong>
       </header>
       <section className={`p2-simple-decision p2-simple-decision-${analysisDecision.status}`} aria-label="Resultado de Atlas">
         <span aria-hidden="true">{analysisDecision.icon}</span>
@@ -661,6 +683,9 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         <p>{simplePriceMessage}</p>
       </section>
       {priceDecision ? <section className={`p2-simple-final p2-simple-decision-${priceDecision.status}`} aria-label="Decisión final"><small>DECISIÓN FINAL</small><h3><span aria-hidden="true">{priceDecision.icon}</span> {priceDecision.label}</h3><p>{simplePriceMessage}</p></section> : null}
+      {priceDecision?.status === "yes" ? (
+        <BetRegistrationButton analysisId={analysis?.analysisVersion?.analysis_id} />
+      ) : null}
       <button type="button" className="secondary-button" onClick={() => onShowExpert(displayStatus(director.parlay_eligibility))}>Ver análisis completo</button>
     </section>
   );
@@ -686,6 +711,83 @@ function MarketAssessment({ market }) {
       <ListBlock title="Evidencia faltante" items={market.missing_evidence} />
       <ListBlock title="Riesgos" items={market.risk_flags} />
     </article>
+  );
+}
+
+
+function BetRegistrationButton({ analysisId }) {
+  const [betRegistration, setBetRegistration] = useState({ status: "idle", message: "" });
+
+  async function registerBet() {
+    if (!analysisId) {
+      setBetRegistration({ status: "error", message: "No se encontró la versión persistida del análisis." });
+      return;
+    }
+
+    const rawStake = window.prompt("Monto apostado en COP (ej. 10000):");
+    if (rawStake === null) return;
+
+    const stakeAmount = Number(String(rawStake).trim());
+    if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) {
+      setBetRegistration({ status: "error", message: "Introduce un monto válido mayor que cero." });
+      return;
+    }
+
+    setBetRegistration({ status: "loading", message: "Registrando apuesta…" });
+
+    try {
+      const response = await fetch("/api/bets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          analysisId,
+          stakeAmount,
+          currency: "COP",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setBetRegistration({
+          status: "error",
+          message: result?.message || "No fue posible registrar la apuesta.",
+        });
+        return;
+      }
+
+      setBetRegistration({
+        status: "success",
+        message: `Apuesta registrada: ${result.bet?.bookmaker || "casa"} @${result.bet?.decimal_odds || ""}`,
+      });
+    } catch {
+      setBetRegistration({
+        status: "error",
+        message: "No fue posible conectar con el registro de apuestas.",
+      });
+    }
+  }
+
+  return (
+    <div className="p2-bet-registration">
+      <button
+        type="button"
+        className="primary-button"
+        onClick={registerBet}
+        disabled={betRegistration.status === "loading" || betRegistration.status === "success"}
+      >
+        {betRegistration.status === "loading"
+          ? "Registrando…"
+          : betRegistration.status === "success"
+            ? "Apuesta registrada"
+            : "Registrar apuesta"}
+      </button>
+      {betRegistration.message ? (
+        <p role={betRegistration.status === "error" ? "alert" : "status"}>
+          {betRegistration.message}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -976,6 +1078,137 @@ function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleI
   );
 }
 
+
+function BetTrackerView({ timezone }) {
+  const [bets, setBets] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [betState, setBetState] = useState(
+    state("Carga tus apuestas registradas en Atlas.")
+  );
+
+  async function loadBets() {
+    setBetState(state("Cargando apuestas…", "loading"));
+
+    try {
+      const response = await fetch("/api/bets");
+      const result = await response.json();
+
+      if (!response.ok) {
+        setBetState(
+          state(
+            result?.message || "No fue posible cargar las apuestas.",
+            "provider_error",
+            result?.errorCode
+          )
+        );
+        return;
+      }
+
+      setBets(result.bets || []);
+      setSummary(result.summary || null);
+      setBetState(
+        state(
+          `${result.count || 0} apuesta(s) registrada(s).`,
+          "success"
+        )
+      );
+    } catch {
+      setBetState(
+        state(
+          "No fue posible conectar con el registro de apuestas.",
+          "provider_error"
+        )
+      );
+    }
+  }
+
+  useEffect(() => {
+    loadBets();
+  }, []);
+
+  return (
+    <section className="p2-mode" aria-labelledby="bets-title">
+      <div className="p2-mode-heading">
+        <p className="eyebrow">Registro personal append-only</p>
+        <h2 id="bets-title">Mis apuestas</h2>
+        <p>
+          Consulta las apuestas que realmente registraste después de una decisión APOSTAR de Atlas.
+        </p>
+      </div>
+
+      <div className="p2-inline-actions">
+        <button
+          type="button"
+          className="primary-button p2-primary"
+          onClick={loadBets}
+          disabled={betState.status === "loading"}
+        >
+          {betState.status === "loading" ? "Actualizando…" : "Actualizar apuestas"}
+        </button>
+
+        <a className="secondary-button p2-download" href="/api/bets?format=json">
+          Exportar JSON
+        </a>
+      </div>
+
+      <StatusNotice value={betState} />
+
+      {summary ? (
+        <section className="p2-history-compare" aria-labelledby="bets-summary-title">
+          <h3 id="bets-summary-title">Resumen personal</h3>
+          <DefinitionGrid
+            entries={[
+              ["Apuestas", summary.bet_count],
+              ["Pendientes", summary.pending_count],
+              ["Ganadas", summary.won_count],
+              ["Perdidas", summary.lost_count],
+              ["Nulas", summary.void_count],
+              ["Total apostado", `${formatValue(summary.total_staked)} COP`],
+              ["Retorno total", `${formatValue(summary.total_payout)} COP`],
+              ["Ganancia / pérdida", `${formatValue(summary.net_profit_loss)} COP`],
+              ["ROI", summary.roi === null ? null : percentage(summary.roi)],
+            ]}
+          />
+        </section>
+      ) : null}
+
+      <div className="p2-history-list">
+        {bets.map((bet) => (
+          <article key={bet.bet_id} className="p2-history-entry">
+            <div>
+              <strong>
+                {bet.home_team || "Local"} vs {bet.away_team || "Visitante"}
+              </strong>
+              <p>
+                {displaySelection(bet.selection)}
+                {bet.line !== null && bet.line !== undefined ? ` · línea ${bet.line}` : ""}
+              </p>
+              <small>
+                {bet.bookmaker} @{bet.decimal_odds} · {formatValue(bet.stake_amount)} {bet.currency}
+              </small>
+              <small>
+                {formatDate(bet.kickoff_utc, timezone)} · Estado: {displayStatus(bet.status)}
+              </small>
+              <small>
+                Atlas: {bet.atlas_price_decision || "No disponible"}
+              </small>
+              {bet.status !== "pending" ? (
+                <small>
+                  Retorno: {formatValue(bet.payout)} {bet.currency} · Ganancia/pérdida: {formatValue(bet.profit_loss)} {bet.currency}
+                </small>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {betState.status === "success" && !bets.length ? (
+        <p>No tienes apuestas registradas todavía.</p>
+      ) : null}
+    </section>
+  );
+}
+
 function HistoryView({ timezone }) {
   const [filters, setFilters] = useState({ date: "", competition: "", team: "", fixtureId: "", status: "", market: "", phase: "" });
   const [history, setHistory] = useState([]);
@@ -1130,7 +1363,7 @@ function InitialAnalysisResult({ analysis }) {
       <p>Ya revisé los datos deportivos. Ahora necesito complementar lo que la API puede no conocer.</p>
       <div className="p2-initial-selection">
         <strong>{fixture.home_team} vs {fixture.away_team}</strong>
-        <span>{director?.selection || director?.market_evaluated?.label}</span>
+        <span>{displaySelection(director?.selection || director?.market_evaluated?.label)}</span>
       </div>
       <p>Genera la solicitud para Gemini, pega su respuesta y deja que Atlas filtre la evidencia antes de tomar posición.</p>
     </section>
@@ -1190,16 +1423,64 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone }) 
   return (
     <article className="p2-candidate-card p2-simple-candidate-card">
       <p className="eyebrow">{candidate.competition}</p>
+      <p className="p2-simple-preselection">Opciones encontradas por Atlas</p>
       {primary ? <span className="p2-chip p2-chip-candidate">Mejor opción inicial</span> : null}
       <h3>{candidate.fixture}</h3>
-      <p className="p2-simple-selection"><strong>{candidate.selection}</strong><span>{candidate.market} · línea {candidate.line}</span></p>
+      <p className="p2-simple-selection"><strong>{displaySelection(candidate.selection)}</strong><span>{displayMarket(candidate.marketId || candidate.market)} · línea {candidate.line}</span></p>
       <p>{reason}</p>
       <small>{formatDate(candidate.kickoff, candidate.timezone || timezone)}</small>
       <button type="button" className="primary-button" onClick={() => onOpen(candidate)}>Analizar esta opción</button>
     </article>
   );
 }
+function JourneyMatchesReviewed({ journey }) {
+  const diagnostics = journey.analysisDiagnostics || [];
 
+  if (!diagnostics.length) return null;
+
+  return (
+    <section className="p2-source-details">
+      <h3>Partidos revisados en esta jornada</h3>
+      <p>
+        Atlas revisó estos partidos y evaluó los mercados disponibles antes
+        de seleccionar candidatos.
+      </p>
+
+      <div className="p2-candidate-grid">
+        {diagnostics.map((item) => (
+          <article
+            key={`${item.fixtureId}-${item.competition}`}
+            className="p2-candidate-card"
+          >
+            <p className="eyebrow">{item.competition}</p>
+
+            <h4>{item.fixture}</h4>
+
+            <DefinitionGrid entries={[
+              ["Estado", "Evaluado"],
+              ["Mercados revisados", item.marketAssessmentCount],
+              ["Opciones encontradas", item.rankedCandidateCount],
+            ]} />
+
+            <details>
+              <summary>Ver mercados evaluados</summary>
+
+              <ul>
+                {item.marketStatuses?.map((market) => (
+                  <li key={market.marketFamily}>
+                    {market.marketFamily} — {market.status}
+                    {market.candidate ? " ✅" : ""}
+                  </li>
+                ))}
+              </ul>
+            </details>
+
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
 function JourneyTechnicalDetails({ journey, quoteLedgers, operationalRanking, quoteCoverage, technicalLabel }) {
   return (
     <details className="p2-source-details p2-journey-technical">
@@ -1219,7 +1500,7 @@ function JourneyTechnicalDetails({ journey, quoteLedgers, operationalRanking, qu
         {(journey.candidates || []).map((candidate) => {
           const operation = findFixtureQuoteEntry(quoteLedgers[String(candidate.fixtureId)], candidate);
           return <article key={`${candidate.fixtureId}-${candidate.marketId}`} className="p2-candidate-card">
-            <h4>{candidate.fixture} · {candidate.selection}</h4>
+            <h4>{candidate.fixture} · {displaySelection(candidate.selection)}</h4>
             <DefinitionGrid entries={[
               ["Probabilidad preliminar", percentage(candidate.probability)],
               ["Intervalo", `${percentage(candidate.uncertaintyLow)}–${percentage(candidate.uncertaintyHigh)}`],
@@ -1235,7 +1516,7 @@ function JourneyTechnicalDetails({ journey, quoteLedgers, operationalRanking, qu
           </article>;
         })}
       </div>
-      {operationalRanking.length ? <section className="p2-stage-card"><h3>Clasificación operativa</h3><ol className="p2-operational-ranking">{operationalRanking.map(({ candidate, operation, operational_rank: rank }) => <li key={operation.selection_key}><strong>#{rank} · {candidate.selection}</strong><p>{operation.active_quote.bookmaker_name} @{operation.active_quote.decimal_odds} · {operation.operational_decision}</p></li>)}</ol></section> : null}
+      {operationalRanking.length ? <section className="p2-stage-card"><h3>Clasificación operativa</h3><ol className="p2-operational-ranking">{operationalRanking.map(({ candidate, operation, operational_rank: rank }) => <li key={operation.selection_key}><strong>#{rank} · {displaySelection(candidate.selection)}</strong><p>{operation.active_quote.bookmaker_name} @{operation.active_quote.decimal_odds} · {operation.operational_decision}</p></li>)}</ol></section> : null}
       <details className="p2-source-details"><summary>Ver contrato técnico completo</summary><pre>{JSON.stringify({ journey, quote_ledgers: quoteLedgers }, null, 2)}</pre></details>
     </details>
   );
@@ -1254,7 +1535,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   );
   const [journeyMarketIds, setJourneyMarketIds] = useState(markets.map((market) => market.id));
   const [journeyAnalysisMode, setJourneyAnalysisMode] = useState("general");
-  const [maximumFixtures, setMaximumFixtures] = useState(5);
+  const [maximumFixtures, setMaximumFixtures] = useState(50);
   const [journeyState, setJourneyState] = useState(state("Configura la jornada y pulsa “Escanear jornada”."));
   const [journey, setJourney] = useState(null);
   const journeyRequest = useRef(null);
@@ -1516,7 +1797,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     const requestedLine = line.trim() || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);
     const reportedDirection = selection.trim() || currentAnalysis?.director?.sports_verdict?.direction || transferredCandidate?.direction || "";
     const reportedSelection = reportedDirection && requestedLine
-      ? `${reportedDirection === "under" ? "Under" : "Over"} ${requestedLine}`
+      ? `${reportedDirection === "under" ? "Menos de" : "Más de"} ${requestedLine}`
       : reportedDirection;
     const manualMarketFamily = transferredCandidate?.market_family || (analysisMode === "specific" ? marketId : currentAnalysis?.director?.market_evaluated?.family);
     const currentLine = currentAnalysis?.director?.line;
@@ -1727,11 +2008,12 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
         <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Explorar jornada</button>
         <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
         <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
+        <button type="button" aria-current={mainMode === "bets" ? "page" : undefined} onClick={() => setMainMode("bets")}>Mis apuestas</button>
         <button type="button" className="secondary-button" onClick={startNewSearch}>Nueva búsqueda</button>
       </nav>
       <AtlasGlossary />
 
-      {mainMode !== "history" ? <div className="p2-shared-date">
+      {!["history", "bets"].includes(mainMode) ? <div className="p2-shared-date">
         <label>
           <span>1 · Elige la fecha</span>
           <input type="date" value={date} onChange={(event) => changeDate(event.target.value)} />
@@ -1782,8 +2064,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
             </fieldset>
             <label>
               <span>4 · Máximo de partidos a revisar</span>
-              <input type="number" min="1" max="10" value={maximumFixtures} onChange={(event) => { setMaximumFixtures(Math.max(1, Math.min(10, Number(event.target.value) || 1))); invalidateJourney(); }} />
-              <small>Entre 1 y 10; el resultado nunca supera cinco candidatos.</small>
+              <input type="number" min="1" max="50" value={maximumFixtures} onChange={(event) => { setMaximumFixtures(Math.max(1, Math.min(50, Number(event.target.value) || 1))); invalidateJourney(); }} />
+              <small>Entre 1 y 50 partidos seleccionados para revisión.</small>
             </label>
           </div>
 
@@ -1794,13 +2076,14 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
 
           {journey ? (
             <section className="p2-journey-result" aria-labelledby="journey-summary-title">
-              <h3 id="journey-summary-title">Opciones encontradas por Atlas</h3>
+              <h3 id="journey-summary-title">Oportunidades encontradas por Atlas</h3>
               <p>Atlas encontró estas opciones con los datos deportivos disponibles. Elige una para completar el análisis.</p>
               <div className="p2-candidate-grid">
                 {(journey.candidates || []).slice(0, 3).map((candidate, index) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}`} candidate={candidate} primary={index === 0} onOpen={openCandidate} timezone={defaultTimezone} />)}
               </div>
-              {(journey.candidates || []).length > 3 ? <details className="p2-source-details p2-more-candidates"><summary>Otras opciones encontradas ({journey.candidates.length - 3})</summary><div className="p2-candidate-grid">{journey.candidates.slice(3).map((candidate) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}`} candidate={candidate} onOpen={openCandidate} timezone={defaultTimezone} />)}</div></details> : null}
-              <JourneyTechnicalDetails journey={journey} quoteLedgers={fixtureQuoteLedgers} operationalRanking={journeyOperationalRanking} quoteCoverage={journeyQuoteCoverage} technicalLabel="Respaldo deportivo" />
+              {(journey.candidates || []).length > 3 ? <div className="p2-candidate-grid">{journey.candidates.slice(3).map((candidate) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}`} candidate={candidate} onOpen={openCandidate} timezone={defaultTimezone} />)}</div> : null}
+             <JourneyMatchesReviewed journey={journey} />
+             <JourneyTechnicalDetails journey={journey} quoteLedgers={fixtureQuoteLedgers} operationalRanking={journeyOperationalRanking} quoteCoverage={journeyQuoteCoverage} technicalLabel="Respaldo deportivo" />
             </section>
           ) : null}
         </section>
@@ -1894,7 +2177,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                   </select>
                 </label> : <div className="p2-family-copy"><strong>Atlas comparará las cinco familias.</strong><small>La cuota no participa en esta comparación inicial; se evaluará únicamente al final.</small></div>}
                 <label><span>Mercado candidato</span><input readOnly value={analysis?.director?.market_evaluated?.label || markets.find((item) => item.id === transferredCandidate?.market_family)?.label || "Atlas lo determinará"} /></label>
-                <label><span>Selección candidata</span><input readOnly value={analysis?.director?.selection || transferredCandidate?.selection || "Atlas la determinará"} /></label>
+                <label><span>Selección candidata</span><input readOnly value={analysis?.director?.selection || transferredCandidate?.selection ? displaySelection(analysis?.director?.selection || transferredCandidate?.selection) : "Atlas la determinará"} /></label>
                 <label><span>Línea sugerida</span><input readOnly value={analysis?.director?.line ?? transferredCandidate?.line ?? "Atlas la determinará"} /></label>
               </section>
             )}
@@ -1915,7 +2198,13 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           </section> : null}
           {analysisCompleted ? <details className="p2-source-details p2-new-gemini-research"><summary>Nueva investigación Gemini</summary><GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} /></details> : null}
         </section>
-      ) : <HistoryView timezone={defaultTimezone} />}
+      ) : mainMode === "bets" ? (
+        <BetTrackerView timezone={defaultTimezone} />
+      ) : (
+        <HistoryView timezone={defaultTimezone} />
+      )}
     </div>
   );
 }
+
+

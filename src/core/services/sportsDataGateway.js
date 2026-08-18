@@ -167,35 +167,117 @@ export function createSportsDataGateway(runtime) {
   }
 
   async function loadLeagueWindow({ competition, season, from, to }) {
-    const result = await runtime.request({
+    const current = await runtime.request({
       pathname: "/fixtures",
       query: { league: competition.id, season, from, to },
       ttlSeconds: 1_800,
       tags: [`competition:${competition.id}`, `season:${season}`],
       externalIds: { competitionId: competition.id },
     });
-    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
-    const fixtures = normalizeFootballFixtures(result.response).filter(
+    if (current.status !== DATA_LOAD_STATUS.SUCCESS) return current;
+
+    const currentFixtures = normalizeFootballFixtures(current.response).filter(
       (fixture) =>
         fixture.status.isFinished &&
         Number(fixture.competition.id) === Number(competition.id) &&
         Number(fixture.competition.season) === Number(season)
     );
-    return successful(result.response, { fixtures, requestMeta: result.requestMeta });
+
+    if (currentFixtures.length >= 8) {
+      return successful(current.response, {
+        fixtures: currentFixtures,
+        requestMeta: current.requestMeta,
+        sampleContinuity: "current_season",
+      });
+    }
+
+    const previousSeason = Number(season) - 1;
+    const previous = await runtime.request({
+      pathname: "/fixtures",
+      query: { league: competition.id, season: previousSeason, last: 10 },
+      ttlSeconds: 1_800,
+      tags: [`competition:${competition.id}`, `season:${previousSeason}`],
+      externalIds: { competitionId: competition.id },
+    });
+
+    if (previous.status !== DATA_LOAD_STATUS.SUCCESS) {
+      return successful(current.response, {
+        fixtures: currentFixtures,
+        requestMeta: current.requestMeta,
+        sampleContinuity: "current_season_only",
+      });
+    }
+
+    const previousFixtures = normalizeFootballFixtures(previous.response).filter(
+      (fixture) =>
+        fixture.status.isFinished &&
+        Number(fixture.competition.id) === Number(competition.id) &&
+        Number(fixture.competition.season) === previousSeason
+    );
+
+    const fixtures = [...currentFixtures, ...previousFixtures]
+      .sort((left, right) => Date.parse(right.date.utc) - Date.parse(left.date.utc))
+      .slice(0, 10);
+
+    return successful([...current.response, ...previous.response], {
+      fixtures,
+      requestMeta: current.requestMeta,
+      sampleContinuity: "cross_season_fallback",
+    });
   }
 
   async function loadTeamRecent({ teamId, season }) {
-    const result = await runtime.request({
+    const current = await runtime.request({
       pathname: "/fixtures",
       query: { team: teamId, season, last: 10 },
       ttlSeconds: 900,
       tags: [`team:${teamId}`, `season:${season}`],
       externalIds: { teamId },
     });
-    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
-    return successful(result.response, {
-      fixtures: normalizeFootballFixtures(result.response),
-      requestMeta: result.requestMeta,
+    if (current.status !== DATA_LOAD_STATUS.SUCCESS) return current;
+
+    const currentFixtures = normalizeFootballFixtures(current.response);
+
+    if (currentFixtures.length >= 10) {
+      return successful(current.response, {
+        fixtures: currentFixtures.slice(0, 10),
+        requestMeta: current.requestMeta,
+        sampleContinuity: "current_season",
+      });
+    }
+
+    const previousSeason = Number(season) - 1;
+    const previous = await runtime.request({
+      pathname: "/fixtures",
+      query: { team: teamId, season: previousSeason, last: 10 },
+      ttlSeconds: 900,
+      tags: [`team:${teamId}`, `season:${previousSeason}`],
+      externalIds: { teamId },
+    });
+
+    if (previous.status !== DATA_LOAD_STATUS.SUCCESS) {
+      return successful(current.response, {
+        fixtures: currentFixtures.slice(0, 10),
+        requestMeta: current.requestMeta,
+        sampleContinuity: "current_season_only",
+      });
+    }
+
+    const fixtures = [
+      ...currentFixtures,
+      ...normalizeFootballFixtures(previous.response),
+    ]
+      .filter(
+        (fixture, index, all) =>
+          all.findIndex((item) => Number(item.fixtureId) === Number(fixture.fixtureId)) === index
+      )
+      .sort((left, right) => Date.parse(right.date.utc) - Date.parse(left.date.utc))
+      .slice(0, 10);
+
+    return successful([...current.response, ...previous.response], {
+      fixtures,
+      requestMeta: current.requestMeta,
+      sampleContinuity: "cross_season_fallback",
     });
   }
 
