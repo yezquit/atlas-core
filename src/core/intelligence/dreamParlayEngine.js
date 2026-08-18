@@ -1,9 +1,6 @@
-const MAX_TOTAL_ODDS = 30;
-const MIN_TOTAL_ODDS = 10;
-
-function calculateDistance(value, target) {
-  return Math.abs(value - target);
-}
+const MIN_SELECTIONS = 5;
+const MAX_SELECTIONS = 15;
+const MAX_TOTAL_ODDS = 100;
 
 function normalizeCandidate(candidate) {
   if (!candidate?.decimalOdds) return null;
@@ -23,43 +20,36 @@ function normalizeCandidate(candidate) {
 export function buildDreamParlays(
   candidates = [],
   {
-    targetOdds = 20,
-    selections = 7,
+    selections = 5,
   } = {}
 ) {
+  if (
+    selections < MIN_SELECTIONS ||
+    selections > MAX_SELECTIONS
+  ) {
+    return [];
+  }
+
   const valid = candidates
     .map(normalizeCandidate)
     .filter(Boolean);
 
-  if (!valid.length) {
+  if (valid.length < selections) {
     return [];
   }
 
   const results = [];
 
-  function search(
-    start,
-    combo,
-    totalOdds
-  ) {
+  function search(start, combo, totalOdds) {
     if (combo.length === selections) {
-      if (
-        totalOdds >= MIN_TOTAL_ODDS &&
-        totalOdds <= MAX_TOTAL_ODDS
-      ) {
-        results.push({
-          type: "dream_parlay",
-          riskLevel: "high",
-          totalOdds: Number(totalOdds.toFixed(2)),
-          selections: combo,
-          distance: calculateDistance(
-            totalOdds,
-            targetOdds
-          ),
-          description:
-            "Combinación exploratoria de alto riesgo construida con selecciones individuales razonables.",
-        });
-      }
+      results.push({
+        type: "dream_parlay",
+        riskLevel: "high",
+        selections: combo,
+        totalOdds: Number(totalOdds.toFixed(2)),
+        description:
+          `Soñadora Atlas de ${selections} selecciones. Alto riesgo por acumulación de eventos.`,
+      });
 
       return;
     }
@@ -82,10 +72,5 @@ export function buildDreamParlays(
 
   search(0, [], 1);
 
-  return results
-    .sort(
-      (a, b) =>
-        a.distance - b.distance
-    )
-    .slice(0, 5);
+  return results.slice(0, 5);
 }

@@ -7,45 +7,84 @@ import {
 
 
 test(
-  "crea una soñadora cercana a cuota 20 con siete selecciones",
+  "crea soñadora con cantidad elegida por usuario",
   () => {
-    const candidates = [
-      { id: "A", decimalOdds: 1.5 },
-      { id: "B", decimalOdds: 1.6 },
-      { id: "C", decimalOdds: 1.4 },
-      { id: "D", decimalOdds: 1.8 },
-      { id: "E", decimalOdds: 1.3 },
-      { id: "F", decimalOdds: 1.7 },
-      { id: "G", decimalOdds: 1.5 },
-    ];
+    const candidates = Array.from(
+      { length: 10 },
+      (_, i) => ({
+        id: String(i),
+        decimalOdds: 1.5
+      })
+    );
 
     const result = buildDreamParlays(
       candidates,
       {
-        targetOdds: 20,
-        selections: 7,
+        selections: 8
       }
     );
 
     assert.ok(result.length > 0);
     assert.equal(
-      result[0].riskLevel,
-      "high"
-    );
-
-    assert.equal(
-      result[0].type,
-      "dream_parlay"
+      result[0].selections.length,
+      8
     );
   }
 );
 
 
 test(
-  "no inventa cuotas imposibles sin candidatos",
+  "permite soñadora mínima de 5",
+  () => {
+    const candidates = Array.from(
+      { length: 5 },
+      () => ({
+        decimalOdds: 2
+      })
+    );
+
+    const result =
+      buildDreamParlays(
+        candidates,
+        {
+          selections: 5
+        }
+      );
+
+    assert.ok(result.length > 0);
+  }
+);
+
+
+test(
+  "rechaza menos de cinco selecciones",
   () => {
     const result =
-      buildDreamParlays([]);
+      buildDreamParlays(
+        [],
+        {
+          selections: 4
+        }
+      );
+
+    assert.deepEqual(
+      result,
+      []
+    );
+  }
+);
+
+
+test(
+  "rechaza más de quince selecciones",
+  () => {
+    const result =
+      buildDreamParlays(
+        [],
+        {
+          selections: 16
+        }
+      );
 
     assert.deepEqual(
       result,
