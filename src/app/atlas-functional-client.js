@@ -1123,8 +1123,12 @@ function BetTrackerView({ timezone }) {
   }
 
   useEffect(() => {
-    loadBets();
-  }, []);
+  const initBets = async () => {
+    await loadBets();
+  };
+
+  initBets();
+}, []);
 
   return (
     <section className="p2-mode" aria-labelledby="bets-title">
