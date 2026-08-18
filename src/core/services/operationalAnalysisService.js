@@ -1,3 +1,4 @@
+
 import { DATA_LOAD_STATUS } from "../contracts/atlasContracts.js";
 import { LINE_ORIGIN, OPERATIONAL_ENGINE_VERSION, phaseForKickoff } from "../contracts/operationalContracts.js";
 import { calculateAnalysisConfidence } from "../intelligence/analysisConfidence.js";
@@ -10,6 +11,7 @@ import { buildAtlasPreflight, buildRedTeamAtlas } from "../intelligence/redTeamA
 import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
 import { createManualOdds, isCurrentOddsQuote, normalizeProviderOdds, refreshStoredOddsQuote, selectBestComparableOdds, validateManualOddsInput } from "../intelligence/oddsIntelligence.js";
 import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
+import { buildDreamParlays } from "../intelligence/dreamParlayEngine.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
 import { analyzeSportsFixture } from "./sportsIntelligenceService.js";
@@ -586,6 +588,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const eligibleForParlayReview = ["eligible", "eligible_with_caution"].includes(director.parlay_eligibility);
   const parlayInput = eligibleForParlayReview ? [{ fixture_id: base.fixture.fixtureId, candidate_id: primaryCandidate?.candidate_id, ranking_version: primaryCandidate?.ranker_version, market_family: primaryCandidate?.market_family, line: director.line, selection: director.selection, decimal_odds: director.odds, odds_source_status: director.odds_source_status, freshness: selectedOdds?.freshness, market_suitability: director.market_suitability, preliminary_probability: preliminaryProbability, uncertainty_width: primaryCandidate?.uncertainty_high - primaryCandidate?.uncertainty_low, analysis_confidence_score: director.analysis_confidence_score, price_status: director.price_assessment.status, price_gap: director.price_assessment.price_gap }] : [];
   const parlay = buildConservativeParlays(parlayInput);
+
   director.parlay_authorization = parlay.status;
   const parlayCandidate = eligibleForParlayReview ? {
     fixture_id: base.fixture.fixtureId,
@@ -606,6 +609,17 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     price_status: director.price_assessment.status,
     price_gap: director.price_assessment.price_gap,
   } : null;
+const dreamParlayCandidates = parlayCandidate
+? [parlayCandidate]
+: [];
+
+const dreamParlays = buildDreamParlays(
+dreamParlayCandidates,
+{
+targetOdds: input.targetDreamOdds || 20,
+selections: input.dreamSelections || 5,
+}
+);
   const version = buildAnalysisVersion({
     fixture: base.fixture,
     phase: input.phase,
@@ -668,6 +682,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     suitability,
     parlay,
     parlayCandidate,
+    dreamParlays,
     individualPick,
     director,
     analysisVersion: version,
