@@ -76,7 +76,7 @@ function summary(records, includeGroups = true) {
     [0.5, 0.6, "50–59%"],
     [0.6, 0.7, "60–69%"],
     [0.7, 0.8, "70–79%"],
-    [0.8, 1.01, "80–90%"],
+    [0.8, 1.01, "80–100%"],
   ].map(([low, high, label]) => ({ label, ...summary(resolved.filter((item) => item.preliminary_probability >= low && item.preliminary_probability < high), false) }));
   return {
     ...base,

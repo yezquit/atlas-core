@@ -7,6 +7,7 @@ import { manualOddsCopyWarning } from "@/core/intelligence/oddsIntelligence";
 import { buildJourneyOperationalRanking, findFixtureQuoteEntry, summarizeJourneyQuoteCoverage } from "@/core/intelligence/fixtureQuoteLedger";
 import { buildSimpleDirectorPresentation } from "@/core/modules/directorAtlas";
 import AtlasCombinationBuilder from "./atlas-combination-builder";
+import AtlasPredictionMemory, { OfficialPredictionRegistration } from "./atlas-prediction-memory";
 
 const LOAD_STATES = new Set([
   "loading",
@@ -687,6 +688,7 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
       {priceDecision?.status === "yes" ? (
         <BetRegistrationButton analysisId={analysis?.analysisVersion?.analysis_id} />
       ) : null}
+      {analysisDecision.status === "yes" ? <OfficialPredictionRegistration analysisId={analysis?.analysisVersion?.analysis_id} /> : null}
       <button type="button" className="secondary-button" onClick={() => onShowExpert(displayStatus(director.parlay_eligibility))}>Ver análisis completo</button>
     </section>
   );
@@ -2013,13 +2015,14 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
         <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Explorar jornada</button>
         <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
         <button type="button" aria-current={mainMode === "combinations" ? "page" : undefined} onClick={() => setMainMode("combinations")}>Parlay y Soñadora</button>
+        <button type="button" aria-current={mainMode === "memory" ? "page" : undefined} onClick={() => setMainMode("memory")}>Memoria Atlas</button>
         <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
         <button type="button" aria-current={mainMode === "bets" ? "page" : undefined} onClick={() => setMainMode("bets")}>Mis apuestas</button>
         <button type="button" className="secondary-button" onClick={startNewSearch}>Nueva búsqueda</button>
       </nav>
       <AtlasGlossary />
 
-      {!["history", "bets", "combinations"].includes(mainMode) ? <div className="p2-shared-date">
+      {!["history", "bets", "combinations", "memory"].includes(mainMode) ? <div className="p2-shared-date">
         <label>
           <span>1 · Elige la fecha</span>
           <input type="date" value={date} onChange={(event) => changeDate(event.target.value)} />
@@ -2095,6 +2098,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
         </section>
       ) : mainMode === "combinations" ? (
         <AtlasCombinationBuilder competitionGroups={competitionGroups} markets={markets} defaultTimezone={defaultTimezone} />
+      ) : mainMode === "memory" ? (
+        <AtlasPredictionMemory />
       ) : mainMode === "match" ? (
         <section className="p2-mode" aria-labelledby="match-title">
           <div className="p2-mode-heading">

@@ -36,8 +36,9 @@ function modeName(mode) {
   return "Automático";
 }
 
-function enrichCandidate(candidate, ledger) {
+function enrichCandidate(candidate, ledger, officialPredictions = []) {
   const operation = findFixtureQuoteEntry(ledger, candidate);
+  const officialPrediction = officialPredictions.find((prediction) => prediction.source_analysis_id === operation?.source_analysis_id) || null;
   return {
     ...candidate,
     fixture_id: candidate.fixtureId,
@@ -55,6 +56,7 @@ function enrichCandidate(candidate, ledger) {
     market_suitability: operation?.market_suitability || null,
     parlay_eligibility: operation?.parlay_eligibility || null,
     director_decision: operation?.director_decision || null,
+    official_prediction_id: officialPrediction?.prediction_id || null,
   };
 }
 
@@ -93,15 +95,16 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
   const [selectionCount, setSelectionCount] = useState(2);
   const [journey, setJourney] = useState(null);
   const [ledgers, setLedgers] = useState({});
+  const [officialPredictions, setOfficialPredictions] = useState([]);
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [combination, setCombination] = useState(null);
   const [loadState, setLoadState] = useState("idle");
   const requestRef = useRef(null);
 
   const candidates = useMemo(() => (journey?.candidates || []).map((candidate) => {
-    const enriched = enrichCandidate(candidate, ledgers[String(candidate.fixtureId)]);
+    const enriched = enrichCandidate(candidate, ledgers[String(candidate.fixtureId)], officialPredictions);
     return { ...enriched, selection_key: combinationSelectionKey(enriched) };
-  }), [journey, ledgers]);
+  }), [journey, ledgers, officialPredictions]);
 
   const eligibleCount = candidates.filter((candidate) => inspectCombinationCandidate(candidate).eligible).length;
   const limits = COMBINATION_LIMITS[product];
@@ -143,6 +146,17 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
     return [String(fixtureId), result.ledger || null];
   }
 
+  async function loadOfficialPredictions() {
+    try {
+      const response = await fetch("/api/predictions");
+      if (!response.ok) return [];
+      const result = await response.json();
+      return result.predictions || [];
+    } catch {
+      return [];
+    }
+  }
+
   async function findCandidates() {
     requestRef.current?.abort();
     const requestedDates = unique(dates);
@@ -155,6 +169,7 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
     setLoadState("loading");
     setJourney(null);
     setLedgers({});
+    setOfficialPredictions([]);
     setSelectedKeys([]);
     setCombination(null);
     try {
@@ -176,9 +191,13 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
       if (controller.signal.aborted) return;
       setJourney(result);
       const fixtureIds = unique((result.candidates || []).map((candidate) => String(candidate.fixtureId)));
-      const ledgerEntries = await Promise.all(fixtureIds.map(loadLedger));
+      const [ledgerEntries, predictions] = await Promise.all([
+        Promise.all(fixtureIds.map(loadLedger)),
+        loadOfficialPredictions(),
+      ]);
       if (controller.signal.aborted) return;
       setLedgers(Object.fromEntries(ledgerEntries.filter(([, ledger]) => ledger)));
+      setOfficialPredictions(predictions);
       setLoadState(response.ok ? "success" : "error");
     } catch (error) {
       if (error?.name !== "AbortError") setLoadState("error");
