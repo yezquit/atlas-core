@@ -1,5 +1,22 @@
 import { assessParlayRisk } from "./parlayAssessmentEngine.js";
 
+export function buildDirectorCombinationMessage({ product, status, selections = 0 } = {}) {
+  const name = product === "dream" ? "Soñadora Atlas" : "Parlay Atlas";
+  if (status === "ready" && product === "dream") {
+    return `${name} preparada con ${selections} selecciones. Es una combinación de alto riesgo y no promete ganancias.`;
+  }
+  if (status === "ready") {
+    return `${name} preparado con ${selections} selecciones. Revisa vigencia, correlación y riesgo antes de decidir.`;
+  }
+  if (status === "manual_incomplete") {
+    return `Selecciona exactamente ${selections} opciones elegibles para construir la combinación manual.`;
+  }
+  if (status === "fixed_selection_invalid") {
+    return "Alguna opción fijada no es elegible o excede el tamaño solicitado.";
+  }
+  return `No existen ${selections} candidatos vigentes, compatibles y suficientemente diversificables. Atlas no forzará una combinación.`;
+}
+
 function buildDirectorParlayAssessment(parlayCandidate) {
 
   const normalizedParlay = {

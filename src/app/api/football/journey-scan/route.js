@@ -1,4 +1,5 @@
 import { DATA_LOAD_STATUS } from "@/core/contracts/atlasContracts";
+import { mergeJourneyExplorations } from "@/core/intelligence/atlasCombinationEngine";
 import { scanSportsJourneyOnServer } from "@/core/services/sportsIntelligenceServer";
 
 function statusCode(result) {
@@ -23,15 +24,35 @@ export async function POST(request) {
       { status: 400 }
     );
   }
-  const result = await scanSportsJourneyOnServer({
-    date: input?.date,
+  const requestedDates = [...new Set(
+    (Array.isArray(input?.dates) ? input.dates : [input?.date]).filter(Boolean)
+  )];
+  if (requestedDates.length === 0 || requestedDates.length > 14) {
+    return Response.json({
+      status: DATA_LOAD_STATUS.UNAVAILABLE,
+      errorCode: "invalid_dates",
+      message: "Selecciona entre una y catorce fechas válidas.",
+      candidates: [],
+    }, { status: 400 });
+  }
+  const sharedInput = {
     competitionKeys: input?.competitionKeys,
     marketIds: input?.marketIds,
     maximumFixtures: input?.maximumFixtures,
     maximumCandidates: input?.maximumCandidates,
     analysisMode: input?.analysisMode,
-    now: new Date().toISOString(),
     timezone: input?.timezone || process.env.ATLAS_DEFAULT_TIMEZONE,
-  });
+  };
+  const results = [];
+  for (const date of requestedDates) {
+    results.push(await scanSportsJourneyOnServer({
+      ...sharedInput,
+      date,
+      now: new Date().toISOString(),
+    }));
+  }
+  const result = requestedDates.length === 1
+    ? results[0]
+    : mergeJourneyExplorations(results, requestedDates);
   return Response.json(result, { status: statusCode(result) });
 }

@@ -1,7 +1,5 @@
 const MIN_SELECTIONS = 5;
 const MAX_SELECTIONS = 15;
-const MAX_TOTAL_ODDS = 100;
-
 function normalizeCandidate(candidate) {
   if (!candidate?.decimalOdds) return null;
 
@@ -57,10 +55,6 @@ export function buildDreamParlays(
     for (let i = start; i < valid.length; i++) {
       const nextOdds =
         totalOdds * valid[i].decimalOdds;
-
-      if (nextOdds > MAX_TOTAL_ODDS) {
-        continue;
-      }
 
       search(
         i + 1,

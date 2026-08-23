@@ -5368,3 +5368,127 @@ body[data-atlas-view="technical"] .view-mode-buttons {
     padding: 15px;
   }
 }
+/* Atlas combination builder: Parlay 2–4 and Soñadora 5–15 */
+.p2-combination-builder {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.p2-combination-product,
+.p2-combination-settings,
+.p2-combination-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.p2-combination-product > label,
+.p2-combination-settings fieldset > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.p2-combination-product small,
+.p2-combination-candidate small {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+.p2-combination-dates,
+.p2-combination-filters,
+.p2-combination-settings,
+.p2-combination-universe,
+.p2-combination-result {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--card);
+}
+
+.p2-combination-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0;
+}
+
+.p2-combination-candidate {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+}
+
+.p2-combination-candidate.is-pending {
+  opacity: 0.72;
+}
+
+.p2-combination-toggle {
+  min-width: 9rem;
+}
+
+.p2-combination-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.p2-combination-metrics span {
+  padding: 0.85rem;
+  border-radius: 0.75rem;
+  background: var(--card-soft);
+}
+
+.p2-combination-metrics small,
+.p2-combination-metrics strong {
+  display: block;
+}
+
+.p2-combination-warning {
+  padding: 0.85rem;
+  border-left: 4px solid #d97706;
+  background: rgba(217, 119, 6, 0.1);
+}
+
+.p2-combination-legs {
+  display: grid;
+  gap: 0.65rem;
+  padding-left: 1.25rem;
+}
+
+.p2-combination-legs li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.p2-combination-legs span {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+@media (max-width: 900px) {
+  .p2-combination-candidate-grid,
+  .p2-combination-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .p2-combination-product,
+  .p2-combination-settings,
+  .p2-combination-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .p2-combination-candidate,
+  .p2-combination-legs li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

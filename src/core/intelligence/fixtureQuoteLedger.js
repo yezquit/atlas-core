@@ -174,6 +174,9 @@ export function buildFixtureQuoteLedger(analyses = [], { fixtureId, now = new Da
       ranking_included: quoteState === "current",
       ranking_exclusion_reason: exclusionReason,
       sports_confidence_score: latestVersion?.analysis_confidence?.analysis_confidence_score ?? null,
+      market_suitability: latestVersion?.director?.market_suitability || null,
+      parlay_eligibility: latestVersion?.director?.parlay_eligibility || null,
+      director_decision: latestVersion?.director?.decision_code || null,
       source_analysis_id: latestVersion?.analysis_id || null,
       quote_source_analysis_id: quoteSourceVersion?.analysis_id || null,
     };
