@@ -1,3 +1,8 @@
+import {
+  PERSONAL_OWNER_ID,
+  belongsToPersonalOwner,
+} from "../auth/personalIdentity.js";
+
 export const DEFAULT_LOCAL_USER_ID = "local-user";
 
 const VALID_BET_OUTCOMES = new Set(["won", "lost", "void"]);
@@ -25,6 +30,7 @@ function roundMoney(value) {
 export function createBetRecord({
   betId,
   userId = DEFAULT_LOCAL_USER_ID,
+  ownerId = PERSONAL_OWNER_ID,
   analysisId,
   fixtureId,
   competition = null,
@@ -48,6 +54,7 @@ export function createBetRecord({
 } = {}) {
   if (!betId) throw new TypeError("bet_id_required");
   if (!userId) throw new TypeError("user_id_required");
+  if (!ownerId) throw new TypeError("owner_id_required");
   if (!analysisId) throw new TypeError("analysis_id_required");
   if (!fixtureId) throw new TypeError("fixture_id_required");
   if (!bookmaker) throw new TypeError("bookmaker_required");
@@ -66,6 +73,7 @@ export function createBetRecord({
 
     bet_id: String(betId),
     user_id: String(userId),
+    owner_id: String(ownerId),
     analysis_id: String(analysisId),
     fixture_id: Number(fixtureId),
 
@@ -225,6 +233,7 @@ export function createMemoryBetLedger(initialEvents = []) {
         .filter(
           (item) =>
             (!filters.userId || item.user_id === filters.userId) &&
+            (!filters.ownerId || belongsToPersonalOwner(item, filters.ownerId)) &&
             (!filters.status || item.status === filters.status) &&
             (!filters.market || item.market_family === filters.market) &&
             (!filters.fixtureId ||
@@ -236,8 +245,8 @@ export function createMemoryBetLedger(initialEvents = []) {
         );
     },
 
-    async summary(userId = DEFAULT_LOCAL_USER_ID) {
-      const bets = await this.list({ userId });
+    async summary(userId = DEFAULT_LOCAL_USER_ID, ownerId = null) {
+      const bets = await this.list(ownerId ? { ownerId } : { userId });
 
       const settled = bets.filter((item) =>
         ["won", "lost", "void"].includes(item.status)
@@ -267,6 +276,7 @@ export function createMemoryBetLedger(initialEvents = []) {
         version: 1,
 
         user_id: userId,
+        owner_id: ownerId || PERSONAL_OWNER_ID,
 
         bet_count: bets.length,
         pending_count: bets.filter((item) => item.status === "pending").length,
@@ -297,15 +307,16 @@ export function createMemoryBetLedger(initialEvents = []) {
       };
     },
 
-    async exportJson(userId = DEFAULT_LOCAL_USER_ID) {
+    async exportJson(userId = DEFAULT_LOCAL_USER_ID, ownerId = null) {
       return JSON.stringify(
         {
           schema_version: 1,
           exported_at: new Date().toISOString(),
           user_id: userId,
+          owner_id: ownerId || PERSONAL_OWNER_ID,
 
-          bets: await this.list({ userId }),
-          summary: await this.summary(userId),
+          bets: await this.list(ownerId ? { ownerId } : { userId }),
+          summary: await this.summary(userId, ownerId),
         },
         null,
         2

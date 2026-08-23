@@ -1,4 +1,8 @@
-export async function GET() {
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
+
+export async function GET(request) {
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   const configured = Boolean(
     process.env.API_FOOTBALL_KEY && process.env.API_FOOTBALL_BASE_URL
   );

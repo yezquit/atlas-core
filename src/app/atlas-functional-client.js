@@ -1530,13 +1530,14 @@ function JourneyTechnicalDetails({ journey, quoteLedgers, operationalRanking, qu
   );
 }
 
-export default function AtlasFunctionalClient({ competitionGroups, markets, defaultTimezone = "America/Bogota" }) {
+export default function AtlasFunctionalClient({ competitionGroups, markets, defaultTimezone = "America/Bogota", ownerId = "personal" }) {
   const competitions = useMemo(
     () => competitionGroups.flatMap((group) => group.competitions),
     [competitionGroups]
   );
   const initialCompetition = competitions[0] || null;
   const [mainMode, setMainMode] = useState("journey");
+  const [loggingOut, setLoggingOut] = useState(false);
   const [date, setDate] = useState("");
   const [journeyCompetitionKeys, setJourneyCompetitionKeys] = useState(
     initialCompetition ? [initialCompetition.key] : []
@@ -1682,6 +1683,18 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     setCandidateQuotes({});
     setFixtureQuoteLedgers({});
     setSelectedQuoteEntry(null);
+  }
+
+  async function logout() {
+    setLoggingOut(true);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("logout_failed");
+      window.location.assign("/login");
+    } catch {
+      window.alert("No fue posible cerrar la sesión. Inténtalo de nuevo.");
+      setLoggingOut(false);
+    }
   }
 
   function changeDate(value) {
@@ -2013,14 +2026,15 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   return (
     <div className="p2-app">
       <nav className="p2-main-tabs" aria-label="Modos principales">
-        <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Explorar jornada</button>
+        <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Analizar jornada</button>
         <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
         <button type="button" aria-current={mainMode === "live" ? "page" : undefined} onClick={() => setMainMode("live")}>Atlas LIVE</button>
-        <button type="button" aria-current={mainMode === "combinations" ? "page" : undefined} onClick={() => setMainMode("combinations")}>Parlay y Soñadora</button>
-        <button type="button" aria-current={mainMode === "memory" ? "page" : undefined} onClick={() => setMainMode("memory")}>Memoria Atlas</button>
+        <button type="button" aria-current={mainMode === "combinations" ? "page" : undefined} onClick={() => setMainMode("combinations")}>Parlay y Soñadora Atlas</button>
+        <button type="button" aria-current={mainMode === "memory" ? "page" : undefined} onClick={() => setMainMode("memory")}>Memoria Atlas · rendimiento</button>
         <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
         <button type="button" aria-current={mainMode === "bets" ? "page" : undefined} onClick={() => setMainMode("bets")}>Mis apuestas</button>
         <button type="button" className="secondary-button" onClick={startNewSearch}>Nueva búsqueda</button>
+        <button type="button" className="secondary-button p2-logout-button" onClick={logout} disabled={loggingOut} title={`Sesión ${ownerId}`}>{loggingOut ? "Cerrando…" : "Cerrar sesión"}</button>
       </nav>
       <AtlasGlossary />
 
@@ -2036,7 +2050,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
         <section className="p2-mode" aria-labelledby="journey-title">
           <div className="p2-mode-heading">
             <p className="eyebrow">Exploración guiada</p>
-            <h2 id="journey-title">Explorar jornada</h2>
+            <h2 id="journey-title">Analizar jornada</h2>
             <p>Atlas revisa los partidos elegibles y presenta varias opciones útiles para continuar.</p>
           </div>
 

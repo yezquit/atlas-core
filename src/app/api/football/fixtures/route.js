@@ -1,4 +1,5 @@
 import { DATA_LOAD_STATUS } from "@/core/contracts/atlasContracts";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 import { loadFixturesByDateFromServer } from "@/core/services/apiFootballServer";
 
 function httpStatusFor(result) {
@@ -12,6 +13,8 @@ function httpStatusFor(result) {
 }
 
 export async function GET(request) {
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
   const result = await loadFixturesByDateFromServer({
     date: searchParams.get("date") || "",
@@ -23,8 +26,7 @@ export async function GET(request) {
   return Response.json(result, {
     status: httpStatusFor(result),
     headers: {
-      "Cache-Control":
-        "public, max-age=0, s-maxage=300, stale-while-revalidate=60",
+      "Cache-Control": "private, no-store",
     },
   });
 }

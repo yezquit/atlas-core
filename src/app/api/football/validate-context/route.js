@@ -1,8 +1,9 @@
 import { parseGeminiResponse, selectGeminiItems } from "@/core/intelligence/geminiManualContext";
-import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 
 export async function POST(request) {
-  if (!isLocalRequest(request)) return localAccessDeniedResponse();
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   let input;
   try {
     input = await request.json();

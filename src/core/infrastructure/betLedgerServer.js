@@ -70,9 +70,9 @@ export function createFileBetLedger() {
 
       list: (filters) => memory.list(filters),
 
-      summary: (userId) => memory.summary(userId),
+      summary: (userId, ownerId) => memory.summary(userId, ownerId),
 
-      exportJson: (userId) => memory.exportJson(userId),
+      exportJson: (userId, ownerId) => memory.exportJson(userId, ownerId),
 
       directory,
       file,

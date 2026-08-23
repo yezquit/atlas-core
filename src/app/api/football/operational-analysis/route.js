@@ -1,6 +1,6 @@
 import { DATA_LOAD_STATUS } from "@/core/contracts/atlasContracts";
 import { analyzeOperationalFixtureOnServer } from "@/core/services/operationalAnalysisServer";
-import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 
 function statusCode(result) {
   if (result.status === DATA_LOAD_STATUS.SUCCESS) return 200;
@@ -11,7 +11,8 @@ function statusCode(result) {
 }
 
 export async function POST(request) {
-  if (!isLocalRequest(request)) return localAccessDeniedResponse();
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   let input;
   try {
     input = await request.json();

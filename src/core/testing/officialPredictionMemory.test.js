@@ -88,6 +88,7 @@ function settled(status, overrides = {}) {
 test("1. crea el contrato inmutable de official_prediction", () => {
   const item = snapshot();
   assert.equal(item.contract, "OfficialPrediction");
+  assert.equal(item.owner_id, "personal");
   assert.equal(item.resolution.status, "pending");
   assert.equal(Object.isFrozen(item), true);
   assert.equal(Object.isFrozen(item.resolution), true);
@@ -343,7 +344,7 @@ test("29. Memoria Atlas es visible y permite guardar y actualizar resultados", a
     readFile(path.join(appDirectory, "atlas-functional-client.js"), "utf8"),
     readFile(path.join(appDirectory, "atlas-prediction-memory.js"), "utf8"),
   ]);
-  assert.match(client, />Memoria Atlas</);
+  assert.match(client, />Memoria Atlas · rendimiento</);
   assert.match(client, /OfficialPredictionRegistration/);
   assert.match(memory, /Guardar pronóstico oficial/);
   assert.match(memory, /Actualizar resultados/);
@@ -351,11 +352,11 @@ test("29. Memoria Atlas es visible y permite guardar y actualizar resultados", a
   assert.match(memory, /Calibración preliminar/);
 });
 
-test("30. la ruta local expone listar, registrar y resolver", async () => {
+test("30. la ruta autenticada expone listar, registrar y resolver", async () => {
   const testingDirectory = path.dirname(fileURLToPath(import.meta.url));
   const route = await readFile(path.resolve(testingDirectory, "../../app/api/predictions/route.js"), "utf8");
   assert.match(route, /export async function GET/);
   assert.match(route, /export async function POST/);
   assert.match(route, /export async function PATCH/);
-  assert.match(route, /isLocalRequest/);
+  assert.match(route, /requirePersonalSession/);
 });

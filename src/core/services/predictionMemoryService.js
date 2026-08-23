@@ -1,4 +1,8 @@
 import { getApiFootballCompetitionByKey } from "../data/apiFootballLeagues.js";
+import {
+  PERSONAL_OWNER_ID,
+  belongsToPersonalOwner,
+} from "../auth/personalIdentity.js";
 import { fixtureStatTotal } from "../intelligence/intelligenceUtils.js";
 import {
   RESOLVABLE_MARKET_STAT,
@@ -64,6 +68,7 @@ export function createPredictionMemoryService({
   idFactory,
   now = () => new Date().toISOString(),
   liveAnalysisFinder = null,
+  ownerId = PERSONAL_OWNER_ID,
 } = {}) {
   if (!predictionRepositoryFactory || !analysisRepositoryFactory || !idFactory) {
     throw new TypeError("prediction_memory_dependencies_required");
@@ -87,6 +92,7 @@ export function createPredictionMemoryService({
     const prediction = createOfficialPredictionSnapshot(analysis, {
       predictionId: idFactory(),
       registeredAt: now(),
+      ownerId,
     });
     return (await (await repository()).appendPrediction(prediction));
   }
@@ -95,14 +101,14 @@ export function createPredictionMemoryService({
     if (!liveAnalysisFinder) throw new Error("live_analysis_memory_not_configured");
     const analysis = await liveAnalysisFinder(liveAnalysisId);
     if (!analysis) throw new Error("live_analysis_not_found_or_expired");
-    const prediction = createOfficialPredictionSnapshot(analysis, { predictionId: idFactory(), registeredAt: now() });
+    const prediction = createOfficialPredictionSnapshot(analysis, { predictionId: idFactory(), registeredAt: now(), ownerId });
     return (await (await repository()).appendPrediction(prediction));
   }
 
   async function resolveOne({ predictionId, source = "api_football", actualTotal = null }, sharedGateway = null) {
     const store = await repository();
     const prediction = await store.getById(predictionId);
-    if (!prediction) throw new Error("official_prediction_not_found");
+    if (!prediction || !belongsToPersonalOwner(prediction, ownerId)) throw new Error("official_prediction_not_found");
     if (prediction.resolution?.status !== "pending") return { prediction, deduplicated: true, update_status: "already_resolved" };
 
     if (source === "manual_user_input") {
@@ -132,9 +138,9 @@ export function createPredictionMemoryService({
     async overview(filters = {}) {
       const store = await repository();
       return {
-        predictions: await store.list(filters),
-        metrics: await store.metrics(filters),
-        calibration: await store.calibration(filters),
+        predictions: await store.list({ ...filters, ownerId }),
+        metrics: await store.metrics({ ...filters, ownerId }),
+        calibration: await store.calibration({ ...filters, ownerId }),
       };
     },
 
@@ -145,7 +151,7 @@ export function createPredictionMemoryService({
     resolvePending() {
       return enqueueMutation(async () => {
         const store = await repository();
-        const pending = await store.list({ status: "pending" });
+        const pending = await store.list({ status: "pending", ownerId });
         const results = [];
         const sharedGateway = gatewayFactory ? gatewayFactory() : null;
         for (const prediction of pending) {

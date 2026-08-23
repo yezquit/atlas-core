@@ -1,5 +1,5 @@
 import { getOperationalHistoryRepository, recordOperationalResult } from "@/core/services/operationalAnalysisServer";
-import { isLocalRequest, localAccessDeniedResponse } from "@/core/services/localAccessPolicy";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 import { buildFixtureQuoteLedger } from "@/core/intelligence/fixtureQuoteLedger";
 
 function filters(url) {
@@ -7,7 +7,8 @@ function filters(url) {
 }
 
 export async function GET(request) {
-  if (!isLocalRequest(request)) return localAccessDeniedResponse();
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   const url = new URL(request.url);
   const repository = await getOperationalHistoryRepository();
   if (url.searchParams.get("view") === "fixture_quotes") {
@@ -30,7 +31,8 @@ export async function GET(request) {
 }
 
 export async function PATCH(request) {
-  if (!isLocalRequest(request)) return localAccessDeniedResponse();
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   let input;
   try {
     input = await request.json();
@@ -52,7 +54,8 @@ export async function PATCH(request) {
 }
 
 export async function DELETE(request) {
-  if (!isLocalRequest(request)) return localAccessDeniedResponse();
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   let input;
   try {
     input = await request.json();

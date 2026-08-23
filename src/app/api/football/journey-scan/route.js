@@ -1,4 +1,5 @@
 import { DATA_LOAD_STATUS } from "@/core/contracts/atlasContracts";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 import { mergeJourneyExplorations } from "@/core/intelligence/atlasCombinationEngine";
 import { scanSportsJourneyOnServer } from "@/core/services/sportsIntelligenceServer";
 
@@ -11,6 +12,8 @@ function statusCode(result) {
 }
 
 export async function POST(request) {
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   let input;
   try {
     input = await request.json();

@@ -1,4 +1,5 @@
 import { DATA_LOAD_STATUS } from "@/core/contracts/atlasContracts";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 import { runAtlasFixtureAnalysisOnServer } from "@/core/services/atlasAnalysisServer";
 
 function httpStatusFor(result) {
@@ -13,6 +14,8 @@ function httpStatusFor(result) {
 }
 
 export async function POST(request) {
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   let input;
   try {
     input = await request.json();

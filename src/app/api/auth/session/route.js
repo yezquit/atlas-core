@@ -5,11 +5,10 @@ export async function GET(request) {
   if (!access.ok) return access.response;
   return Response.json(
     {
-      status: "unavailable",
-      errorCode: "route_deprecated",
-      message:
-        "La búsqueda por nombres fue deshabilitada. Usa fecha, liga y selección explícita por fixture ID.",
+      status: "success",
+      owner_id: access.session.ownerId,
+      expires_at: access.session.expiresAt,
     },
-    { status: 410 }
+    { headers: { "Cache-Control": "no-store" } }
   );
 }

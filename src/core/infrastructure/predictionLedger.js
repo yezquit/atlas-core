@@ -1,4 +1,5 @@
 import { calculateOfficialPredictionCalibration, calculateOfficialPredictionMetrics } from "../intelligence/officialPrediction.js";
+import { belongsToPersonalOwner } from "../auth/personalIdentity.js";
 
 export function createMemoryPredictionLedger(initialEvents = []) {
   const events = [...initialEvents];
@@ -33,6 +34,7 @@ export function createMemoryPredictionLedger(initialEvents = []) {
     },
     async list(filters = {}) {
       return materialized().filter((item) =>
+        (!filters.ownerId || belongsToPersonalOwner(item, filters.ownerId)) &&
         (!filters.status || item.resolution?.status === filters.status) &&
         (!filters.market || item.market_family === filters.market) &&
         (!filters.mode || item.mode === filters.mode) &&

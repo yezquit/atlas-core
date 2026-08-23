@@ -1,8 +1,13 @@
 import AtlasFunctionalClient from "./atlas-functional-client";
 import { groupApiFootballCompetitions } from "@/core/data/apiFootballLeagues";
+import { currentPersonalSession } from "@/core/auth/personalSessionServer";
 import { SPORTS_MARKETS } from "@/core/intelligence/marketEngine";
+import { redirect } from "next/navigation";
 
-export default function Home() {
+export default async function Home() {
+  const session = await currentPersonalSession();
+  if (!session) redirect("/login");
+
   const competitionGroups = groupApiFootballCompetitions();
   const defaultTimezone = process.env.ATLAS_DEFAULT_TIMEZONE || "America/Bogota";
 
@@ -22,6 +27,7 @@ export default function Home() {
           competitionGroups={competitionGroups}
           markets={SPORTS_MARKETS}
           defaultTimezone={defaultTimezone}
+          ownerId={session.ownerId}
         />
       </section>
     </main>

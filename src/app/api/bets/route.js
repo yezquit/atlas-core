@@ -5,10 +5,7 @@ import {
   registerTrackedBet,
   settleTrackedBet,
 } from "@/core/services/betTrackerServer";
-import {
-  isLocalRequest,
-  localAccessDeniedResponse,
-} from "@/core/services/localAccessPolicy";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 
 function filters(url) {
   const result = {};
@@ -31,9 +28,8 @@ function filters(url) {
 }
 
 export async function GET(request) {
-  if (!isLocalRequest(request)) {
-    return localAccessDeniedResponse();
-  }
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
 
   const url = new URL(request.url);
 
@@ -71,9 +67,8 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  if (!isLocalRequest(request)) {
-    return localAccessDeniedResponse();
-  }
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
 
   let input;
 
@@ -163,9 +158,8 @@ export async function POST(request) {
 }
 
 export async function PATCH(request) {
-  if (!isLocalRequest(request)) {
-    return localAccessDeniedResponse();
-  }
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
 
   let input;
 

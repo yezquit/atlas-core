@@ -1,8 +1,9 @@
 import { listApiFootballLeagues } from "@/core/data/apiFootballLeagues";
+import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
 
-export const dynamic = "force-static";
-
-export async function GET() {
+export async function GET(request) {
+  const access = requirePersonalSession(request);
+  if (!access.ok) return access.response;
   const leagues = listApiFootballLeagues();
 
   return Response.json(
@@ -19,8 +20,7 @@ export async function GET() {
     },
     {
       headers: {
-        "Cache-Control":
-          "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600",
+        "Cache-Control": "private, no-store",
       },
     }
   );

@@ -1,5 +1,9 @@
 import { calculateCalibration } from "./resultCalibration.js";
 import { buildSimpleDirectorPresentation } from "../modules/directorAtlas.js";
+import {
+  PERSONAL_OWNER_ID,
+  belongsToPersonalOwner,
+} from "../auth/personalIdentity.js";
 
 export const OFFICIAL_PREDICTION_STATUS = Object.freeze({
   PENDING: "pending",
@@ -166,6 +170,7 @@ export function createOfficialPredictionSnapshot(analysis, {
   predictionId,
   registeredAt = new Date().toISOString(),
   publicDecision = null,
+  ownerId = PERSONAL_OWNER_ID,
 } = {}) {
   const eligibility = officialPredictionEligibility(analysis, publicDecision);
   if (!eligibility.eligible) {
@@ -188,6 +193,7 @@ export function createOfficialPredictionSnapshot(analysis, {
     const snapshot = analysis.snapshot;
     return deepFreeze({
       contract: "OfficialPrediction", version: 1, prediction_id: predictionId,
+      owner_id: ownerId,
       fingerprint: officialPredictionFingerprint(analysis), source_analysis_id: analysis.analysis_id,
       fixture_id: Number(snapshot.fixture_id), kickoff_utc: snapshot.kickoff_utc || null,
       issued_at: snapshot.captured_at, registered_at: registeredAt,
@@ -212,6 +218,7 @@ export function createOfficialPredictionSnapshot(analysis, {
     contract: "OfficialPrediction",
     version: 1,
     prediction_id: predictionId,
+    owner_id: ownerId,
     fingerprint: officialPredictionFingerprint(analysis),
     source_analysis_id: analysis.analysis_id,
     fixture_id: Number(analysis.fixture_id ?? fixture.fixture_id),
@@ -358,7 +365,11 @@ function liveMinuteBucket(item) {
 }
 
 export function calculateOfficialPredictionMetrics(predictions = [], filters = {}) {
-  const items = predictions.filter((item) => item?.contract === "OfficialPrediction" && (!filters.mode || item.mode === filters.mode));
+  const items = predictions.filter((item) =>
+    item?.contract === "OfficialPrediction" &&
+    (!filters.ownerId || belongsToPersonalOwner(item, filters.ownerId)) &&
+    (!filters.mode || item.mode === filters.mode)
+  );
   return deepFreeze({
     contract: "OfficialPredictionMetrics",
     version: 1,
@@ -384,6 +395,7 @@ function calibrationLabel(predicted, observed) {
 
 export function calculateOfficialPredictionCalibration(predictions = [], filters = {}) {
   const records = predictions
+    .filter((item) => !filters.ownerId || belongsToPersonalOwner(item, filters.ownerId))
     .filter((item) => !filters.mode || item.mode === filters.mode)
     .filter((item) => [OFFICIAL_PREDICTION_STATUS.HIT, OFFICIAL_PREDICTION_STATUS.MISS].includes(item.resolution?.status))
     .map((item) => ({

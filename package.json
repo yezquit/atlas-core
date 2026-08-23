@@ -3,10 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
+    "dev:lan": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
+    "start:lan": "next start -H 0.0.0.0",
+    "auth:configure": "node scripts/configure-personal-auth.mjs",
     "lint": "eslint",
     "test": "node --test src/core/testing/*.test.js src/core/testing/atlasTrialCases.js",
     "verify:phase2": "node scripts/verify-phase-2.mjs",

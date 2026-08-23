@@ -1,6 +1,10 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import {
+  PERSONAL_OWNER_ID,
+  belongsToPersonalOwner,
+} from "../auth/personalIdentity.js";
 
 import {
   DEFAULT_LOCAL_USER_ID,
@@ -47,7 +51,7 @@ export async function registerTrackedBet({
   const ledger = await betStore.repository();
 
   const duplicate = (await ledger.list({
-    userId: DEFAULT_LOCAL_USER_ID,
+    ownerId: PERSONAL_OWNER_ID,
   })).find((bet) => bet?.analysis_id === analysis.analysis_id);
 
   if (duplicate) {
@@ -60,6 +64,7 @@ export async function registerTrackedBet({
   const bet = createBetRecord({
     betId: randomUUID(),
     userId: DEFAULT_LOCAL_USER_ID,
+    ownerId: PERSONAL_OWNER_ID,
     analysisId: analysis.analysis_id,
     fixtureId: fixture.fixture_id,
     competition: fixture.competition || null,
@@ -98,20 +103,20 @@ export async function listMyTrackedBets(filters = {}) {
 
   return ledger.list({
     ...filters,
-    userId: DEFAULT_LOCAL_USER_ID,
+    ownerId: PERSONAL_OWNER_ID,
   });
 }
 
 export async function getMyBetSummary() {
   const ledger = await betStore.repository();
-  return ledger.summary(DEFAULT_LOCAL_USER_ID);
+  return ledger.summary(DEFAULT_LOCAL_USER_ID, PERSONAL_OWNER_ID);
 }
 
 export async function getTrackedBetById(betId) {
   const ledger = await betStore.repository();
   const bet = await ledger.getById(betId);
 
-  if (!bet || bet.user_id !== DEFAULT_LOCAL_USER_ID) {
+  if (!bet || !belongsToPersonalOwner(bet)) {
     return null;
   }
 
@@ -127,7 +132,7 @@ export async function settleTrackedBet({
   const ledger = await betStore.repository();
   const current = await ledger.getById(betId);
 
-  if (!current || current.user_id !== DEFAULT_LOCAL_USER_ID) {
+  if (!current || !belongsToPersonalOwner(current)) {
     throw new Error("No existe esa apuesta para el usuario local.");
   }
 
@@ -149,5 +154,5 @@ export async function settleTrackedBet({
 
 export async function exportMyTrackedBets() {
   const ledger = await betStore.repository();
-  return ledger.exportJson(DEFAULT_LOCAL_USER_ID);
+  return ledger.exportJson(DEFAULT_LOCAL_USER_ID, PERSONAL_OWNER_ID);
 }
