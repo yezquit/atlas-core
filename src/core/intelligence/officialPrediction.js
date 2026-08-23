@@ -77,13 +77,23 @@ function currentQuote(analysis) {
     quote_id: quote.quote_id || null,
     bookmaker: quote.bookmaker_name || null,
     decimal_odds: finiteNumber(quote.decimal_odds),
-    observed_at: quote.updated_at || quote.consulted_at || null,
+    observed_at: quote.updated_at || quote.consulted_at || quote.observed_at || quote.fetched_at || null,
     verification_status: quote.verification_status || quote.source_status || null,
     freshness: quote.freshness,
   };
 }
 
+function isLiveAnalysis(analysis) {
+  return analysis?.mode === "live" && analysis?.snapshot?.mode === "live";
+}
+
+function livePublicDecision(analysis) {
+  const decision = analysis?.director?.analysis_decision || {};
+  return { status: decision.status || "no", label: decision.label || null, explanation: decision.explanation || null, price_status: analysis?.director?.price_assessment?.status || null };
+}
+
 export function officialPredictionPublicDecision(analysis) {
+  if (isLiveAnalysis(analysis)) return livePublicDecision(analysis);
   const presentation = buildSimpleDirectorPresentation(analysis?.director, {
     geminiItems: analysis?.gemini_context?.selected_items || [],
   });
@@ -101,6 +111,21 @@ export function officialPredictionEligibility(analysis, publicDecision = null) {
   const line = finiteNumber(sports.line ?? director.line);
   const resolvedPublicDecision = publicDecision || officialPredictionPublicDecision(analysis);
   const reasons = [];
+
+  if (isLiveAnalysis(analysis)) {
+    const snapshot = analysis.snapshot;
+    if (!analysis.analysis_id) reasons.push("analysis_id_missing");
+    if (analysis.status !== "success") reasons.push("live_analysis_not_successful");
+    if (!snapshot.snapshot_id || !snapshot.captured_at) reasons.push("live_snapshot_missing");
+    if (!Number.isInteger(Number(snapshot.fixture_id)) || Number(snapshot.fixture_id) <= 0) reasons.push("fixture_id_missing");
+    if (sports.status !== "sports_candidate") reasons.push("director_sports_support_required");
+    if (resolvedPublicDecision.status !== "yes") reasons.push("public_director_support_required");
+    if (!director.market_evaluated?.family) reasons.push("market_family_missing");
+    if (!direction) reasons.push("direction_missing");
+    if (line === null) reasons.push("line_missing");
+    if (!fixture.home_team || !fixture.away_team) reasons.push("teams_missing");
+    return deepFreeze({ contract: "OfficialPredictionEligibility", version: 1, eligible: reasons.length === 0, status: reasons.length === 0 ? "official_prediction_eligible" : "candidate_only", reasons });
+  }
 
   if (!analysis?.analysis_id) reasons.push("analysis_id_missing");
   if (analysis?.inputs?.reanalysis !== true) reasons.push("completed_reanalysis_required");
@@ -128,8 +153,8 @@ export function officialPredictionFingerprint(analysis) {
   const director = analysis?.director || {};
   const sports = director.sports_verdict || {};
   return [
-    "official_prediction_v1",
-    analysis?.analysis_id,
+    isLiveAnalysis(analysis) ? "official_prediction_live_v1" : "official_prediction_v1",
+    ...(isLiveAnalysis(analysis) ? [analysis?.snapshot?.snapshot_id] : [analysis?.analysis_id]),
     analysis?.fixture_id ?? director.fixture?.fixture_id,
     director.market_evaluated?.family,
     normalizedDirection(sports.direction || director.selection),
@@ -158,6 +183,30 @@ export function createOfficialPredictionSnapshot(analysis, {
   const uncertaintyLow = uncertaintyFrom(analysis, "low");
   const uncertaintyHigh = uncertaintyFrom(analysis, "high");
   const publicPresentation = publicDecision || officialPredictionPublicDecision(analysis);
+
+  if (isLiveAnalysis(analysis)) {
+    const snapshot = analysis.snapshot;
+    return deepFreeze({
+      contract: "OfficialPrediction", version: 1, prediction_id: predictionId,
+      fingerprint: officialPredictionFingerprint(analysis), source_analysis_id: analysis.analysis_id,
+      fixture_id: Number(snapshot.fixture_id), kickoff_utc: snapshot.kickoff_utc || null,
+      issued_at: snapshot.captured_at, registered_at: registeredAt,
+      competition: snapshot.competition || null, competition_key: analysis.competition_key || null,
+      season: snapshot.season ?? null, home_team: snapshot.home_team, away_team: snapshot.away_team,
+      mode: "live", market_family: director.market_evaluated.family,
+      selection: sports.selection || director.selection, direction: normalizedDirection(sports.direction || director.selection),
+      line: finiteNumber(sports.line ?? director.line), active_quote: quote,
+      estimated_probability: null, probability_status: "unavailable", uncertainty: { low: null, high: null },
+      confidence_score: finiteNumber(director.analysis_confidence_score), sports_score: finiteNumber(sports.sports_score),
+      public_director_decision: { status: publicPresentation.status, label: publicPresentation.label || null, explanation: publicPresentation.explanation || null },
+      economic_state: { price_status: director.price_assessment?.status || "unavailable", market_suitability: null, decision_code: director.decision_code || null, price_decision_status: publicPresentation.price_status || null },
+      reasons: [...new Set([...(director.simple_reasons || []), ...(director.reasons || [])])].slice(0, 5),
+      versions: { operational_engine: analysis.pipeline_version || null, director_contract: `${director.contract || "DirectorLiveVerdict"}@${director.version || "unknown"}`, probability_methodology: null, scout_ranker: null, scout_candidate_id: null },
+      live_context: { snapshot_id: snapshot.snapshot_id, minute: snapshot.minute, status: snapshot.status, score_at_prediction: snapshot.score, live_stats_snapshot: snapshot.statistics, live_timestamp: snapshot.captured_at },
+      source_metadata: { competition_key: analysis.competition_key || null, requested_date: snapshot.kickoff_utc?.slice(0, 10) || null, season: snapshot.season ?? null, timezone: null, evidence_refs: [], gemini_context_id: null, line_origin: "live_snapshot_projection" },
+      resolution: { status: OFFICIAL_PREDICTION_STATUS.PENDING, actual_total: null, source: null, resolved_at: null, reason: null },
+    });
+  }
 
   return deepFreeze({
     contract: "OfficialPrediction",
@@ -299,8 +348,17 @@ function scoreBucket(value) {
   return "80-100";
 }
 
-export function calculateOfficialPredictionMetrics(predictions = []) {
-  const items = predictions.filter((item) => item?.contract === "OfficialPrediction");
+function liveMinuteBucket(item) {
+  const minute = finiteNumber(item.live_context?.minute);
+  if (minute === null) return "not_available";
+  if (minute <= 30) return "1-30";
+  if (minute <= 60) return "31-60";
+  if (minute <= 75) return "61-75";
+  return "76+";
+}
+
+export function calculateOfficialPredictionMetrics(predictions = [], filters = {}) {
+  const items = predictions.filter((item) => item?.contract === "OfficialPrediction" && (!filters.mode || item.mode === filters.mode));
   return deepFreeze({
     contract: "OfficialPredictionMetrics",
     version: 1,
@@ -312,6 +370,8 @@ export function calculateOfficialPredictionMetrics(predictions = []) {
     by_sports_score_bucket: groupBy(items, (item) => scoreBucket(item.sports_score)),
     by_period: groupBy(items, (item) => text(item.issued_at).slice(0, 7) || "not_available"),
     by_engine_version: groupBy(items, (item) => item.versions?.operational_engine),
+    by_mode: groupBy(items, (item) => item.mode),
+    by_live_minute_bucket: groupBy(items.filter((item) => item.mode === "live"), liveMinuteBucket),
   });
 }
 
@@ -322,8 +382,9 @@ function calibrationLabel(predicted, observed) {
   return gap > 0 ? "overconfident" : "underconfident";
 }
 
-export function calculateOfficialPredictionCalibration(predictions = []) {
+export function calculateOfficialPredictionCalibration(predictions = [], filters = {}) {
   const records = predictions
+    .filter((item) => !filters.mode || item.mode === filters.mode)
     .filter((item) => [OFFICIAL_PREDICTION_STATUS.HIT, OFFICIAL_PREDICTION_STATUS.MISS].includes(item.resolution?.status))
     .map((item) => ({
       outcome: item.resolution.status,

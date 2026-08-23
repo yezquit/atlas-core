@@ -43,8 +43,8 @@ export function createFilePredictionLedger({ directory, file = path.join(/* turb
       },
       getById: (id) => memory.getById(id),
       list: (filters) => memory.list(filters),
-      metrics: () => memory.metrics(),
-      calibration: () => memory.calibration(),
+      metrics: (filters) => memory.metrics(filters),
+      calibration: (filters) => memory.calibration(filters),
       directory,
       file,
     };

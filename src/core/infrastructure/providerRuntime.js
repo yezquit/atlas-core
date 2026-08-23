@@ -274,10 +274,11 @@ export function createProviderRuntime({
     pathname,
     query = {},
     ttlSeconds = 300,
+    cacheScope = "",
     tags = [],
     externalIds = {},
   }) {
-    const key = stableKey(pathname, query);
+    const key = stableKey(cacheScope ? `${pathname}#${cacheScope}` : pathname, query);
     const cached = await cache.get(key);
     if (cached) {
       metrics.cacheHits += 1;

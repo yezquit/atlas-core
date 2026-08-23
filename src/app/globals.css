@@ -5368,6 +5368,46 @@ body[data-atlas-view="technical"] .view-mode-buttons {
     padding: 15px;
   }
 }
+
+.p2-live,
+.p2-live-analysis { display: grid; gap: 20px; }
+.p2-live-toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.p2-live-toolbar p { margin: 0; color: var(--muted); }
+.p2-live-fixtures,
+.p2-live-markets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.p2-live-fixture,
+.p2-live-markets article,
+.p2-live-director,
+.p2-live-manual { border: 1px solid var(--line); border-radius: 18px; padding: 18px; background: var(--card-soft); }
+.p2-live-fixture { display: grid; gap: 10px; }
+.p2-live-fixture h3,
+.p2-live-fixture p { margin: 0; }
+.p2-live-score { font-size: 2rem; }
+.p2-live-director-yes { border-color: rgba(49, 209, 124, 0.65); }
+.p2-live-director-wait { border-color: rgba(245, 158, 11, 0.65); }
+.p2-live-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.p2-live-stats span { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; }
+.p2-live-stats small { color: var(--muted); }
+.p2-live-manual-grid { display: grid; grid-template-columns: 2fr 1fr auto; gap: 12px; align-items: end; margin-top: 14px; }
+.p2-live-manual-grid label { display: grid; gap: 6px; }
+.p2-live-manual-grid input,
+.p2-live-manual-grid select { width: 100%; }
+.p2-live-analysis pre { max-height: 480px; overflow: auto; white-space: pre-wrap; }
+.p2-memory-mode-filter { display: flex; gap: 16px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.p2-memory-mode-filter legend { padding: 0 6px; }
+
+@media (max-width: 900px) {
+  .p2-live-fixtures,
+  .p2-live-markets { grid-template-columns: 1fr 1fr; }
+  .p2-live-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .p2-live-fixtures,
+  .p2-live-markets,
+  .p2-live-manual-grid,
+  .p2-live-stats { grid-template-columns: 1fr; }
+}
 /* Atlas combination builder: Parlay 2–4 and Soñadora 5–15 */
 .p2-combination-builder {
   display: grid;

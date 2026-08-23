@@ -11,7 +11,11 @@ async function automaticOutcome(prediction, gateway) {
   if (!competition) return { state: "pending", reason: "competition_not_available_for_result_update" };
   let fixtureResult;
   try {
-    fixtureResult = await gateway.loadFixtureById({
+    fixtureResult = prediction.mode === "live" ? await gateway.loadLiveFixtureById({
+      fixtureId: prediction.fixture_id,
+      competition,
+      timezone: prediction.source_metadata?.timezone,
+    }) : await gateway.loadFixtureById({
       fixtureId: prediction.fixture_id,
       competition,
       date: prediction.source_metadata?.requested_date,
@@ -59,6 +63,7 @@ export function createPredictionMemoryService({
   gatewayFactory,
   idFactory,
   now = () => new Date().toISOString(),
+  liveAnalysisFinder = null,
 } = {}) {
   if (!predictionRepositoryFactory || !analysisRepositoryFactory || !idFactory) {
     throw new TypeError("prediction_memory_dependencies_required");
@@ -83,6 +88,14 @@ export function createPredictionMemoryService({
       predictionId: idFactory(),
       registeredAt: now(),
     });
+    return (await (await repository()).appendPrediction(prediction));
+  }
+
+  async function registerLive({ liveAnalysisId }) {
+    if (!liveAnalysisFinder) throw new Error("live_analysis_memory_not_configured");
+    const analysis = await liveAnalysisFinder(liveAnalysisId);
+    if (!analysis) throw new Error("live_analysis_not_found_or_expired");
+    const prediction = createOfficialPredictionSnapshot(analysis, { predictionId: idFactory(), registeredAt: now() });
     return (await (await repository()).appendPrediction(prediction));
   }
 
@@ -112,12 +125,16 @@ export function createPredictionMemoryService({
       return enqueueMutation(() => register(input));
     },
 
+    registerLive(input) {
+      return enqueueMutation(() => registerLive(input));
+    },
+
     async overview(filters = {}) {
       const store = await repository();
       return {
         predictions: await store.list(filters),
-        metrics: await store.metrics(),
-        calibration: await store.calibration(),
+        metrics: await store.metrics(filters),
+        calibration: await store.calibration(filters),
       };
     },
 

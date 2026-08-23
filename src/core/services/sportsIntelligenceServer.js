@@ -13,6 +13,7 @@ export const SPORTS_REQUEST_BUDGETS = Object.freeze({
   journey: 2500,
   profile: 30,
   reanalysis: 60,
+  live: 12,
 });
 
 const persistentCache = createPersistentFileCache();

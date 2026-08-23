@@ -166,6 +166,48 @@ export function createSportsDataGateway(runtime) {
     });
   }
 
+  async function loadLiveFixtures({ competitions = [], timezone }) {
+    const operationalTimezone = normalizeTimeZone(timezone);
+    const competitionIds = [...new Set(competitions.map((item) => Number(item?.id)).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!competitionIds.length) return unavailable("live_competitions_required", "No hay competiciones LIVE configuradas.");
+    const result = await runtime.request({
+      pathname: "/fixtures",
+      query: { live: competitionIds.join("-"), timezone: operationalTimezone },
+      ttlSeconds: 15,
+      tags: ["fixtures:live", `timezone:${operationalTimezone}`],
+      externalIds: { competitionIds, timezone: operationalTimezone },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const fixtures = normalizeFootballFixtures(result.response, { timezone: operationalTimezone })
+      .filter((fixture) => competitionIds.includes(Number(fixture.competition.id)));
+    return {
+      status: fixtures.length ? DATA_LOAD_STATUS.SUCCESS : DATA_LOAD_STATUS.EMPTY,
+      fixtures,
+      requestMeta: result.requestMeta,
+      timezone: operationalTimezone,
+      message: fixtures.length ? `${fixtures.length} partido(s) LIVE disponible(s).` : "No hay partidos LIVE en las competiciones configuradas.",
+    };
+  }
+
+  async function loadLiveFixtureById({ fixtureId, competition, timezone }) {
+    const operationalTimezone = normalizeTimeZone(timezone);
+    const result = await runtime.request({
+      pathname: "/fixtures",
+      query: { id: fixtureId, timezone: operationalTimezone },
+      ttlSeconds: 15,
+      tags: [`fixture:${fixtureId}`, "fixture:live", `timezone:${operationalTimezone}`],
+      externalIds: { fixtureId, competitionId: competition?.id, timezone: operationalTimezone },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const exact = normalizeFootballFixtures(result.response, { timezone: operationalTimezone })
+      .filter((fixture) => Number(fixture.fixtureId) === Number(fixtureId));
+    if (exact.length !== 1) return unavailable(exact.length > 1 ? "ambiguous_live_fixture_id" : "live_fixture_not_found", exact.length > 1 ? "El proveedor devolvió un fixture LIVE ambiguo." : "El fixture LIVE no está disponible.", { fixture: null, requestMeta: result.requestMeta });
+    if (!competition || Number(exact[0].competition.id) !== Number(competition.id)) {
+      return unavailable("live_fixture_competition_mismatch", "El fixture LIVE no pertenece a la competición seleccionada.", { fixture: null, requestMeta: result.requestMeta });
+    }
+    return successful(result.response, { fixture: exact[0], requestMeta: result.requestMeta });
+  }
+
   async function loadLeagueWindow({ competition, season, from, to }) {
     const current = await runtime.request({
       pathname: "/fixtures",
@@ -301,6 +343,26 @@ export function createSportsDataGateway(runtime) {
     };
   }
 
+  async function loadLiveFixtureStatistics(fixtureId) {
+    const result = await runtime.request({
+      pathname: "/fixtures/statistics",
+      query: { fixture: fixtureId },
+      ttlSeconds: 60,
+      cacheScope: "live",
+      tags: [`fixture:${fixtureId}`, "statistics:live"],
+      externalIds: { fixtureId, statisticsMode: "live" },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const statistics = normalizeFixtureStatistics(result.response);
+    return {
+      status: statistics.qualityFlags.hasStatistics ? DATA_LOAD_STATUS.SUCCESS : DATA_LOAD_STATUS.EMPTY,
+      statistics: statistics.qualityFlags.hasStatistics ? statistics : null,
+      fixtureId: Number(fixtureId),
+      statisticsMode: "live",
+      requestMeta: result.requestMeta,
+    };
+  }
+
   async function loadFixtureOdds(fixtureId) {
     const result = await runtime.request({
       pathname: "/odds",
@@ -318,6 +380,25 @@ export function createSportsDataGateway(runtime) {
       response: exact,
       fixtureId: Number(fixtureId),
       warnings: exact.length === result.response.length ? [] : ["provider_fixture_mismatch"],
+      requestMeta: result.requestMeta,
+    };
+  }
+
+  async function loadLiveFixtureOdds(fixtureId) {
+    const result = await runtime.request({
+      pathname: "/odds/live",
+      query: { fixture: fixtureId },
+      ttlSeconds: 15,
+      tags: [`fixture:${fixtureId}`, "odds:live"],
+      externalIds: { fixtureId, oddsMode: "live" },
+    });
+    if (result.status !== DATA_LOAD_STATUS.SUCCESS) return result;
+    const exact = result.response.filter((item) => Number(item?.fixture?.id ?? item?.fixture_id) === Number(fixtureId));
+    return {
+      status: exact.length ? DATA_LOAD_STATUS.SUCCESS : DATA_LOAD_STATUS.EMPTY,
+      response: exact,
+      fixtureId: Number(fixtureId),
+      oddsMode: "live",
       requestMeta: result.requestMeta,
     };
   }
@@ -379,10 +460,14 @@ export function createSportsDataGateway(runtime) {
     loadCompetitionMetadata,
     loadFixturesForDate,
     loadFixtureById,
+    loadLiveFixtures,
+    loadLiveFixtureById,
     loadLeagueWindow,
     loadTeamRecent,
     loadFixtureStatistics,
+    loadLiveFixtureStatistics,
     loadFixtureOdds,
+    loadLiveFixtureOdds,
     loadFixtureLineups,
     loadFixtureInjuries,
     loadStandings,

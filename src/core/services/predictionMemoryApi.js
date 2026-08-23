@@ -4,7 +4,7 @@ function jsonError(errorCode, message, status = 400, details = null) {
 
 export async function predictionApiGet(request, service) {
   const url = new URL(request.url);
-  const filters = Object.fromEntries(["status", "market", "competition"].map((key) => [key, url.searchParams.get(key)]).filter(([, value]) => value));
+  const filters = Object.fromEntries(["status", "market", "competition", "mode"].map((key) => [key, url.searchParams.get(key)]).filter(([, value]) => value));
   return Response.json({ status: "success", ...(await service.overview(filters)) });
 }
 
@@ -15,9 +15,10 @@ export async function predictionApiPost(request, service) {
   } catch {
     return jsonError("invalid_json", "La solicitud no contiene JSON válido.");
   }
-  if (!input?.analysisId) return jsonError("analysis_id_required", "Indica la versión de análisis que emitió el pronóstico.");
+  if (input?.mode === "live" && !input?.liveAnalysisId) return jsonError("live_analysis_id_required", "Indica el snapshot LIVE que emitió el pronóstico.");
+  if (input?.mode !== "live" && !input?.analysisId) return jsonError("analysis_id_required", "Indica la versión de análisis que emitió el pronóstico.");
   try {
-    const result = await service.register({ analysisId: input.analysisId });
+    const result = input.mode === "live" ? await service.registerLive({ liveAnalysisId: input.liveAnalysisId }) : await service.register({ analysisId: input.analysisId });
     return Response.json({ status: "success", message: result.deduplicated ? "El mismo snapshot ya estaba guardado." : "Pronóstico oficial guardado.", ...result }, { status: result.deduplicated ? 200 : 201 });
   } catch (error) {
     const conflict = error?.message === "analysis_is_not_an_official_prediction";

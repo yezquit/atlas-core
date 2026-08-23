@@ -61,10 +61,11 @@ function PredictionCard({ prediction, onUpdate, busy }) {
   const [actualTotal, setActualTotal] = useState("");
   const resolution = prediction.resolution || {};
   return <article className={`p2-memory-entry p2-memory-entry-${resolution.status}`}>
-    <header><div><p className="eyebrow">{prediction.competition}</p><h3>{prediction.home_team} vs {prediction.away_team}</h3></div><span className="p2-memory-status">{STATUS_LABELS[resolution.status] || resolution.status}</span></header>
+    <header><div><p className="eyebrow">{prediction.competition} · {prediction.mode === "live" ? "LIVE" : "Prepartido"}</p><h3>{prediction.home_team} vs {prediction.away_team}</h3></div><span className="p2-memory-status">{STATUS_LABELS[resolution.status] || resolution.status}</span></header>
     <div className="p2-memory-entry-grid">
       <span><small>Pronóstico</small><strong>{prediction.selection}</strong></span><span><small>Mercado / línea</small><strong>{prediction.market_family} · {prediction.line}</strong></span><span><small>Confianza</small><strong>{prediction.confidence_score === null ? "No disponible" : `${prediction.confidence_score}/100`}</strong></span><span><small>Emitido</small><strong>{dateTime(prediction.issued_at)}</strong></span><span><small>Inicio</small><strong>{dateTime(prediction.kickoff_utc)}</strong></span><span><small>Resultado total</small><strong>{resolution.actual_total ?? "Pendiente"}</strong></span>
     </div>
+    {prediction.mode === "live" ? <p className="p2-memory-result-source">Snapshot: minuto {prediction.live_context?.minute} · marcador {prediction.live_context?.score_at_prediction?.home}-{prediction.live_context?.score_at_prediction?.away}</p> : null}
     {resolution.status === "pending" ? <div className="p2-memory-resolution-actions">
       <button type="button" className="secondary-button" disabled={busy} onClick={() => onUpdate({ predictionId: prediction.prediction_id, source: "api_football" })}>Verificar con datos deportivos</button>
       <label><span>Total real verificado</span><input inputMode="decimal" value={actualTotal} onChange={(event) => setActualTotal(event.target.value)} placeholder="Ej. 9" /></label>
@@ -78,9 +79,10 @@ export default function AtlasPredictionMemory() {
   const [data, setData] = useState({ predictions: [], metrics: null, calibration: null });
   const [status, setStatus] = useState({ kind: "loading", message: "Cargando memoria…" });
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState("");
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/predictions")
+    fetch(`/api/predictions${mode ? `?mode=${mode}` : ""}`)
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.message);
@@ -92,7 +94,7 @@ export default function AtlasPredictionMemory() {
         if (!cancelled) setStatus({ kind: "error", message: error?.message || "No fue posible leer la memoria local." });
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [mode]);
   async function updateResults(input = { scope: "pending" }) {
     setBusy(true);
     setStatus({ kind: "loading", message: "Verificando resultados sin inventar datos…" });
@@ -111,11 +113,13 @@ export default function AtlasPredictionMemory() {
   }
   const metrics = data.metrics || { total: 0, pending: 0, resolved: 0, evaluated: 0, hits: 0, misses: 0, voids: 0, not_evaluable: 0, hit_rate: null, by_market_family: {} };
   return <section className="p2-mode p2-memory" aria-labelledby="memory-title">
-    <div className="p2-mode-heading"><p className="eyebrow">Memoria predictiva</p><h2 id="memory-title">Rendimiento Atlas</h2><p>Lo que Atlas pronosticó antes del partido. Esta memoria es independiente de las apuestas reales del usuario.</p></div>
+    <div className="p2-mode-heading"><p className="eyebrow">Memoria predictiva</p><h2 id="memory-title">Rendimiento Atlas</h2><p>Lo que Atlas pronosticó antes o durante el partido, siempre etiquetado por modo. Esta memoria es independiente de las apuestas reales del usuario.</p></div>
     <div className="p2-memory-toolbar"><button type="button" className="primary-button p2-primary" disabled={busy || metrics.pending === 0} onClick={() => updateResults({ scope: "pending" })}>{busy ? "Verificando…" : "Actualizar resultados"}</button><p className={`p2-memory-notice p2-memory-notice-${status.kind}`} role="status">{status.message}</p></div>
+    <fieldset className="p2-memory-mode-filter"><legend>Separar por momento del pronóstico</legend><label><input type="radio" name="prediction-mode" checked={mode === ""} onChange={() => setMode("")} />Todos</label><label><input type="radio" name="prediction-mode" checked={mode === "prematch"} onChange={() => setMode("prematch")} />Prepartido</label><label><input type="radio" name="prediction-mode" checked={mode === "live"} onChange={() => setMode("live")} />LIVE</label></fieldset>
     <section className="p2-memory-metrics" aria-label="Métricas de asertividad"><MetricCard label="Oficiales" value={metrics.total} /><MetricCard label="Pendientes" value={metrics.pending} /><MetricCard label="Resueltos" value={metrics.resolved} /><MetricCard label="Evaluables" value={metrics.evaluated} /><MetricCard label="Aciertos" value={metrics.hits} /><MetricCard label="Fallos" value={metrics.misses} /><MetricCard label="Nulos" value={metrics.voids} /><MetricCard label="No evaluables" value={metrics.not_evaluable} /><MetricCard label="Tasa de acierto" value={percentage(metrics.hit_rate)} /></section>
     <section className="p2-memory-section" aria-labelledby="memory-market-title"><h3 id="memory-market-title">Asertividad por mercado</h3><p>La tasa usa únicamente aciertos y fallos; nulos y no evaluables no alteran el denominador.</p><MarketMetrics groups={metrics.by_market_family} /></section>
+    <section className="p2-memory-section"><h3>Asertividad por modo</h3><MarketMetrics groups={metrics.by_mode} /><h3>LIVE por tramo de minuto</h3><MarketMetrics groups={metrics.by_live_minute_bucket} /></section>
     <Calibration calibration={data.calibration} />
-    <section className="p2-memory-section" aria-labelledby="memory-recent-title"><h3 id="memory-recent-title">Pronósticos recientes</h3><div className="p2-memory-list">{data.predictions.map((prediction) => <PredictionCard key={prediction.prediction_id} prediction={prediction} onUpdate={updateResults} busy={busy} />)}{!data.predictions.length ? <p>Guarda un dictamen respaldado desde “Analizar partido” para iniciar la memoria.</p> : null}</div></section>
+    <section className="p2-memory-section" aria-labelledby="memory-recent-title"><h3 id="memory-recent-title">Pronósticos recientes</h3><div className="p2-memory-list">{data.predictions.map((prediction) => <PredictionCard key={prediction.prediction_id} prediction={prediction} onUpdate={updateResults} busy={busy} />)}{!data.predictions.length ? <p>Guarda un dictamen respaldado desde “Analizar partido” o “Atlas LIVE” para iniciar la memoria.</p> : null}</div></section>
   </section>;
 }

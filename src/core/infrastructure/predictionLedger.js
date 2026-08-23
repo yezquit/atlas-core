@@ -35,14 +35,15 @@ export function createMemoryPredictionLedger(initialEvents = []) {
       return materialized().filter((item) =>
         (!filters.status || item.resolution?.status === filters.status) &&
         (!filters.market || item.market_family === filters.market) &&
+        (!filters.mode || item.mode === filters.mode) &&
         (!filters.competition || String(item.competition || "").toLowerCase().includes(String(filters.competition).toLowerCase()))
       );
     },
-    async metrics() {
-      return calculateOfficialPredictionMetrics(materialized());
+    async metrics(filters = {}) {
+      return calculateOfficialPredictionMetrics(materialized(), filters);
     },
-    async calibration() {
-      return calculateOfficialPredictionCalibration(materialized());
+    async calibration(filters = {}) {
+      return calculateOfficialPredictionCalibration(materialized(), filters);
     },
     events,
   };
