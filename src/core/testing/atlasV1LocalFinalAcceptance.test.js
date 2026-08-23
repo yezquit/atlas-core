@@ -204,7 +204,7 @@ test("49. opción manual independiente", () => {
 test("50. glosario accesible", async () => assert.match(await readFile(clientPath, "utf8"), /¿Cómo leer Atlas\?/));
 test("51. ayuda touch/click/keyboard", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /<details className="p2-help-term">/); assert.match(source, /<summary aria-label=/); });
 test("52. sports_score no visible como jerga simple", async () => { const source = await readFile(clientPath, "utf8"); const simple = source.slice(source.indexOf("function ScoutResult"), source.indexOf("function DirectorResult")); assert.doesNotMatch(simple, />Sports score</); });
-test("53. traducciones", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /stale: "Vencido"/); assert.match(source, /user_reported_current: "Vigente, reportada por el usuario"/); });
+test("53. traducciones", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /stale: "Desactualizada"/); assert.match(source, /user_reported_current: "Vigente, reportada por el usuario"/); });
 test("54. modo sencillo máximo 3 razones", async () => assert.match(await readFile(clientPath, "utf8"), /director\.simple_reasons \|\| director\.reasons \|\| \[\]\)\.slice\(0, 3\)/));
 test("55. modo sencillo máximo 3 riesgos", async () => assert.match(await readFile(clientPath, "utf8"), /fixtureRisks = \(director\.red_team\?\.items \|\| \[\]\)[\s\S]*\.slice\(0, 3\)/));
 test("56. experto conserva detalle", async () => { const source = await readFile(clientPath, "utf8"); assert.match(source, /expert-scout/); assert.match(source, /expert-operational-ranking/); });

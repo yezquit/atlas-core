@@ -44,6 +44,12 @@ function candidate(index, overrides = {}) {
     selection: quote.selection,
     sportsScore: overrides.sportsScore ?? 80 - index,
     probability: 0.6,
+    uncertaintyLow: 0.48,
+    uncertaintyHigh: 0.72,
+    sampleSize: 24,
+    generalRank: index,
+    familyRank: 1,
+    status: "sports_candidate_pending_price",
     active_quote: overrides.activeQuote === null ? null : quote,
     price_status: overrides.priceStatus ?? "favorable_preliminary",
     price_gap: overrides.priceGap ?? 0.05,
@@ -113,27 +119,39 @@ test("no fuerza combinación con candidatos insuficientes", () => {
   assert.match(result.director_message, /no forzará/i);
 });
 
-test("cuota stale no es elegible", () => {
+test("cuota stale no elimina elegibilidad deportiva y no se usa económicamente", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { quote: { freshness: "stale", stale: true, verification_status: "stale", source_status: "stale" } }));
-  assert.equal(inspection.eligible, false);
-  assert.ok(inspection.reasons.includes("quote_not_current"));
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.economic_price_status, "stale");
+  assert.equal(inspection.price_usable, false);
 });
 
-test("cuota decimal inválida no es elegible", () => {
+test("cuota decimal inválida no elimina elegibilidad deportiva", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { decimalOdds: 1 }));
-  assert.equal(inspection.eligible, false);
-  assert.ok(inspection.reasons.includes("invalid_decimal_odds"));
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.economic_price_status, "invalid");
+  assert.equal(inspection.price_usable, false);
 });
 
-test("línea incompatible no es elegible", () => {
+test("línea incompatible se separa de la elegibilidad deportiva", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { quote: { line: 2.5 } }));
-  assert.equal(inspection.eligible, false);
-  assert.ok(inspection.reasons.includes("missing_or_incompatible_quote"));
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.economic_price_status, "incompatible_line");
+  assert.equal(inspection.price_usable, false);
 });
 
-test("familia incompatible no es elegible", () => {
+test("familia incompatible no se utiliza económicamente", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { quote: { market_family: "corners" } }));
-  assert.equal(inspection.eligible, false);
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.economic_price_status, "incompatible_market");
+  assert.equal(inspection.price_usable, false);
+});
+
+test("dirección incompatible no se utiliza económicamente", () => {
+  const inspection = inspectCombinationCandidate(candidate(1, { quote: { direction: "under", selection: "Under 1.5" } }));
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.economic_price_status, "incompatible_direction");
+  assert.equal(inspection.price_usable, false);
 });
 
 test("elimina selecciones duplicadas exactas", () => {
@@ -166,11 +184,37 @@ test("automático evita líneas redundantes del mismo fixture", () => {
   assert.equal(result.selections.filter((item) => item.fixture_id === 77).length, 1);
 });
 
+test("Soñadora prioriza fixtures distintos cuando existen alternativas", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { fixtureId: 77, marketId: "goals", sportsScore: 95 }),
+      candidate(2, { fixtureId: 77, marketId: "corners", line: 8.5, sportsScore: 94 }),
+      candidate(3, { sportsScore: 90 }),
+      candidate(4, { sportsScore: 89 }),
+      candidate(5, { sportsScore: 88 }),
+      candidate(6, { sportsScore: 87 }),
+    ],
+    product: "dream",
+    mode: "automatic",
+    selections: 5,
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.selections.filter((item) => item.fixture_id === 77).length, 1);
+});
+
 test("modo manual conserva exactamente las selecciones elegidas", () => {
   const candidates = [candidate(1), candidate(2), candidate(3)];
   const keys = candidates.slice(1).map(combinationSelectionKey);
   const result = buildAtlasCombination({ candidates, product: "parlay", mode: "manual", selections: 2, selectedKeys: keys });
   assert.deepEqual(result.selections.map((item) => item.selection_key).sort(), keys.sort());
+});
+
+test("modo manual conserva la elección y advierte correlación alta", () => {
+  const candidates = [candidate(1, { fixtureId: 77, line: 1.5 }), candidate(2, { fixtureId: 77, line: 2.5 })];
+  const result = buildAtlasCombination({ candidates, product: "parlay", mode: "manual", selections: 2, selectedKeys: candidates.map(combinationSelectionKey) });
+  assert.equal(result.status, "ready");
+  assert.equal(result.correlation.level, "high");
+  assert.equal(result.risk.level, "high");
 });
 
 test("modo manual exige el número exacto", () => {
@@ -187,10 +231,13 @@ test("modo mixto completa las selecciones fijadas", () => {
   assert.ok(result.selections.some((item) => item.selection_key === fixed));
 });
 
-test("modo mixto no acepta una selección fija stale", () => {
+test("modo mixto acepta una selección deportiva fija aunque su cuota esté stale", () => {
   const stale = candidate(1, { quote: { freshness: "stale", stale: true, verification_status: "stale" } });
   const result = buildAtlasCombination({ candidates: [stale, candidate(2), candidate(3)], product: "parlay", mode: "mixed", selections: 2, selectedKeys: [combinationSelectionKey(stale)] });
-  assert.equal(result.status, "insufficient_candidates");
+  assert.equal(result.status, "ready");
+  assert.ok(result.selections.some((item) => item.selection_key === combinationSelectionKey(stale)));
+  assert.equal(result.combined_decimal_odds, null);
+  assert.equal(result.price_coverage.status, "partial");
 });
 
 test("calcula la cuota combinada sin presentarla como probabilidad", () => {
@@ -199,21 +246,89 @@ test("calcula la cuota combinada sin presentarla como probabilidad", () => {
   assert.equal(result.combined_odds_is_probability, false);
 });
 
-test("Director puede bloquear una selección aunque tenga cuota vigente", () => {
+test("decisión individual de Director no es requisito para sports eligibility", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { directorDecision: "NO APOSTAR" }));
-  assert.equal(inspection.eligible, false);
-  assert.ok(inspection.reasons.includes("director_blocks_selection"));
+  assert.equal(inspection.sports_eligible, true);
 });
 
-test("precio desfavorable excluye al candidato", () => {
+test("precio desfavorable no modifica el soporte deportivo", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { priceStatus: "unfavorable" }));
-  assert.equal(inspection.eligible, false);
-  assert.ok(inspection.reasons.includes("price_not_acceptable"));
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.price_usable, true);
+  assert.equal(inspection.candidate.economic_evaluation_status, "unfavorable");
 });
 
-test("marginal sin brecha positiva queda excluido", () => {
+test("precio marginal sin brecha positiva no altera elegibilidad deportiva", () => {
   const inspection = inspectCombinationCandidate(candidate(1, { priceStatus: "marginal", priceGap: 0 }));
-  assert.equal(inspection.eligible, false);
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.price_usable, true);
+});
+
+test("candidato deportivo sin cuota puede ser elegible", () => {
+  const inspection = inspectCombinationCandidate(candidate(1, { activeQuote: null }));
+  assert.equal(inspection.sports_eligible, true);
+  assert.equal(inspection.economic_price_status, "unavailable");
+  assert.equal(inspection.price_usable, false);
+});
+
+test("automático construye sin análisis individual ni official_prediction", () => {
+  const candidates = [candidate(1, { activeQuote: null }), candidate(2, { activeQuote: null })].map((item) => {
+    const { director_decision, parlay_eligibility, official_prediction_id, ...sportsOnly } = item;
+    void director_decision;
+    void parlay_eligibility;
+    void official_prediction_id;
+    return sportsOnly;
+  });
+  const result = buildAtlasCombination({ candidates, product: "parlay", mode: "automatic", selections: 2 });
+  assert.equal(result.status, "ready");
+  assert.equal(result.selections.length, 2);
+  assert.equal(result.price_coverage.status, "unavailable");
+});
+
+test("ranking automático es global y prioriza sports_score aunque el candidato aparezca después", () => {
+  const result = buildAtlasCombination({
+    candidates: [candidate(1, { sportsScore: 62 }), candidate(2, { sportsScore: 70 }), candidate(3, { sportsScore: 94 })],
+    product: "parlay",
+    mode: "automatic",
+    selections: 2,
+  });
+  assert.deepEqual(result.selections.map((item) => item.sports_score), [94, 70]);
+});
+
+test("cuotas parciales nunca se presentan como cuota combinada completa", () => {
+  const result = buildAtlasCombination({ candidates: [candidate(1, { decimalOdds: 2 }), candidate(2, { activeQuote: null })], product: "parlay", mode: "automatic", selections: 2 });
+  assert.equal(result.status, "ready");
+  assert.equal(result.combined_decimal_odds, null);
+  assert.deepEqual(result.price_coverage, { status: "partial", available: 1, missing: 1, total: 2 });
+});
+
+test("modo manual conserva selecciones deportivas aunque falte cuota", () => {
+  const candidates = [candidate(1, { activeQuote: null }), candidate(2)];
+  const result = buildAtlasCombination({ candidates, product: "parlay", mode: "manual", selections: 2, selectedKeys: candidates.map(combinationSelectionKey) });
+  assert.equal(result.status, "ready");
+  assert.equal(result.price_coverage.status, "partial");
+});
+
+test("insuficiencia deportiva real impide formar una combinación", () => {
+  const weak = candidate(1, { sportsScore: 40, activeQuote: null });
+  const inspection = inspectCombinationCandidate(weak);
+  assert.equal(inspection.sports_eligible, false);
+  assert.ok(inspection.reasons.includes("sports_support_insufficient"));
+  const result = buildAtlasCombination({ candidates: [weak, candidate(2)], product: "parlay", mode: "automatic", selections: 2 });
+  assert.equal(result.status, "insufficient_candidates");
+});
+
+test("Soñadora se construye con soporte deportivo aunque ninguna pata tenga cuota", () => {
+  const result = buildAtlasCombination({
+    candidates: [1, 2, 3, 4, 5].map((index) => candidate(index, { activeQuote: null })),
+    product: "dream",
+    mode: "automatic",
+    selections: 5,
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.price_coverage.available, 0);
+  assert.equal(result.combined_decimal_odds, null);
+  assert.equal(result.risk.level, "high");
 });
 
 test("une candidatos de múltiples fechas y fixtures", () => {

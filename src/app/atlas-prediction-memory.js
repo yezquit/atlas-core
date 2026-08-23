@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { displayMarketLabel, displaySelectionLabel, displayStatusLabel } from "./presentation-labels";
 
 const STATUS_LABELS = Object.freeze({ pending: "Pendiente", hit: "Acierto", miss: "Fallo", void: "Nulo", not_evaluable: "No evaluable" });
 
@@ -21,7 +22,7 @@ export function OfficialPredictionRegistration({ analysisId }) {
   const [status, setStatus] = useState({ kind: "idle", message: "" });
   async function savePrediction() {
     if (!analysisId || status.kind === "loading") return;
-    setStatus({ kind: "loading", message: "Guardando snapshot inmutable…" });
+    setStatus({ kind: "loading", message: "Guardando captura inmutable…" });
     try {
       const response = await fetch("/api/predictions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ analysisId }) });
       const body = await response.json();
@@ -44,7 +45,7 @@ function MetricCard({ label, value }) {
 function MarketMetrics({ groups = {} }) {
   const rows = Object.entries(groups);
   if (!rows.length) return <p>Aún no hay muestra por mercado.</p>;
-  return <div className="p2-memory-table-wrap"><table className="p2-memory-table"><thead><tr><th>Mercado</th><th>Total</th><th>Aciertos</th><th>Fallos</th><th>Tasa</th></tr></thead><tbody>{rows.map(([name, metrics]) => <tr key={name}><td>{name}</td><td>{metrics.total}</td><td>{metrics.hits}</td><td>{metrics.misses}</td><td>{percentage(metrics.hit_rate)}</td></tr>)}</tbody></table></div>;
+  return <div className="p2-memory-table-wrap"><table className="p2-memory-table"><thead><tr><th>Mercado</th><th>Total</th><th>Aciertos</th><th>Fallos</th><th>Tasa</th></tr></thead><tbody>{rows.map(([name, metrics]) => <tr key={name}><td>{displayMarketLabel(name) === name ? displayStatusLabel(name) : displayMarketLabel(name)}</td><td>{metrics.total}</td><td>{metrics.hits}</td><td>{metrics.misses}</td><td>{percentage(metrics.hit_rate)}</td></tr>)}</tbody></table></div>;
 }
 
 function Calibration({ calibration }) {
@@ -61,17 +62,17 @@ function PredictionCard({ prediction, onUpdate, busy }) {
   const [actualTotal, setActualTotal] = useState("");
   const resolution = prediction.resolution || {};
   return <article className={`p2-memory-entry p2-memory-entry-${resolution.status}`}>
-    <header><div><p className="eyebrow">{prediction.competition} · {prediction.mode === "live" ? "LIVE" : "Prepartido"}</p><h3>{prediction.home_team} vs {prediction.away_team}</h3></div><span className="p2-memory-status">{STATUS_LABELS[resolution.status] || resolution.status}</span></header>
+    <header><div><p className="eyebrow">{prediction.competition} · {prediction.mode === "live" ? "EN VIVO" : "Prepartido"}</p><h3>{prediction.home_team} vs {prediction.away_team}</h3></div><span className="p2-memory-status">{STATUS_LABELS[resolution.status] || displayStatusLabel(resolution.status)}</span></header>
     <div className="p2-memory-entry-grid">
-      <span><small>Pronóstico</small><strong>{prediction.selection}</strong></span><span><small>Mercado / línea</small><strong>{prediction.market_family} · {prediction.line}</strong></span><span><small>Confianza</small><strong>{prediction.confidence_score === null ? "No disponible" : `${prediction.confidence_score}/100`}</strong></span><span><small>Emitido</small><strong>{dateTime(prediction.issued_at)}</strong></span><span><small>Inicio</small><strong>{dateTime(prediction.kickoff_utc)}</strong></span><span><small>Resultado total</small><strong>{resolution.actual_total ?? "Pendiente"}</strong></span>
+      <span><small>Pronóstico</small><strong>{displaySelectionLabel(prediction.selection)}</strong></span><span><small>Mercado / línea</small><strong>{displayMarketLabel(prediction.market_family)} · {prediction.line}</strong></span><span><small>Confianza</small><strong>{prediction.confidence_score === null ? "No disponible" : `${prediction.confidence_score}/100`}</strong></span><span><small>Emitido</small><strong>{dateTime(prediction.issued_at)}</strong></span><span><small>Inicio</small><strong>{dateTime(prediction.kickoff_utc)}</strong></span><span><small>Resultado total</small><strong>{resolution.actual_total ?? "Pendiente"}</strong></span>
     </div>
-    {prediction.mode === "live" ? <p className="p2-memory-result-source">Snapshot: minuto {prediction.live_context?.minute} · marcador {prediction.live_context?.score_at_prediction?.home}-{prediction.live_context?.score_at_prediction?.away}</p> : null}
+    {prediction.mode === "live" ? <p className="p2-memory-result-source">Captura: minuto {prediction.live_context?.minute} · marcador {prediction.live_context?.score_at_prediction?.home}-{prediction.live_context?.score_at_prediction?.away}</p> : null}
     {resolution.status === "pending" ? <div className="p2-memory-resolution-actions">
       <button type="button" className="secondary-button" disabled={busy} onClick={() => onUpdate({ predictionId: prediction.prediction_id, source: "api_football" })}>Verificar con datos deportivos</button>
       <label><span>Total real verificado</span><input inputMode="decimal" value={actualTotal} onChange={(event) => setActualTotal(event.target.value)} placeholder="Ej. 9" /></label>
       <button type="button" className="secondary-button" disabled={busy || !actualTotal.trim()} onClick={() => onUpdate({ predictionId: prediction.prediction_id, source: "manual_user_input", actualTotal })}>Resolver manualmente</button>
-    </div> : <p className="p2-memory-result-source">Fuente: {resolution.source} · resuelto {dateTime(resolution.resolved_at)}{resolution.reason ? ` · ${resolution.reason}` : ""}</p>}
-    <details><summary>Ver snapshot y trazabilidad</summary><pre>{JSON.stringify(prediction, null, 2)}</pre></details>
+    </div> : <p className="p2-memory-result-source">Fuente: {resolution.source === "manual_user_input" ? "Entrada manual" : resolution.source === "api_football" ? "Datos deportivos verificados" : displayStatusLabel(resolution.source)} · resuelto {dateTime(resolution.resolved_at)}{resolution.reason ? ` · ${displayStatusLabel(resolution.reason)}` : ""}</p>}
+    <details><summary>Ver captura y trazabilidad</summary><pre>{JSON.stringify(prediction, null, 2)}</pre></details>
   </article>;
 }
 
@@ -115,11 +116,11 @@ export default function AtlasPredictionMemory() {
   return <section className="p2-mode p2-memory" aria-labelledby="memory-title">
     <div className="p2-mode-heading"><p className="eyebrow">Memoria predictiva</p><h2 id="memory-title">Rendimiento Atlas</h2><p>Lo que Atlas pronosticó antes o durante el partido, siempre etiquetado por modo. Esta memoria es independiente de las apuestas reales del usuario.</p></div>
     <div className="p2-memory-toolbar"><button type="button" className="primary-button p2-primary" disabled={busy || metrics.pending === 0} onClick={() => updateResults({ scope: "pending" })}>{busy ? "Verificando…" : "Actualizar resultados"}</button><p className={`p2-memory-notice p2-memory-notice-${status.kind}`} role="status">{status.message}</p></div>
-    <fieldset className="p2-memory-mode-filter"><legend>Separar por momento del pronóstico</legend><label><input type="radio" name="prediction-mode" checked={mode === ""} onChange={() => setMode("")} />Todos</label><label><input type="radio" name="prediction-mode" checked={mode === "prematch"} onChange={() => setMode("prematch")} />Prepartido</label><label><input type="radio" name="prediction-mode" checked={mode === "live"} onChange={() => setMode("live")} />LIVE</label></fieldset>
+    <fieldset className="p2-memory-mode-filter"><legend>Separar por momento del pronóstico</legend><label><input type="radio" name="prediction-mode" checked={mode === ""} onChange={() => setMode("")} />Todos</label><label><input type="radio" name="prediction-mode" checked={mode === "prematch"} onChange={() => setMode("prematch")} />Prepartido</label><label><input type="radio" name="prediction-mode" checked={mode === "live"} onChange={() => setMode("live")} />EN VIVO</label></fieldset>
     <section className="p2-memory-metrics" aria-label="Métricas de asertividad"><MetricCard label="Oficiales" value={metrics.total} /><MetricCard label="Pendientes" value={metrics.pending} /><MetricCard label="Resueltos" value={metrics.resolved} /><MetricCard label="Evaluables" value={metrics.evaluated} /><MetricCard label="Aciertos" value={metrics.hits} /><MetricCard label="Fallos" value={metrics.misses} /><MetricCard label="Nulos" value={metrics.voids} /><MetricCard label="No evaluables" value={metrics.not_evaluable} /><MetricCard label="Tasa de acierto" value={percentage(metrics.hit_rate)} /></section>
     <section className="p2-memory-section" aria-labelledby="memory-market-title"><h3 id="memory-market-title">Asertividad por mercado</h3><p>La tasa usa únicamente aciertos y fallos; nulos y no evaluables no alteran el denominador.</p><MarketMetrics groups={metrics.by_market_family} /></section>
-    <section className="p2-memory-section"><h3>Asertividad por modo</h3><MarketMetrics groups={metrics.by_mode} /><h3>LIVE por tramo de minuto</h3><MarketMetrics groups={metrics.by_live_minute_bucket} /></section>
+    <section className="p2-memory-section"><h3>Asertividad por modo</h3><MarketMetrics groups={metrics.by_mode} /><h3>EN VIVO por tramo de minuto</h3><MarketMetrics groups={metrics.by_live_minute_bucket} /></section>
     <Calibration calibration={data.calibration} />
-    <section className="p2-memory-section" aria-labelledby="memory-recent-title"><h3 id="memory-recent-title">Pronósticos recientes</h3><div className="p2-memory-list">{data.predictions.map((prediction) => <PredictionCard key={prediction.prediction_id} prediction={prediction} onUpdate={updateResults} busy={busy} />)}{!data.predictions.length ? <p>Guarda un dictamen respaldado desde “Analizar partido” o “Atlas LIVE” para iniciar la memoria.</p> : null}</div></section>
+    <section className="p2-memory-section" aria-labelledby="memory-recent-title"><h3 id="memory-recent-title">Pronósticos recientes</h3><div className="p2-memory-list">{data.predictions.map((prediction) => <PredictionCard key={prediction.prediction_id} prediction={prediction} onUpdate={updateResults} busy={busy} />)}{!data.predictions.length ? <p>Guarda un dictamen respaldado desde “Analizar partido” o “Atlas EN VIVO” para iniciar la memoria.</p> : null}</div></section>
   </section>;
 }

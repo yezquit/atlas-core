@@ -19,9 +19,13 @@ export const COMBINATION_LIMITS = Object.freeze({
 
 const CURRENT_QUOTE_STATUSES = new Set(["verified_provider", "user_reported"]);
 const CURRENT_SOURCE_STATUSES = new Set(["verified_current", "user_reported_current"]);
-const ACCEPTED_PRICE_STATUSES = new Set(["favorable_preliminary", "marginal"]);
-const ACCEPTED_PARLAY_STATUSES = new Set(["eligible", "eligible_with_caution"]);
-const BLOCKING_DIRECTOR_DECISIONS = new Set(["No", "NO APOSTAR", "blocked"]);
+const MINIMUM_SPORTS_SCORE = 58;
+const BLOCKING_SPORTS_STATUSES = new Set([
+  "blocked",
+  "insufficient_data",
+  "insufficient_information",
+  "not_viable",
+]);
 
 function normalizedDirection(value) {
   const candidate = String(value || "").trim().toLowerCase();
@@ -70,41 +74,88 @@ export function validateCombinationRequest({ product, mode, selections } = {}) {
   return { valid: true, count, limits };
 }
 
-function quoteMatchesCandidate(candidate, quote) {
-  if (!quote) return false;
-  const fixtureMatches = Number(quote.fixture_id ?? quote.fixtureId) === Number(candidate.fixture_id ?? candidate.fixtureId);
-  const familyMatches = (quote.market_family ?? quote.marketFamily) === (candidate.market_family ?? candidate.marketId ?? candidate.market);
-  const directionMatches = normalizedDirection(quote.direction ?? quote.selection) === normalizedDirection(candidate.direction ?? candidate.selection);
-  return fixtureMatches && familyMatches && directionMatches && number(quote.line) === number(candidate.line);
+function quoteCompatibility(candidate, quote) {
+  if (!quote) return "unavailable";
+  if (Number(quote.fixture_id ?? quote.fixtureId) !== Number(candidate.fixture_id ?? candidate.fixtureId)) return "incompatible_fixture";
+  if ((quote.market_family ?? quote.marketFamily) !== (candidate.market_family ?? candidate.marketId ?? candidate.market)) return "incompatible_market";
+  if (normalizedDirection(quote.direction ?? quote.selection) !== normalizedDirection(candidate.direction ?? candidate.selection)) return "incompatible_direction";
+  if (number(quote.line) !== number(candidate.line)) return "incompatible_line";
+
+  const candidateMode = candidate.analysis_mode ?? candidate.analysisMode;
+  const quoteMode = quote.analysis_mode ?? quote.analysisMode ?? quote.mode;
+  if (candidateMode === "live" && quoteMode === "prematch") return "incompatible_context";
+  return "compatible";
+}
+
+function sportsScore(candidate) {
+  return number(
+    candidate.sports_score
+      ?? candidate.sportsScore
+      ?? candidate.technical_support_score
+      ?? candidate.technicalSupport
+      ?? candidate.confidence,
+  );
+}
+
+function sportsStatus(candidate) {
+  return candidate.overall_status
+    ?? candidate.overallStatus
+    ?? candidate.status
+    ?? candidate.transferredCandidate?.overall_status
+    ?? null;
+}
+
+function economicPriceAssessment(candidate, quote) {
+  const compatibility = quoteCompatibility(candidate, quote);
+  const decimalOdds = number(quote?.decimal_odds ?? quote?.decimalOdds);
+  const verificationStatus = quote?.verification_status ?? candidate.odds_source_status ?? candidate.oddsSourceStatus;
+  const sourceStatus = quote?.source_status ?? candidate.odds_source_state ?? candidate.oddsSourceState;
+  const fresh = (quote?.freshness ?? candidate.freshness) === "fresh" && quote?.stale !== true;
+  const currentSource = CURRENT_QUOTE_STATUSES.has(verificationStatus) || CURRENT_SOURCE_STATUSES.has(sourceStatus);
+  let status = compatibility;
+
+  if (compatibility === "compatible") {
+    if (quote?.status === "blocked" || quote?.blocked === true) status = "blocked";
+    else if (!fresh) status = "stale";
+    else if (decimalOdds === null || decimalOdds <= 1) status = "invalid";
+    else if (!currentSource) status = "unavailable";
+    else status = "available";
+  }
+
+  return {
+    status,
+    usable: status === "available",
+    decimalOdds: status === "available" ? decimalOdds : null,
+    reason: status === "available" ? null : `price_${status}`,
+  };
 }
 
 export function inspectCombinationCandidate(candidate = {}) {
   const key = combinationSelectionKey(candidate);
   const quote = candidate.active_quote ?? candidate.activeQuote ?? candidate.current_quote ?? candidate.currentQuote ?? null;
-  const decimalOdds = number(quote?.decimal_odds ?? quote?.decimalOdds ?? candidate.decimal_odds ?? candidate.decimalOdds);
-  const verificationStatus = quote?.verification_status ?? candidate.odds_source_status ?? candidate.oddsSourceStatus;
-  const sourceStatus = quote?.source_status ?? candidate.odds_source_state ?? candidate.oddsSourceState;
-  const fresh = (quote?.freshness ?? candidate.freshness) === "fresh" && quote?.stale !== true;
-  const currentSource = CURRENT_QUOTE_STATUSES.has(verificationStatus) || CURRENT_SOURCE_STATUSES.has(sourceStatus);
-  const priceStatus = candidate.price_status ?? candidate.priceStatus;
-  const priceGap = number(candidate.price_gap ?? candidate.priceGap);
-  const directorDecision = candidate.director_decision ?? candidate.directorDecision ?? candidate.operational_decision;
-  const parlayEligibility = candidate.parlay_eligibility ?? candidate.parlayEligibility;
-  const marketSuitability = candidate.market_suitability ?? candidate.marketSuitability;
+  const scoreValue = sportsScore(candidate);
+  const status = sportsStatus(candidate);
+  const sampleSize = number(candidate.sample_size_effective ?? candidate.sampleSize ?? candidate.transferredCandidate?.sample_size_effective);
+  const uncertaintyLow = number(candidate.uncertainty_low ?? candidate.uncertaintyLow ?? candidate.uncertainty?.low ?? candidate.transferredCandidate?.uncertainty?.low);
+  const uncertaintyHigh = number(candidate.uncertainty_high ?? candidate.uncertaintyHigh ?? candidate.uncertainty?.high ?? candidate.transferredCandidate?.uncertainty?.high);
+  const price = economicPriceAssessment(candidate, quote);
   const reasons = [];
 
   if (!key) reasons.push("invalid_identity");
-  if (!quote || !quoteMatchesCandidate(candidate, quote)) reasons.push("missing_or_incompatible_quote");
-  if (!fresh || !currentSource) reasons.push("quote_not_current");
-  if (decimalOdds === null || decimalOdds <= 1) reasons.push("invalid_decimal_odds");
-  if (!ACCEPTED_PRICE_STATUSES.has(priceStatus) || (priceStatus === "marginal" && !(priceGap > 0))) reasons.push("price_not_acceptable");
-  if (parlayEligibility && !ACCEPTED_PARLAY_STATUSES.has(parlayEligibility)) reasons.push("director_parlay_not_eligible");
-  if (BLOCKING_DIRECTOR_DECISIONS.has(directorDecision)) reasons.push("director_blocks_selection");
-  if (["blocked", "not_viable", "insufficient_data", "review_only"].includes(marketSuitability)) reasons.push("market_not_operationally_eligible");
+  if (scoreValue === null) reasons.push("sports_score_unavailable");
+  else if (scoreValue < MINIMUM_SPORTS_SCORE) reasons.push("sports_support_insufficient");
+  if (BLOCKING_SPORTS_STATUSES.has(status)) reasons.push(`sports_status_${status}`);
+  if (sampleSize !== null && sampleSize <= 0) reasons.push("sports_sample_insufficient");
+
+  const sportsEligible = reasons.length === 0;
 
   return {
-    eligible: reasons.length === 0,
+    eligible: sportsEligible,
+    sports_eligible: sportsEligible,
     reasons: [...new Set(reasons)],
+    economic_reasons: price.reason ? [price.reason] : [],
+    economic_price_status: price.status,
+    price_usable: price.usable,
     candidate: {
       ...candidate,
       selection_key: key,
@@ -112,8 +163,20 @@ export function inspectCombinationCandidate(candidate = {}) {
       market_family: candidate.market_family ?? candidate.marketId ?? candidate.market,
       direction: normalizedDirection(candidate.direction ?? candidate.selection),
       line: number(candidate.line),
-      decimal_odds: decimalOdds,
-      active_quote: quote,
+      sports_score: scoreValue,
+      sports_status: status,
+      sample_size_effective: sampleSize,
+      uncertainty_low: uncertaintyLow,
+      uncertainty_high: uncertaintyHigh,
+      sports_eligible: sportsEligible,
+      sports_eligibility_reasons: [...new Set(reasons)],
+      economic_price_status: price.status,
+      economic_price_reasons: price.reason ? [price.reason] : [],
+      economic_evaluation_status: candidate.price_status ?? candidate.priceStatus ?? null,
+      price_usable: price.usable,
+      decimal_odds: price.decimalOdds,
+      observed_quote: quote,
+      active_quote: price.usable ? quote : null,
     },
   };
 }
@@ -127,9 +190,33 @@ export function assessCombinationCorrelation(left, right) {
   return { level: "medium", reason: "same_fixture_multiple_markets" };
 }
 
-function score(candidate) {
-  const pricePriority = candidate.price_status === "favorable_preliminary" ? 30 : 15;
-  return pricePriority + Number(candidate.price_gap ?? 0) * 100 + Number(candidate.sports_score ?? candidate.sportsScore ?? candidate.technicalSupport ?? 0);
+function uncertaintyWidth(candidate) {
+  if (!Number.isFinite(candidate.uncertainty_low) || !Number.isFinite(candidate.uncertainty_high)) return Number.POSITIVE_INFINITY;
+  return Math.max(0, candidate.uncertainty_high - candidate.uncertainty_low);
+}
+
+function rank(candidate) {
+  const value = number(candidate.overall_rank ?? candidate.generalRank ?? candidate.rank ?? candidate.transferredCandidate?.overall_rank);
+  return value === null ? Number.POSITIVE_INFINITY : value;
+}
+
+function familyRank(candidate) {
+  const value = number(candidate.family_rank ?? candidate.familyRank ?? candidate.transferredCandidate?.family_rank);
+  return value === null ? Number.POSITIVE_INFINITY : value;
+}
+
+function compareSportsCandidates(left, right) {
+  const scoreDifference = Number(right.sports_score) - Number(left.sports_score);
+  if (scoreDifference) return scoreDifference;
+  const uncertaintyDifference = uncertaintyWidth(left) - uncertaintyWidth(right);
+  if (uncertaintyDifference) return uncertaintyDifference;
+  const sampleDifference = Number(right.sample_size_effective ?? -1) - Number(left.sample_size_effective ?? -1);
+  if (sampleDifference) return sampleDifference;
+  const rankDifference = rank(left) - rank(right);
+  if (rankDifference) return rankDifference;
+  const familyRankDifference = familyRank(left) - familyRank(right);
+  if (familyRankDifference) return familyRankDifference;
+  return String(left.selection_key).localeCompare(String(right.selection_key));
 }
 
 function uniqueInspections(candidates) {
@@ -138,15 +225,16 @@ function uniqueInspections(candidates) {
     const inspection = inspectCombinationCandidate(candidate);
     const key = inspection.candidate.selection_key || `invalid:${deduplicated.size}`;
     const current = deduplicated.get(key);
-    if (!current || score(inspection.candidate) > score(current.candidate)) deduplicated.set(key, inspection);
+    if (!current || compareSportsCandidates(inspection.candidate, current.candidate) < 0) deduplicated.set(key, inspection);
   }
   return [...deduplicated.values()];
 }
 
-function canAppend(selected, candidate, product) {
+function canAppend(selected, candidate, product, allowSecondFixtureSelection = false) {
   if (selected.some((item) => assessCombinationCorrelation(item, candidate).level === "high")) return false;
   const sameFixtureCount = selected.filter((item) => Number(item.fixture_id) === Number(candidate.fixture_id)).length;
-  return sameFixtureCount < (product === COMBINATION_PRODUCT.DREAM ? 2 : 1);
+  const maximumPerFixture = product === COMBINATION_PRODUCT.DREAM && allowSecondFixtureSelection ? 2 : 1;
+  return sameFixtureCount < maximumPerFixture;
 }
 
 function correlationWarnings(selections) {
@@ -162,30 +250,55 @@ function correlationWarnings(selections) {
 
 function riskFor(product, selections, warnings) {
   if (product === COMBINATION_PRODUCT.DREAM) return { level: "high", score: Math.min(100, 55 + selections.length * 3 + warnings.length * 8) };
+  if (warnings.includes("same_fixture_same_market_family")) return { level: "high", score: Math.min(100, 65 + selections.length * 5) };
   const scoreValue = Math.min(100, 18 + selections.length * 10 + warnings.length * 15);
   return { level: scoreValue >= 60 ? "high" : scoreValue >= 35 ? "medium" : "low", score: scoreValue };
 }
 
+function priceCoverage(selections) {
+  const available = selections.filter((candidate) => candidate.price_usable).length;
+  const total = selections.length;
+  return {
+    status: available === total && total > 0 ? "complete" : available > 0 ? "partial" : "unavailable",
+    available,
+    missing: total - available,
+    total,
+  };
+}
+
+function addDiversifiedCandidates(chosen, eligible, target, product) {
+  const passes = product === COMBINATION_PRODUCT.DREAM ? [false, true] : [false];
+  for (const allowSecondFixtureSelection of passes) {
+    if (chosen.length === target) break;
+    for (const candidate of eligible) {
+      if (chosen.some((item) => item.selection_key === candidate.selection_key)) continue;
+      if (!canAppend(chosen, candidate, product, allowSecondFixtureSelection)) continue;
+      chosen.push(candidate);
+      if (chosen.length === target) break;
+    }
+  }
+}
+
 export function buildAtlasCombination({ candidates = [], product, mode, selections, selectedKeys = [] } = {}) {
   const validation = validateCombinationRequest({ product, mode, selections });
-  if (!validation.valid) return { contract: "AtlasCombinationResult", version: 1, status: "invalid_request", ...validation, selections: [] };
+  if (!validation.valid) return { contract: "AtlasCombinationResult", version: 2, status: "invalid_request", ...validation, selections: [] };
 
   const inspected = uniqueInspections(candidates);
-  const eligible = inspected.filter((item) => item.eligible).map((item) => item.candidate).sort((left, right) => score(right) - score(left));
+  const eligible = inspected.filter((item) => item.sports_eligible).map((item) => item.candidate).sort(compareSportsCandidates);
   const requestedKeys = [...new Set(selectedKeys.filter(Boolean))];
   const fixed = requestedKeys.map((key) => eligible.find((candidate) => candidate.selection_key === key)).filter(Boolean);
 
   if (mode === COMBINATION_MODE.MANUAL && (requestedKeys.length !== validation.count || fixed.length !== validation.count)) {
     return {
       contract: "AtlasCombinationResult",
-      version: 1,
+      version: 2,
       status: "insufficient_candidates",
       product,
       mode,
       requested_selections: validation.count,
       selections: fixed,
       eligible_candidates: eligible,
-      rejected_candidates: inspected.filter((item) => !item.eligible),
+      rejected_candidates: inspected.filter((item) => !item.sports_eligible),
       director_message: buildDirectorCombinationMessage({ product, status: "manual_incomplete", selections: validation.count }),
     };
   }
@@ -193,59 +306,57 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
   if (mode === COMBINATION_MODE.MIXED && (requestedKeys.length > validation.count || fixed.length !== requestedKeys.length)) {
     return {
       contract: "AtlasCombinationResult",
-      version: 1,
+      version: 2,
       status: "insufficient_candidates",
       product,
       mode,
       requested_selections: validation.count,
       selections: fixed,
       eligible_candidates: eligible,
-      rejected_candidates: inspected.filter((item) => !item.eligible),
+      rejected_candidates: inspected.filter((item) => !item.sports_eligible),
       director_message: buildDirectorCombinationMessage({ product, status: "fixed_selection_invalid", selections: validation.count }),
     };
   }
 
   const chosen = mode === COMBINATION_MODE.AUTOMATIC ? [] : [...fixed];
   if (mode !== COMBINATION_MODE.MANUAL) {
-    for (const candidate of eligible) {
-      if (chosen.some((item) => item.selection_key === candidate.selection_key)) continue;
-      if (!canAppend(chosen, candidate, product)) continue;
-      chosen.push(candidate);
-      if (chosen.length === validation.count) break;
-    }
+    addDiversifiedCandidates(chosen, eligible, validation.count, product);
   }
 
   if (chosen.length !== validation.count) {
     return {
       contract: "AtlasCombinationResult",
-      version: 1,
+      version: 2,
       status: "insufficient_candidates",
       product,
       mode,
       requested_selections: validation.count,
       selections: chosen,
       eligible_candidates: eligible,
-      rejected_candidates: inspected.filter((item) => !item.eligible),
+      rejected_candidates: inspected.filter((item) => !item.sports_eligible),
       director_message: buildDirectorCombinationMessage({ product, status: "insufficient_candidates", selections: validation.count }),
     };
   }
 
   const warnings = correlationWarnings(chosen);
   const risk = riskFor(product, chosen, warnings);
+  const coverage = priceCoverage(chosen);
+  const correlationLevel = warnings.includes("same_fixture_same_market_family") ? "high" : warnings.length ? "medium" : "low";
   return {
     contract: "AtlasCombinationResult",
-    version: 1,
+    version: 2,
     status: "ready",
     product,
     mode,
     requested_selections: validation.count,
     selections: chosen,
-    combined_decimal_odds: combinedDecimalOdds(chosen),
+    combined_decimal_odds: coverage.status === "complete" ? combinedDecimalOdds(chosen) : null,
     combined_odds_is_probability: false,
+    price_coverage: coverage,
     risk,
-    correlation: { level: warnings.length ? "medium" : "low", warnings },
+    correlation: { level: correlationLevel, warnings },
     eligible_candidates: eligible,
-    rejected_candidates: inspected.filter((item) => !item.eligible),
+    rejected_candidates: inspected.filter((item) => !item.sports_eligible),
     director_message: buildDirectorCombinationMessage({ product, status: "ready", selections: chosen.length }),
   };
 }

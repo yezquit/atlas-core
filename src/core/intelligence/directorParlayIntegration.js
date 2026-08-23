@@ -3,10 +3,10 @@ import { assessParlayRisk } from "./parlayAssessmentEngine.js";
 export function buildDirectorCombinationMessage({ product, status, selections = 0 } = {}) {
   const name = product === "dream" ? "Soñadora Atlas" : "Parlay Atlas";
   if (status === "ready" && product === "dream") {
-    return `${name} preparada con ${selections} selecciones. Es una combinación de alto riesgo y no promete ganancias.`;
+    return `${name} preparada con ${selections} selecciones. Estas son las opciones con mejor soporte conjunto encontradas en el universo analizado. Es una combinación de alto riesgo por acumulación de eventos y no promete ganancias.`;
   }
   if (status === "ready") {
-    return `${name} preparado con ${selections} selecciones. Revisa vigencia, correlación y riesgo antes de decidir.`;
+    return `${name} preparado con ${selections} selecciones. Estas son las opciones con mejor soporte conjunto encontradas en el universo analizado. Revisa disponibilidad de precios, correlación y riesgo antes de decidir.`;
   }
   if (status === "manual_incomplete") {
     return `Selecciona exactamente ${selections} opciones elegibles para construir la combinación manual.`;
@@ -14,7 +14,7 @@ export function buildDirectorCombinationMessage({ product, status, selections = 
   if (status === "fixed_selection_invalid") {
     return "Alguna opción fijada no es elegible o excede el tamaño solicitado.";
   }
-  return `No existen ${selections} candidatos vigentes, compatibles y suficientemente diversificables. Atlas no forzará una combinación.`;
+  return `No existen ${selections} candidatos con soporte deportivo suficiente y suficientemente diversificables. Atlas no forzará una combinación.`;
 }
 
 function buildDirectorParlayAssessment(parlayCandidate) {

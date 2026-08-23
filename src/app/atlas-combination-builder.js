@@ -10,6 +10,12 @@ import {
   inspectCombinationCandidate,
 } from "@/core/intelligence/atlasCombinationEngine";
 import { findFixtureQuoteEntry } from "@/core/intelligence/fixtureQuoteLedger";
+import {
+  displayCorrelationLabel,
+  displayMarketLabel,
+  displaySelectionLabel,
+  displayStatusLabel,
+} from "./presentation-labels";
 
 function unique(items) {
   return [...new Set(items.filter(Boolean))];
@@ -36,9 +42,8 @@ function modeName(mode) {
   return "Automático";
 }
 
-function enrichCandidate(candidate, ledger, officialPredictions = []) {
+function enrichCandidate(candidate, ledger) {
   const operation = findFixtureQuoteEntry(ledger, candidate);
-  const officialPrediction = officialPredictions.find((prediction) => prediction.source_analysis_id === operation?.source_analysis_id) || null;
   return {
     ...candidate,
     fixture_id: candidate.fixtureId,
@@ -46,39 +51,43 @@ function enrichCandidate(candidate, ledger, officialPredictions = []) {
     ranking_version: candidate.methodologyVersion || "journey-scan",
     market_family: candidate.marketId,
     sports_score: candidate.sportsScore ?? candidate.technicalSupport,
-    active_quote: operation?.active_quote || null,
+    preliminary_probability: candidate.probability,
+    uncertainty_low: candidate.uncertaintyLow,
+    uncertainty_high: candidate.uncertaintyHigh,
+    sample_size_effective: candidate.sampleSize,
+    overall_rank: candidate.generalRank,
+    family_rank: candidate.familyRank,
+    overall_status: candidate.status,
+    active_quote: operation?.active_quote || operation?.latest_known_quote || null,
     decimal_odds: operation?.active_quote?.decimal_odds ?? null,
     freshness: operation?.active_quote?.freshness || "unavailable",
     odds_source_status: operation?.active_quote?.verification_status || "unavailable",
     price_status: operation?.price_status || "unavailable",
     price_gap: operation?.price_gap ?? null,
-    operational_decision: operation?.operational_decision || "Pendiente de precio",
-    market_suitability: operation?.market_suitability || null,
-    parlay_eligibility: operation?.parlay_eligibility || null,
-    director_decision: operation?.director_decision || null,
-    official_prediction_id: officialPrediction?.prediction_id || null,
   };
 }
 
 function CandidateCard({ candidate, selected, selectable, onToggle }) {
   const inspection = inspectCombinationCandidate(candidate);
-  const label = candidate.selection || `${candidate.direction === "under" ? "Menos de" : "Más de"} ${candidate.line}`;
+  const normalized = inspection.candidate;
+  const label = displaySelectionLabel(candidate.selection || `${candidate.direction === "under" ? "Under" : "Over"} ${candidate.line}`);
+  const priceLabel = normalized.price_usable
+    ? `${normalized.active_quote.bookmaker_name || "Proveedor"} @${normalized.decimal_odds}`
+    : displayStatusLabel(normalized.economic_price_status);
   return (
-    <article className={`p2-combination-candidate ${inspection.eligible ? "is-eligible" : "is-pending"}`}>
+    <article className={`p2-combination-candidate ${inspection.sports_eligible ? "is-eligible" : "is-pending"}`}>
       <div>
         <p className="eyebrow">{candidate.competition}</p>
         <h4>{candidate.fixture}</h4>
-        <p><strong>{label}</strong> · {candidate.market}</p>
-        <small>{candidate.localCalendarDate} · Respaldo deportivo {candidate.sports_score}/100 · Probabilidad preliminar {percent(candidate.probability)}</small>
-        <small>{candidate.active_quote
-          ? `Precio vigente: ${candidate.active_quote.bookmaker_name} @${candidate.active_quote.decimal_odds}`
-          : "Precio actual pendiente: no entra en la combinación."}</small>
-        <small>DirectorAtlas: {candidate.operational_decision}</small>
+        <p><strong>{label}</strong> · {displayMarketLabel(candidate.marketId || candidate.market)}</p>
+        <small><strong>Soporte deportivo:</strong> {normalized.sports_score}/100 · Probabilidad preliminar {percent(candidate.probability)}</small>
+        <small><strong>Estado deportivo:</strong> {inspection.sports_eligible ? "Elegible deportivamente" : "Soporte deportivo insuficiente"}</small>
+        <small><strong>Información económica:</strong> {priceLabel}{normalized.price_usable ? "" : " · no se utiliza para calcular la cuota combinada"}</small>
       </div>
       {selectable ? (
         <label className="p2-combination-toggle">
-          <input type="checkbox" checked={selected} disabled={!inspection.eligible} onChange={() => onToggle(candidate.selection_key)} />
-          <span>{selected ? "Quitar selección" : inspection.eligible ? "Añadir selección" : "No elegible ahora"}</span>
+          <input type="checkbox" checked={selected} disabled={!inspection.sports_eligible} onChange={() => onToggle(candidate.selection_key)} />
+          <span>{selected ? "Quitar selección" : inspection.sports_eligible ? "Añadir selección" : "No elegible deportivamente"}</span>
         </label>
       ) : null}
     </article>
@@ -95,18 +104,17 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
   const [selectionCount, setSelectionCount] = useState(2);
   const [journey, setJourney] = useState(null);
   const [ledgers, setLedgers] = useState({});
-  const [officialPredictions, setOfficialPredictions] = useState([]);
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [combination, setCombination] = useState(null);
   const [loadState, setLoadState] = useState("idle");
   const requestRef = useRef(null);
 
   const candidates = useMemo(() => (journey?.candidates || []).map((candidate) => {
-    const enriched = enrichCandidate(candidate, ledgers[String(candidate.fixtureId)], officialPredictions);
+    const enriched = enrichCandidate(candidate, ledgers[String(candidate.fixtureId)]);
     return { ...enriched, selection_key: combinationSelectionKey(enriched) };
-  }), [journey, ledgers, officialPredictions]);
+  }), [journey, ledgers]);
 
-  const eligibleCount = candidates.filter((candidate) => inspectCombinationCandidate(candidate).eligible).length;
+  const eligibleCount = candidates.filter((candidate) => inspectCombinationCandidate(candidate).sports_eligible).length;
   const limits = COMBINATION_LIMITS[product];
 
   function invalidate() {
@@ -146,17 +154,6 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
     return [String(fixtureId), result.ledger || null];
   }
 
-  async function loadOfficialPredictions() {
-    try {
-      const response = await fetch("/api/predictions");
-      if (!response.ok) return [];
-      const result = await response.json();
-      return result.predictions || [];
-    } catch {
-      return [];
-    }
-  }
-
   async function findCandidates() {
     requestRef.current?.abort();
     const requestedDates = unique(dates);
@@ -169,7 +166,6 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
     setLoadState("loading");
     setJourney(null);
     setLedgers({});
-    setOfficialPredictions([]);
     setSelectedKeys([]);
     setCombination(null);
     try {
@@ -191,13 +187,9 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
       if (controller.signal.aborted) return;
       setJourney(result);
       const fixtureIds = unique((result.candidates || []).map((candidate) => String(candidate.fixtureId)));
-      const [ledgerEntries, predictions] = await Promise.all([
-        Promise.all(fixtureIds.map(loadLedger)),
-        loadOfficialPredictions(),
-      ]);
+      const ledgerEntries = await Promise.all(fixtureIds.map(loadLedger));
       if (controller.signal.aborted) return;
       setLedgers(Object.fromEntries(ledgerEntries.filter(([, ledger]) => ledger)));
-      setOfficialPredictions(predictions);
       setLoadState(response.ok ? "success" : "error");
     } catch (error) {
       if (error?.name !== "AbortError") setLoadState("error");
@@ -225,7 +217,7 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
       <div className="p2-mode-heading">
         <p className="eyebrow">Combinaciones Atlas</p>
         <h2 id="combination-title">Parlay Atlas y Soñadora Atlas</h2>
-        <p>Atlas reúne candidatos del Journey Scan y solo combina opciones que ya tienen precio vigente y autorización operativa individual.</p>
+        <p>Atlas compara primero el soporte deportivo de todo el universo del Journey Scan. Las cuotas disponibles complementan la propuesta, pero no determinan su elegibilidad deportiva.</p>
       </div>
 
       <fieldset className="p2-combination-product">
@@ -264,7 +256,7 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
       <p className={`p2-status p2-status-${loadState}`}>{statusMessage(loadState)}</p>
 
       {journey ? <section className="p2-combination-universe">
-        <div className="p2-combination-summary"><h3>Universo disponible</h3><p>{journey.candidates?.length || 0} candidatos deportivos · {eligibleCount} elegibles con precio y decisión vigentes.</p><p>Los pendientes permanecen visibles para que puedas analizarlos individualmente; Atlas no inventa su cuota ni los incluye.</p></div>
+        <div className="p2-combination-summary"><h3>Universo disponible</h3><p>{journey.candidates?.length || 0} candidatos deportivos · {eligibleCount} elegibles deportivamente.</p><p>La falta de cuota no elimina una selección con soporte suficiente. Atlas muestra la cobertura económica por separado y nunca inventa precios.</p></div>
         <div className="p2-combination-candidate-grid">{candidates.map((candidate) => <CandidateCard key={candidate.selection_key} candidate={candidate} selectable={mode !== COMBINATION_MODE.AUTOMATIC} selected={selectedKeys.includes(candidate.selection_key)} onToggle={toggleCandidate} />)}</div>
         <button type="button" className="primary-button p2-primary" onClick={generateCombination}>Generar {productName(product)}</button>
       </section> : null}
@@ -274,10 +266,11 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
         <h3>{combination.status === "ready" ? `${productName(product)} preparada` : "No se pudo construir la combinación"}</h3>
         <p>{combination.director_message || combination.message}</p>
         {combination.status === "ready" ? <>
-          <div className="p2-combination-metrics"><span><small>Cuota combinada</small><strong>{combination.combined_decimal_odds}</strong></span><span><small>Riesgo</small><strong>{combination.risk.level === "high" ? "Alto" : combination.risk.level === "medium" ? "Medio" : "Bajo"}</strong></span><span><small>Modo</small><strong>{modeName(combination.mode)}</strong></span></div>
+          <div className="p2-combination-metrics"><span><small>Cuota combinada</small><strong>{combination.combined_decimal_odds ?? "Completa no disponible"}</strong></span><span><small>Cobertura de precios</small><strong>{combination.price_coverage.available} de {combination.price_coverage.total}</strong></span><span><small>Riesgo</small><strong>{combination.risk.level === "high" ? "Alto" : combination.risk.level === "medium" ? "Medio" : "Bajo"}</strong></span><span><small>Modo</small><strong>{modeName(combination.mode)}</strong></span></div>
           {product === COMBINATION_PRODUCT.DREAM ? <p className="p2-combination-warning">Alto riesgo: el resultado depende de que todas las selecciones se cumplan.</p> : null}
-          <ol className="p2-combination-legs">{combination.selections.map((candidate) => <li key={candidate.selection_key}><div><strong>{candidate.fixture}</strong><span>{candidate.selection} · {candidate.market} · @{candidate.decimal_odds}</span></div><button type="button" className="secondary-button" onClick={() => removePreparedSelection(candidate.selection_key)}>Quitar</button></li>)}</ol>
-          {combination.correlation.warnings.length ? <p>Correlación advertida: {combination.correlation.warnings.join(", ")}.</p> : <p>La propuesta evita repetir selecciones altamente correlacionadas del mismo fixture y mercado.</p>}
+          {combination.price_coverage.status !== "complete" ? <p>Cuota combinada completa no disponible: {combination.price_coverage.available} de {combination.price_coverage.total} selecciones tienen precio compatible y vigente.</p> : null}
+          <ol className="p2-combination-legs">{combination.selections.map((candidate) => <li key={candidate.selection_key}><div><strong>{candidate.fixture}</strong><span>{displaySelectionLabel(candidate.selection)} · {displayMarketLabel(candidate.marketId || candidate.market)} · {candidate.price_usable ? `@${candidate.decimal_odds}` : `Cuota ${displayStatusLabel(candidate.economic_price_status).toLowerCase()}`}</span></div><button type="button" className="secondary-button" onClick={() => removePreparedSelection(candidate.selection_key)}>Quitar</button></li>)}</ol>
+          {combination.correlation.warnings.length ? <p>Correlación advertida: {combination.correlation.warnings.map(displayCorrelationLabel).join(", ")}.</p> : <p>La propuesta evita repetir selecciones altamente correlacionadas del mismo partido y mercado.</p>}
         </> : null}
       </section> : null}
     </section>

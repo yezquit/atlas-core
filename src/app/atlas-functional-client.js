@@ -9,6 +9,12 @@ import { buildSimpleDirectorPresentation } from "@/core/modules/directorAtlas";
 import AtlasCombinationBuilder from "./atlas-combination-builder";
 import AtlasPredictionMemory, { OfficialPredictionRegistration } from "./atlas-prediction-memory";
 import AtlasLive from "./atlas-live";
+import {
+  displayMarketLabel,
+  displayProviderStatus,
+  displaySelectionLabel,
+  displayStatusLabel,
+} from "./presentation-labels";
 
 const LOAD_STATES = new Set([
   "loading",
@@ -52,7 +58,7 @@ const STATUS_LABELS = Object.freeze({
   review_only: "Solo revisión",
   suitable_under_conditions: "Apto bajo condiciones",
   user_reported: "Reportado por el usuario",
-  stale: "Vencido",
+  stale: "Desactualizada",
   verified_provider: "Verificado por proveedor",
   endpoint_unavailable: "Endpoint no disponible",
   no_reports: "Sin reportes disponibles",
@@ -184,29 +190,14 @@ function safeStatus(value) {
 }
 
 function displayStatus(value) {
-  return STATUS_LABELS[value] || String(value || "No disponible").replaceAll("_", " ");
+  return STATUS_LABELS[value] || displayStatusLabel(value);
 }
 
 function displaySelection(value) {
-  const text = String(value || "").trim();
-  if (!text) return "No disponible";
-
-  return text
-    .replace(/^Under\b/i, "Menos de")
-    .replace(/^Over\b/i, "Más de");
+  return displaySelectionLabel(value);
 }
 function displayMarket(value) {
-  const text = String(value || "").trim();
-
-  const markets = {
-    goals: "Goles",
-    total_shots: "Remates totales",
-    shots_on_goal: "Remates a puerta",
-    corners: "Córners",
-    cards: "Tarjetas",
-  };
-
-  return markets[text] || text || "Mercado no disponible";
+  return displayMarketLabel(value);
 }
 function formatDate(value, timezone = "America/Bogota") {
   if (!value) return "Fecha no disponible";
@@ -410,7 +401,7 @@ function TeamProfile({ profile, role }) {
       </div>
       <ListBlock title="Advertencias" items={profile.warnings} />
       <details className="p2-source-details">
-        <summary>Ver fixtures usados ({profile.fixture_ids?.length || 0})</summary>
+        <summary>Ver partidos usados ({profile.fixture_ids?.length || 0})</summary>
         <p>{profile.fixture_ids?.join(", ") || "Ninguno"}</p>
       </details>
     </>
@@ -447,7 +438,7 @@ function VersionComparison({ analysis, expert = false, active }) {
       <DefinitionGrid entries={[
         ["Analysis ID anterior", comparison?.previous_analysis_id],
         ["Analysis ID actual", comparison?.current_analysis_id || analysis?.analysisVersion?.analysis_id],
-        ["Fixture ID", comparison?.fixture_id || analysis?.analysisVersion?.fixture_id],
+        ["ID del partido", comparison?.fixture_id || analysis?.analysisVersion?.fixture_id],
         ["Versión del motor", comparison?.engine_version || analysis?.analysisVersion?.engine_version],
       ]} />
       {!comparison?.comparable ? <p>No hay una versión anterior comparable.</p> : (
@@ -806,14 +797,14 @@ function ExpertResult({ analysis }) {
   const telemetry = analysis.telemetry;
   return (
     <div className="p2-expert" data-result-mode="expert">
-      <Accordion id="expert-identity" title="Identidad del fixture" summary="ID, fecha, liga y temporada">
+      <Accordion id="expert-identity" title="Identidad del partido" summary="ID, fecha, liga y temporada">
         <DefinitionGrid entries={[
-          ["Fixture ID", fixture?.fixtureId],
+          ["ID del partido", fixture?.fixtureId],
           ["Partido", fixture ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}` : null],
           ["Inicio", formatDate(fixture?.date?.utc)],
           ["Competición", analysis.competition?.localName],
           ["Temporada", fixture?.competition?.season],
-          ["Estado", fixture?.status?.long],
+          ["Estado", displayProviderStatus(fixture?.status?.long || fixture?.status?.short)],
         ]} />
       </Accordion>
 
@@ -835,7 +826,7 @@ function ExpertResult({ analysis }) {
 
       <Accordion id="expert-director" title="Director Atlas y contratos internos" summary={displayStatus(director?.market_suitability)}>
         <DefinitionGrid entries={[
-          ["Selección", director?.selection],
+          ["Selección", displaySelection(director?.selection)],
           ["Probabilidad", percentage(director.estimated_probability)],
           ["Intervalo", director.probability_status === "preliminary" ? `${percentage(director.probability_uncertainty_low)}–${percentage(director.probability_uncertainty_high)}` : "No disponible"],
           ["Aptitud individual", displayStatus(director?.individual_eligibility)],
@@ -929,7 +920,7 @@ function ExpertResult({ analysis }) {
           ["Cuota activa", analysis.selectedOdds?.decimal_odds],
           ["Mercado", analysis.selectedOdds?.market_name],
           ["Mejor cuota comparable (referencia)", analysis.bestComparableOdds?.decimal_odds],
-          ["Selección", analysis.selectedOdds?.selection],
+          ["Selección", displaySelection(analysis.selectedOdds?.selection)],
           ["Línea", analysis.selectedOdds?.line],
           ["Estado", displayStatus(analysis.selectedOdds?.verification_status)],
           ["Origen", analysis.selectedOdds?.source],
@@ -989,7 +980,7 @@ function ExpertResult({ analysis }) {
 
       <Accordion id="expert-version-diff" title="Versión temporal y cambios" summary={analysis.analysisVersion?.phase || "Sin versión"}>
         <VersionComparison analysis={analysis} expert />
-        {!analysis.changesSincePrevious && !analysis.analysisVersion?.inputs?.reanalysis ? <p>Esta es la primera versión conservada para el fixture.</p> : null}
+        {!analysis.changesSincePrevious && !analysis.analysisVersion?.inputs?.reanalysis ? <p>Esta es la primera versión conservada para el partido.</p> : null}
       </Accordion>
 
       <Accordion id="expert-telemetry" title="Consumo de API y caché" summary={`${telemetry?.requestsUsed || 0} solicitudes utilizadas`}>
@@ -1312,7 +1303,7 @@ function HistoryView({ timezone }) {
         <label><span>Fecha</span><input type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value })} /></label>
         <label><span>Competición</span><input value={filters.competition} onChange={(event) => setFilters({ ...filters, competition: event.target.value })} /></label>
         <label><span>Equipo</span><input value={filters.team} onChange={(event) => setFilters({ ...filters, team: event.target.value })} /></label>
-        <label><span>Fixture ID</span><input inputMode="numeric" value={filters.fixtureId} onChange={(event) => setFilters({ ...filters, fixtureId: event.target.value })} /></label>
+        <label><span>ID del partido</span><input inputMode="numeric" value={filters.fixtureId} onChange={(event) => setFilters({ ...filters, fixtureId: event.target.value })} /></label>
         <label><span>Estado</span><input value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} /></label>
         <label><span>Mercado</span><input value={filters.market} onChange={(event) => setFilters({ ...filters, market: event.target.value })} /></label>
         <label><span>Fase</span><input value={filters.phase} onChange={(event) => setFilters({ ...filters, phase: event.target.value })} /></label>
@@ -1342,7 +1333,7 @@ function HistoryView({ timezone }) {
       </div>
       {compared.length === 2 ? (
         <section className="p2-history-compare"><h3>Comparación seleccionada</h3><DefinitionGrid entries={[
-          ["Mismo fixture", compared[0].fixture_id === compared[1].fixture_id],
+          ["Mismo partido", compared[0].fixture_id === compared[1].fixture_id],
           ["Confianza anterior", `${compared[0].analysis_confidence?.analysis_confidence_score || 0}%`],
           ["Confianza posterior", `${compared[1].analysis_confidence?.analysis_confidence_score || 0}%`],
           ["Cuota anterior", compared[0].director?.odds],
@@ -1496,9 +1487,9 @@ function JourneyTechnicalDetails({ journey, quoteLedgers, operationalRanking, qu
       <p>Esta sección conserva probabilidades, intervalos, {technicalLabel.toLowerCase()}, rankings, cuotas e identidades para auditoría.</p>
       <DefinitionGrid entries={[
         ["Competiciones consultadas", journey.competitionsQueried?.join(", ")],
-        ["Fixtures encontrados", journey.fixturesFound],
-        ["Fixtures revisados", journey.fixturesReviewed],
-        ["Fixtures descartados", journey.fixturesDiscarded],
+        ["Partidos encontrados", journey.fixturesFound],
+        ["Partidos revisados", journey.fixturesReviewed],
+        ["Partidos descartados", journey.fixturesDiscarded],
         ["Candidatos destacados", journey.candidates?.length],
         ["Cobertura de precio", displayStatus(quoteCoverage.status)],
         ["Cuotas vigentes", quoteCoverage.current],
@@ -1879,7 +1870,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       const result = await response.json();
       if (controller.signal.aborted) return;
       if (Number(result?.selectedFixtureId) !== requestedFixtureId) {
-        setAnalysisState(state("Atlas rechazó una respuesta que no conservó el fixture seleccionado.", "blocked", "fixture_id_changed"));
+        setAnalysisState(state("Atlas rechazó una respuesta que no conservó el partido seleccionado.", "blocked", "fixture_id_changed"));
         return;
       }
       if (transferredCandidate && result?.marketSelection?.primary?.market_family !== transferredCandidate.market_family) {
@@ -2011,7 +2002,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       status: { long: "Candidato de la jornada" },
     }]);
     setSelectedFixtureId(String(candidate.fixtureId));
-    setFixturesState(state("Candidato transferido. El fixture ID permanece inmutable.", "success"));
+    setFixturesState(state("Candidato transferido. El ID del partido permanece inmutable.", "success"));
     setAnalysis(null);
     setAnalysisState(state("La opción seleccionada está lista. Prepara la investigación para completar el análisis.", "transferred_ready"));
   }
@@ -2028,7 +2019,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       <nav className="p2-main-tabs" aria-label="Modos principales">
         <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Analizar jornada</button>
         <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
-        <button type="button" aria-current={mainMode === "live" ? "page" : undefined} onClick={() => setMainMode("live")}>Atlas LIVE</button>
+        <button type="button" aria-current={mainMode === "live" ? "page" : undefined} onClick={() => setMainMode("live")}>Atlas EN VIVO</button>
         <button type="button" aria-current={mainMode === "combinations" ? "page" : undefined} onClick={() => setMainMode("combinations")}>Parlay y Soñadora Atlas</button>
         <button type="button" aria-current={mainMode === "memory" ? "page" : undefined} onClick={() => setMainMode("memory")}>Memoria Atlas · rendimiento</button>
         <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
@@ -2178,7 +2169,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               {fixtures.map((fixture) => (
                 <label key={fixture.fixtureId} className={selectedFixtureId === String(fixture.fixtureId) ? "selected" : ""}>
                   <input type="radio" name="fixtureId" checked={selectedFixtureId === String(fixture.fixtureId)} onChange={() => chooseFixture(fixture.fixtureId)} />
-                  <span><strong>{fixture.label || `${fixture.teams.home.name} vs ${fixture.teams.away.name}`}</strong><small>{formatDate(fixture.date?.kickoff_utc || fixture.date?.utc, fixture.date?.timezone || defaultTimezone)} · {fixture.date?.timezone === "America/Bogota" || !fixture.date?.timezone ? "Hora de Colombia" : fixture.date.timezone} · {fixture.status?.long}</small><small className="p2-secondary-id">Fixture ID {fixture.fixtureId}</small></span>
+                  <span><strong>{fixture.label || `${fixture.teams.home.name} vs ${fixture.teams.away.name}`}</strong><small>{formatDate(fixture.date?.kickoff_utc || fixture.date?.utc, fixture.date?.timezone || defaultTimezone)} · {fixture.date?.timezone === "America/Bogota" || !fixture.date?.timezone ? "Hora de Colombia" : fixture.date.timezone} · {displayProviderStatus(fixture.status?.long || fixture.status?.short)}</small><small className="p2-secondary-id">ID del partido {fixture.fixtureId}</small></span>
                 </label>
               ))}
             </fieldset>
