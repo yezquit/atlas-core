@@ -60,10 +60,14 @@ export function calculateSportsScore(candidate, { marketAssessment = null, confi
   const effectiveSample = clamp((Number(candidate.sample_size_effective) / 20) * 100);
   const coverage = clamp(Number(marketAssessment?.technical_support_score ?? 70));
   const confidence = clamp(Number(confidenceScore ?? coverage));
-  const distance = Math.abs(Number(candidate.line) - Number(candidate.projected_mean)) / Math.max(0.75, Number(candidate.dispersion) || 0.75);
-  const lineStability = clamp(100 - distance * 18 - (candidate.contextual_only ? 28 : 0));
+  const lineStability = calculateLineStabilityScore(candidate);
   const sensitivity = clamp(100 - (candidate.limitations?.length || 0) * 3 - (candidate.context_adjustment?.changed_distribution ? 8 : 0));
   return round(probabilityBalance * 0.3 + uncertainty * 0.2 + effectiveSample * 0.15 + coverage * 0.15 + confidence * 0.05 + lineStability * 0.1 + sensitivity * 0.05);
+}
+
+export function calculateLineStabilityScore(candidate = {}) {
+  const distance = Math.abs(Number(candidate.line) - Number(candidate.projected_mean)) / Math.max(0.75, Number(candidate.dispersion) || 0.75);
+  return round(clamp(100 - distance * 18 - (candidate.contextual_only ? 28 : 0)));
 }
 
 function overallStatus(candidate, priceStatus, blocked) {
@@ -130,7 +134,14 @@ export function rankMarketCandidates(candidates = [], { quotes = [], preferredQu
     const marketAssessment = assessmentByFamily.get(candidate.market_family) || null;
     const sportsScore = calculateSportsScore(candidate, { marketAssessment, confidenceScore });
     const price = selectCandidateQuote(candidate, quotes, preferredQuote);
-    const enriched = { ...candidate, sports_score: sportsScore };
+    const enriched = {
+      ...candidate,
+      sports_score: sportsScore,
+      technical_support_score: marketAssessment?.technical_support_score !== null && marketAssessment?.technical_support_score !== undefined && Number.isFinite(Number(marketAssessment.technical_support_score))
+        ? Number(marketAssessment.technical_support_score)
+        : null,
+      line_stability_score: calculateLineStabilityScore(candidate),
+    };
     return {
       ...enriched,
       price_status: price.status,

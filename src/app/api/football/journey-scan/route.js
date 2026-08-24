@@ -44,6 +44,7 @@ export async function POST(request) {
     maximumFixtures: input?.maximumFixtures,
     maximumCandidates: input?.maximumCandidates,
     analysisMode: input?.analysisMode,
+    competitionProfiles: Array.isArray(input?.competitionProfiles) ? input.competitionProfiles : [],
     timezone: input?.timezone || process.env.ATLAS_DEFAULT_TIMEZONE,
   };
   const results = [];

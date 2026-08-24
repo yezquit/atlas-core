@@ -9,7 +9,9 @@ import {
   evaluateSportsMarkets,
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
-import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
+import { buildRankedMarketSelection, selectCandidateQuote } from "../intelligence/marketCandidateRanker.js";
+import { normalizeProviderOdds } from "../intelligence/oddsIntelligence.js";
+import { buildCompetitionProfileContext, findCompetitionProfile } from "../intelligence/competitionProfile.js";
 import {
   buildRefereeIntelligence,
   normalizeRefereeName,
@@ -75,11 +77,12 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
 
 export function deriveJourneyOutcome({ fixturesFound = 0, candidates = [], telemetry = {} } = {}) {
   if (telemetry.budgetExhausted && candidates.length === 0) {
-    return { status: DATA_LOAD_STATUS.BLOCKED, displayTone: "blocked", overallStatus: "blocked", message: "Análisis bloqueado por un límite crítico antes de producir candidatos." };
+    return { status: DATA_LOAD_STATUS.BLOCKED, reason: "provider_quota_or_budget", displayTone: "blocked", overallStatus: "blocked", message: "Análisis bloqueado por un límite crítico antes de producir candidatos." };
   }
   if (candidates.length === 0) {
     return {
       status: DATA_LOAD_STATUS.EMPTY,
+      reason: fixturesFound === 0 ? "no_fixtures" : "no_sports_candidates",
       displayTone: "neutral",
       overallStatus: "no_candidates",
       message: fixturesFound === 0 ? "No se encontraron partidos en las competiciones seleccionadas." : "No se encontraron candidatos con respaldo suficiente",
@@ -87,8 +90,8 @@ export function deriveJourneyOutcome({ fixturesFound = 0, candidates = [], telem
   }
   const priceComplete = candidates.every((candidate) => ["verified_current", "user_reported_current"].includes(candidate.priceStatus));
   return priceComplete
-    ? { status: DATA_LOAD_STATUS.SUCCESS, displayTone: "success", overallStatus: "completed", message: "Análisis de jornada completado" }
-    : { status: DATA_LOAD_STATUS.SUCCESS, displayTone: "warning", overallStatus: "candidates_pending_price", message: "Candidatos deportivos encontrados — evaluación de precio pendiente" };
+    ? { status: DATA_LOAD_STATUS.SUCCESS, reason: null, displayTone: "success", overallStatus: "completed", message: "Análisis de jornada completado" }
+    : { status: DATA_LOAD_STATUS.SUCCESS, reason: null, displayTone: "warning", overallStatus: "candidates_pending_price", message: "Candidatos deportivos encontrados — evaluación de precio pendiente" };
 }
 
 function dateShift(date, days) {
@@ -380,12 +383,150 @@ export async function analyzeSportsFixture(input, gateway) {
   };
 }
 
+function toJourneyCandidate({ analysis, candidate, comparison }) {
+  const risks = (candidate.limitations || []).filter((item) => !isModelLimitation(item)).slice(0, 3);
+  return {
+    competition: analysis.competition.localName,
+    competitionKey: analysis.competition.key,
+    season: analysis.fixture.competition.season,
+    fixtureId: analysis.fixture.fixtureId,
+    fixture: `${analysis.fixture.teams.home.name} vs ${analysis.fixture.teams.away.name}`,
+    kickoff: analysis.fixture.date.utc,
+    kickoffLocal: analysis.fixture.date.kickoff_local,
+    timezone: analysis.fixture.date.timezone,
+    localCalendarDate: analysis.fixture.date.local_calendar_date,
+    market: analysis.marketAssessments.find((item) => item.market_family === candidate.market_family)?.market_label || candidate.market_family,
+    marketId: candidate.market_family,
+    analysisMode: "specific",
+    selection: candidate.selection,
+    direction: candidate.direction,
+    line: candidate.line,
+    probability: candidate.preliminary_probability,
+    uncertaintyLow: candidate.uncertainty_low,
+    uncertaintyHigh: candidate.uncertainty_high,
+    confidence: candidate.sports_score,
+    priceStatus: candidate.price_status,
+    status: candidate.overall_status,
+    displayStatus: candidate.overall_status,
+    technicalSupport: candidate.technical_support_score ?? candidate.sports_score,
+    lineStabilityScore: candidate.line_stability_score,
+    limitations: candidate.limitations || [],
+    sampleSize: candidate.sample_size_effective,
+    methodologyVersion: candidate.methodology_version,
+    generalRank: candidate.rank,
+    familyRank: candidate.family_rank,
+    sportsScore: candidate.sports_score,
+    familiesCompared: comparison.families_compared,
+    familyComparison: comparison.best_by_family,
+    whyMarketWon: comparison.why_market_won,
+    competitiveContext: analysis.competitiveContext,
+    transferredCandidate: {
+      fixture_id: analysis.fixture.fixtureId,
+      analysis_mode: "specific",
+      market_family: candidate.market_family,
+      direction: candidate.direction,
+      line: candidate.line,
+      selection: candidate.selection,
+      preliminary_probability: candidate.preliminary_probability,
+      uncertainty: { low: candidate.uncertainty_low, high: candidate.uncertainty_high },
+      sports_score: candidate.sports_score,
+      technical_support_score: candidate.technical_support_score,
+      line_stability_score: candidate.line_stability_score,
+      sample_size_effective: candidate.sample_size_effective,
+      limitations: candidate.limitations || [],
+      rank: candidate.rank,
+      overall_rank: candidate.overall_rank || candidate.rank,
+      family_rank: candidate.family_rank,
+      reasons: candidate.simple_sports_reasons,
+      risks,
+      methodology_version: candidate.methodology_version,
+    },
+    reasons: candidate.simple_sports_reasons,
+    risks,
+    missingData: ["Cuota actual para la línea exacta"],
+    nextAction: "Atlas intentará recuperar una cuota exacta; si no existe, puedes ingresarla manualmente.",
+    rankReason: candidate.rank_reason.join(" "),
+  };
+}
+
+export function attachCompetitionProfile(candidate, profiles = []) {
+  const profile = findCompetitionProfile(profiles, {
+    competition: candidate.competition,
+    competition_key: candidate.competitionKey,
+    season: candidate.season,
+  });
+  return profile ? {
+    ...candidate,
+    competitionProfile: profile,
+    competitionProfileContext: buildCompetitionProfileContext(profile),
+  } : candidate;
+}
+
+export async function recoverJourneyCandidateOdds(candidates, gateway, now) {
+  if (typeof gateway.loadFixtureOdds !== "function" || candidates.length === 0) return candidates;
+  const fixtureContext = new Map(candidates.map((candidate) => [Number(candidate.fixtureId), candidate]));
+  const oddsByFixture = new Map(await Promise.all([...fixtureContext].map(async ([fixtureId, candidate]) => {
+    try {
+      const raw = await gateway.loadFixtureOdds(fixtureId);
+      if (raw.status !== DATA_LOAD_STATUS.SUCCESS) return [fixtureId, []];
+      const normalized = normalizeProviderOdds({ response: raw.response, fixtureId, now, kickoff: candidate.kickoff });
+      return [fixtureId, normalized.quotes];
+    } catch {
+      return [fixtureId, []];
+    }
+  })));
+  return candidates.map((candidate) => {
+    const price = selectCandidateQuote({
+      market_family: candidate.marketId,
+      direction: candidate.direction,
+      line: candidate.line,
+    }, oddsByFixture.get(Number(candidate.fixtureId)) || []);
+    const usable = ["verified_current", "user_reported_current"].includes(price.status) && price.quote?.stale !== true;
+    return {
+      ...candidate,
+      activeQuote: usable ? price.quote : null,
+      priceStatus: usable ? price.status : price.status || "unavailable",
+      missingData: usable ? [] : ["Cuota actual para la línea exacta"],
+    };
+  });
+}
+
+export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
+  const groups = new Map();
+  const sorted = [...entries].sort((left, right) =>
+    Number(right.candidate.sports_score) - Number(left.candidate.sports_score) ||
+    Number(left.analysis.fixture.fixtureId) - Number(right.analysis.fixture.fixtureId) ||
+    left.candidate.candidate_id.localeCompare(right.candidate.candidate_id)
+  );
+  for (const entry of sorted) {
+    const key = Number(entry.analysis.fixture.fixtureId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  const selected = [];
+  let depth = 0;
+  while (selected.length < maximum) {
+    let added = false;
+    for (const group of groups.values()) {
+      if (group[depth]) {
+        selected.push(group[depth]);
+        added = true;
+        if (selected.length === maximum) break;
+      }
+    }
+    if (!added) break;
+    depth += 1;
+  }
+  return selected;
+}
+
 export async function scanSportsJourney(input, gateway) {
   const startedAt = Date.now();
   if (!isValidIsoDate(input?.date)) {
     return {
       status: DATA_LOAD_STATUS.UNAVAILABLE,
       errorCode: "invalid_date",
+      reason: "internal_safe_error",
       message: "La fecha debe ser válida.",
       candidates: [],
       telemetry: gateway.runtime.snapshot(),
@@ -405,6 +546,7 @@ export async function scanSportsJourney(input, gateway) {
     return {
       status: DATA_LOAD_STATUS.UNAVAILABLE,
       errorCode: "invalid_market",
+      reason: "insufficient_coverage",
       message: "Selecciona al menos un mercado válido.",
       candidates: [],
       telemetry: gateway.runtime.snapshot(),
@@ -418,6 +560,7 @@ export async function scanSportsJourney(input, gateway) {
     return {
       status: DATA_LOAD_STATUS.UNAVAILABLE,
       errorCode: "invalid_competition",
+      reason: "unsupported_competition",
       message: "Selecciona al menos una competición válida.",
       candidates: [],
       telemetry: gateway.runtime.snapshot(),
@@ -427,11 +570,13 @@ export async function scanSportsJourney(input, gateway) {
   const referenceNow = input.now || `${input.date}T00:00:00.000Z`;
   const fixtures = [];
   const warnings = [];
+  const providerFailureCodes = [];
   for (const competition of competitions) {
     const season = expectedSeasonForDate(competition, input.date);
     const metadata = await gateway.loadCompetitionMetadata(competition, season);
     if (metadata.status !== DATA_LOAD_STATUS.SUCCESS) {
       warnings.push(`${competition.localName}: ${metadata.message}`);
+      providerFailureCodes.push(metadata.errorCode || metadata.status);
       continue;
     }
     const result = await gateway.loadFixturesForDate({
@@ -446,6 +591,7 @@ export async function scanSportsJourney(input, gateway) {
       );
     } else if (result.status !== DATA_LOAD_STATUS.EMPTY) {
       warnings.push(`${competition.localName}: ${result.message}`);
+      providerFailureCodes.push(result.errorCode || result.status);
     }
   }
 
@@ -483,6 +629,7 @@ export async function scanSportsJourney(input, gateway) {
     reviewed.push(analysis);
   }
   const analysisDiagnostics = [];
+  const combinationEntries = [];
 
   const analysisCandidates = reviewed.flatMap((analysis) => {
     const selection = buildRankedMarketSelection({
@@ -515,6 +662,11 @@ export async function scanSportsJourney(input, gateway) {
     for (const candidate of selection.ranked_candidates) {
       if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
     }
+    combinationEntries.push(...selection.ranked_candidates.map((candidate) => ({
+      analysis,
+      candidate,
+      comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
+    })));
     return [...bestByFamily.values()].map((candidate) => ({
       analysis,
       candidate,
@@ -548,63 +700,17 @@ export async function scanSportsJourney(input, gateway) {
   );
 
   const maximumCandidates = Math.max(1, Math.min(50, Number(input.maximumCandidates) || 50));
-  const highlighted = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates)
-    .map(({ analysis, candidate, comparison }) => ({
-      competition: analysis.competition.localName,
-      competitionKey: analysis.competition.key,
-      season: analysis.fixture.competition.season,
-      fixtureId: analysis.fixture.fixtureId,
-      fixture: `${analysis.fixture.teams.home.name} vs ${analysis.fixture.teams.away.name}`,
-      kickoff: analysis.fixture.date.utc,
-      kickoffLocal: analysis.fixture.date.kickoff_local,
-      timezone: analysis.fixture.date.timezone,
-      localCalendarDate: analysis.fixture.date.local_calendar_date,
-      market: analysis.marketAssessments.find((item) => item.market_family === candidate.market_family)?.market_label || candidate.market_family,
-      marketId: candidate.market_family,
-      analysisMode: "specific",
-      selection: candidate.selection,
-      direction: candidate.direction,
-      line: candidate.line,
-      probability: candidate.preliminary_probability,
-      uncertaintyLow: candidate.uncertainty_low,
-      uncertaintyHigh: candidate.uncertainty_high,
-      confidence: candidate.sports_score,
-      priceStatus: candidate.price_status,
-      status: candidate.overall_status,
-      displayStatus: candidate.overall_status,
-      technicalSupport: candidate.sports_score,
-      sampleSize: candidate.sample_size_effective,
-      methodologyVersion: candidate.methodology_version,
-      generalRank: candidate.rank,
-      familyRank: candidate.family_rank,
-      sportsScore: candidate.sports_score,
-      familiesCompared: comparison.families_compared,
-      familyComparison: comparison.best_by_family,
-      whyMarketWon: comparison.why_market_won,
-      competitiveContext: analysis.competitiveContext,
-      transferredCandidate: {
-        fixture_id: analysis.fixture.fixtureId,
-        analysis_mode: "specific",
-        market_family: candidate.market_family,
-        direction: candidate.direction,
-        line: candidate.line,
-        selection: candidate.selection,
-        preliminary_probability: candidate.preliminary_probability,
-        uncertainty: { low: candidate.uncertainty_low, high: candidate.uncertainty_high },
-        sports_score: candidate.sports_score,
-        rank: candidate.rank,
-        overall_rank: candidate.overall_rank || candidate.rank,
-        family_rank: candidate.family_rank,
-        reasons: candidate.simple_sports_reasons,
-        risks: candidate.limitations.filter((item) => !isModelLimitation(item)).slice(0, 3),
-        methodology_version: candidate.methodology_version,
-      },
-      reasons: candidate.simple_sports_reasons,
-      risks: candidate.limitations.filter((item) => !isModelLimitation(item)).slice(0, 3),
-      missingData: candidate.price_status === "unavailable" ? ["Cuota actual para la línea exacta"] : [],
-      nextAction: "Abrir el análisis individual y evaluar una cuota actual para la línea exacta.",
-      rankReason: candidate.rank_reason.join(" "),
-    }));
+  const competitionProfiles = Array.isArray(input.competitionProfiles) ? input.competitionProfiles : [];
+  const highlightedSports = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
+  const combinationSports = selectCombinationJourneyCandidates(combinationEntries, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
+  const pricedUniverse = await recoverJourneyCandidateOdds(
+    [...new Map([...highlightedSports, ...combinationSports].map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate])).values()],
+    gateway,
+    referenceNow,
+  );
+  const pricedByIdentity = new Map(pricedUniverse.map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate]));
+  const highlighted = highlightedSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
+  const combinationCandidates = combinationSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
   const fixturesByCompetition = Object.fromEntries(
     [...fixtures.reduce((map, item) => {
       const name = item.competition.localName;
@@ -615,10 +721,16 @@ export async function scanSportsJourney(input, gateway) {
 
   const telemetry = gateway.runtime.snapshot();
   const outcome = deriveJourneyOutcome({ fixturesFound: eligibleFixtures.length, candidates: highlighted, telemetry });
+  if (highlighted.length === 0 && !telemetry.budgetExhausted) {
+    if (providerFailureCodes.some((code) => /timeout/i.test(code))) outcome.reason = "timeout";
+    else if (fixtures.length === 0 && providerFailureCodes.length > 0) outcome.reason = "provider_unavailable";
+    else if (reviewed.length > 0 && analysisCandidates.length === 0) outcome.reason = "insufficient_coverage";
+  }
   return {
     contract: "JourneyExplorationResult",
     version: 2,
     status: outcome.status,
+    reason: outcome.reason,
     displayTone: outcome.displayTone,
     overallStatus: outcome.overallStatus,
     message: outcome.message,
@@ -637,6 +749,8 @@ export async function scanSportsJourney(input, gateway) {
     candidateDiagnosticsByCompetition,
     analysisDiagnostics,
     candidates: highlighted,
+    combinationCandidates,
+    competitionProfilesApplied: competitionProfiles.length,
     warnings,
     executionTimeMs: Date.now() - startedAt,
     telemetry,

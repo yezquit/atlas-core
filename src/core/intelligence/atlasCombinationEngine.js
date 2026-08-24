@@ -55,6 +55,16 @@ export function classifyCombinationSize(size) {
   return selections <= 4 ? COMBINATION_PRODUCT.PARLAY : COMBINATION_PRODUCT.DREAM;
 }
 
+export function normalizeCombinationTarget(value, product, fallback = null) {
+  const limits = COMBINATION_LIMITS[product];
+  if (!limits) return null;
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= limits.minimum && parsed <= limits.maximum) return parsed;
+  const parsedFallback = Number(fallback);
+  if (Number.isInteger(parsedFallback) && parsedFallback >= limits.minimum && parsedFallback <= limits.maximum) return parsedFallback;
+  return limits.minimum;
+}
+
 export function validateCombinationRequest({ product, mode, selections } = {}) {
   const limits = COMBINATION_LIMITS[product];
   if (!limits) return { valid: false, errorCode: "invalid_product", message: "Elige Parlay Atlas o Soñadora Atlas." };
@@ -195,6 +205,51 @@ function uncertaintyWidth(candidate) {
   return Math.max(0, candidate.uncertainty_high - candidate.uncertainty_low);
 }
 
+function clamp(value, minimum = 0, maximum = 100) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function round(value, decimals = 1) {
+  return Number(Number(value).toFixed(decimals));
+}
+
+export function deriveCombinationStabilityScore(candidate = {}) {
+  const inspected = inspectCombinationCandidate(candidate).candidate;
+  const width = uncertaintyWidth(inspected);
+  const uncertaintyScore = Number.isFinite(width) ? clamp(100 - width * 125) : 0;
+  const sampleScore = clamp((Number(inspected.sample_size_effective) / 20) * 100);
+  const technicalSupport = number(candidate.technical_support_score ?? candidate.technicalSupport) ?? inspected.sports_score ?? 0;
+  const lineStability = number(candidate.line_stability_score ?? candidate.lineStabilityScore) ?? 50;
+  const limitations = candidate.limitations ?? candidate.transferredCandidate?.limitations ?? candidate.transferredCandidate?.risks ?? candidate.risks ?? [];
+  const limitationPenalty = Math.min(15, limitations.length * 3);
+  // Complemento deportivo explicable: soporte 35%, incertidumbre inversa 25%,
+  // muestra 15%, soporte técnico 15% y estabilidad de línea 10%, menos limitaciones.
+  // No crea ni modifica probabilidades y no consulta precios.
+  return round(
+    clamp(
+      Number(inspected.sports_score || 0) * 0.35 +
+      uncertaintyScore * 0.25 +
+      sampleScore * 0.15 +
+      technicalSupport * 0.15 +
+      lineStability * 0.1 -
+      limitationPenalty,
+    )
+  );
+}
+
+export function combinationConservatismProfile(product, targetCount) {
+  if (product !== COMBINATION_PRODUCT.DREAM || Number(targetCount) < 8) return "balanced";
+  return Number(targetCount) >= 12 ? "very_conservative" : "conservative";
+}
+
+function stabilityWeight(product, targetCount) {
+  // La Soñadora conserva el ranking normal hasta 7 patas; desde 8 aumenta de
+  // forma explícita el peso de estabilidad y desde 12 usa el perfil más prudente.
+  if (product !== COMBINATION_PRODUCT.DREAM || Number(targetCount) < 8) return 0;
+  if (Number(targetCount) >= 12) return 0.5;
+  return 0.35;
+}
+
 function rank(candidate) {
   const value = number(candidate.overall_rank ?? candidate.generalRank ?? candidate.rank ?? candidate.transferredCandidate?.overall_rank);
   return value === null ? Number.POSITIVE_INFINITY : value;
@@ -217,6 +272,16 @@ function compareSportsCandidates(left, right) {
   const familyRankDifference = familyRank(left) - familyRank(right);
   if (familyRankDifference) return familyRankDifference;
   return String(left.selection_key).localeCompare(String(right.selection_key));
+}
+
+function compareCombinationCandidates(left, right, product, targetCount) {
+  const weight = stabilityWeight(product, targetCount);
+  if (weight > 0) {
+    const leftRankScore = Number(left.sports_score) * (1 - weight) + Number(left.combination_stability_score) * weight;
+    const rightRankScore = Number(right.sports_score) * (1 - weight) + Number(right.combination_stability_score) * weight;
+    if (rightRankScore !== leftRankScore) return rightRankScore - leftRankScore;
+  }
+  return compareSportsCandidates(left, right);
 }
 
 function uniqueInspections(candidates) {
@@ -283,8 +348,19 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
   const validation = validateCombinationRequest({ product, mode, selections });
   if (!validation.valid) return { contract: "AtlasCombinationResult", version: 2, status: "invalid_request", ...validation, selections: [] };
 
-  const inspected = uniqueInspections(candidates);
-  const eligible = inspected.filter((item) => item.sports_eligible).map((item) => item.candidate).sort(compareSportsCandidates);
+  const profile = combinationConservatismProfile(product, validation.count);
+  const inspected = uniqueInspections(candidates).map((inspection) => ({
+    ...inspection,
+    candidate: {
+      ...inspection.candidate,
+      combination_stability_score: deriveCombinationStabilityScore(inspection.candidate),
+      combination_profile: profile,
+    },
+  }));
+  const eligible = inspected
+    .filter((item) => item.sports_eligible)
+    .map((item) => item.candidate)
+    .sort((left, right) => compareCombinationCandidates(left, right, product, validation.count));
   const requestedKeys = [...new Set(selectedKeys.filter(Boolean))];
   const fixed = requestedKeys.map((key) => eligible.find((candidate) => candidate.selection_key === key)).filter(Boolean);
 
@@ -348,6 +424,7 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
     status: "ready",
     product,
     mode,
+    combination_profile: profile,
     requested_selections: validation.count,
     selections: chosen,
     combined_decimal_odds: coverage.status === "complete" ? combinedDecimalOdds(chosen) : null,
@@ -366,16 +443,20 @@ export function mergeJourneyExplorations(results = [], dates = []) {
   const source = successful.length ? successful : results.filter(Boolean);
   const candidates = [...new Map(source.flatMap((item) => item.candidates || []).map((candidate) => [combinationSelectionKey(candidate), candidate])).values()]
     .filter((candidate) => combinationSelectionKey(candidate));
+  const combinationCandidates = [...new Map(source.flatMap((item) => item.combinationCandidates || item.candidates || []).map((candidate) => [combinationSelectionKey(candidate), candidate])).values()]
+    .filter((candidate) => combinationSelectionKey(candidate));
   return {
     contract: "MultiDateJourneyExplorationResult",
     version: 1,
     status: successful.length ? "success" : source[0]?.status || "empty",
+    reason: successful.length ? null : source[0]?.reason || "internal_safe_error",
     message: successful.length
       ? `Atlas reunió ${candidates.length} candidato(s) de ${dates.length} fecha(s) seleccionada(s).`
       : source[0]?.message || "No se encontraron candidatos para las fechas seleccionadas.",
     dates,
     dateResults: results,
     candidates,
+    combinationCandidates,
     fixturesFound: source.reduce((total, item) => total + Number(item.fixturesFound || 0), 0),
     fixturesReviewed: source.reduce((total, item) => total + Number(item.fixturesReviewed || 0), 0),
     warnings: source.flatMap((item, index) => (item.warnings || []).map((warning) => `${dates[index] || "Fecha"}: ${warning}`)),
