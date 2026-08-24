@@ -55,7 +55,7 @@ export default function LoginForm() {
         required
       />
       <button type="submit" disabled={submitting}>
-        {submitting ? "Verificando…" : "Iniciar sesión"}
+        {submitting ? "Verificando…" : "Entrar"}
       </button>
       <p className="login-feedback" role="status" aria-live="polite">
         {message}

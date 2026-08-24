@@ -660,7 +660,12 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         <span aria-hidden="true">{analysisDecision.icon}</span>
         <div><small>RESULTADO DE ATLAS</small><h3>{analysisDecision.label}</h3><p>{analysisDecision.explanation}</p></div>
       </section>
-      <p className="p2-atlas-confidence"><small>Confianza Atlas</small><strong>{director.analysis_confidence_score || 0}/100</strong></p>
+      <div className="p2-director-metrics" aria-label="Resumen del dictamen">
+        <span><small>Soporte</small><strong>{director.sports_verdict?.sports_score ?? "No disponible"}{Number.isFinite(Number(director.sports_verdict?.sports_score)) ? "/100" : ""}</strong></span>
+        <span><small>Precio</small><strong>{presentation.has_current_price ? `${price.bookmaker} @${price.decimal_odds}` : "Pendiente"}</strong></span>
+        <span><small>Confianza</small><strong>{director.analysis_confidence_score || 0}/100</strong></span>
+        <span><small>Riesgo</small><strong>{simpleRisks.length ? "Con alertas" : "Sin alerta específica"}</strong></span>
+      </div>
       <div className="p2-simple-evidence-grid">
         <ListBlock title="¿Por qué?" items={decisionReasons} empty="Atlas no encontró razones suficientes para sostener esta opción." />
         <ListBlock title="¿Qué podría hacerla fallar?" items={simpleRisks} empty="No se identificó un riesgo específico del partido con los datos disponibles." />
@@ -1527,7 +1532,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     [competitionGroups]
   );
   const initialCompetition = competitions[0] || null;
-  const [mainMode, setMainMode] = useState("journey");
+  const [mainMode, setMainMode] = useState("home");
   const [loggingOut, setLoggingOut] = useState(false);
   const [date, setDate] = useState("");
   const [journeyCompetitionKeys, setJourneyCompetitionKeys] = useState(
@@ -2017,6 +2022,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   return (
     <div className="p2-app">
       <nav className="p2-main-tabs" aria-label="Modos principales">
+        <button type="button" aria-current={mainMode === "home" ? "page" : undefined} onClick={() => setMainMode("home")}>Inicio</button>
         <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Analizar jornada</button>
         <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
         <button type="button" aria-current={mainMode === "live" ? "page" : undefined} onClick={() => setMainMode("live")}>Atlas EN VIVO</button>
@@ -2029,13 +2035,35 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       </nav>
       <AtlasGlossary />
 
-      {!["history", "bets", "combinations", "memory", "live"].includes(mainMode) ? <div className="p2-shared-date">
+      {!["home", "history", "bets", "combinations", "memory", "live"].includes(mainMode) ? <div className="p2-shared-date">
         <label>
           <span>1 · Elige la fecha</span>
           <input type="date" value={date} onChange={(event) => changeDate(event.target.value)} />
         </label>
         <p>Una sola fecha mantiene la consulta controlada y hace visible el contexto exacto.</p>
       </div> : null}
+
+      {mainMode === "home" ? (
+        <section className="p2-mode p2-home" aria-labelledby="atlas-home-title">
+          <div className="p2-mode-heading">
+            <p className="eyebrow">Centro de inteligencia</p>
+            <h2 id="atlas-home-title">¿Qué quieres analizar?</h2>
+            <p>Accede a cada flujo sin perder el principio de Atlas: comprender primero, decidir después.</p>
+          </div>
+          <div className="p2-home-primary" aria-label="Acciones principales">
+            <button type="button" onClick={() => setMainMode("journey")}><span>01</span><strong>Analizar jornada</strong><small>Compara partidos y mercados con respaldo deportivo.</small></button>
+            <button type="button" onClick={() => setMainMode("match")}><span>02</span><strong>Analizar partido</strong><small>Profundiza en un partido y una opción exacta.</small></button>
+            <button type="button" onClick={() => setMainMode("live")}><span>03</span><strong>Atlas EN VIVO</strong><small>Lee marcador, minuto y estadísticas actuales.</small></button>
+            <button type="button" onClick={() => setMainMode("combinations")}><span>04</span><strong>Parlay y Soñadora</strong><small>Construye combinaciones desde el análisis deportivo.</small></button>
+          </div>
+          <div className="p2-home-secondary" aria-label="Accesos secundarios">
+            <button type="button" onClick={() => setMainMode("memory")}><strong>Memoria Atlas</strong><small>Pronósticos y calibración.</small></button>
+            <button type="button" onClick={() => setMainMode("bets")}><strong>Rendimiento</strong><small>ROI y resultados registrados.</small></button>
+            <button type="button" onClick={() => setMainMode("history")}><strong>Historial</strong><small>Expedientes y versiones.</small></button>
+            <button type="button" onClick={() => setMainMode("bets")}><strong>Mis apuestas</strong><small>Registro personal.</small></button>
+          </div>
+        </section>
+      ) : null}
 
       {mainMode === "journey" ? (
         <section className="p2-mode" aria-labelledby="journey-title">
@@ -2222,7 +2250,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
         </section>
       ) : mainMode === "bets" ? (
         <BetTrackerView timezone={defaultTimezone} />
-      ) : (
+      ) : mainMode === "home" ? null : (
         <HistoryView timezone={defaultTimezone} />
       )}
     </div>
