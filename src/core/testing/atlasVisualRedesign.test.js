@@ -9,9 +9,10 @@ const testingDirectory = path.dirname(fileURLToPath(import.meta.url));
 const appDirectory = path.resolve(testingDirectory, "../../app");
 const repositoryRoot = path.resolve(testingDirectory, "../../..");
 
-test("UI 1. conserva byte por byte el asset maestro YEZQUIT aprobado", async () => {
+test("UI 1. conserva byte por byte el asset maestro YEZQUIT final", async () => {
   const asset = await readFile(path.join(repositoryRoot, "public/brand/yezquit-master.png"));
-  assert.equal(createHash("sha256").update(asset).digest("hex"), "c364b7d399357884585b94801595ec5580374285e1ab845a4724d101c7b31b2d");
+  assert.equal(createHash("sha256").update(asset).digest("hex"), "1e707045c7c41fea42427212d3687a642438ab8001e8ada5296a4bec47adb6f0");
+  assert.deepEqual([asset.readUInt32BE(16), asset.readUInt32BE(20)], [1254, 1254]);
 });
 
 test("UI 2. login y cabecera usan el asset maestro sin incrustarlo", async () => {
@@ -44,9 +45,8 @@ test("UI 5. la identidad Atlas es clara y el rojo no es dominante", async () => 
 
 test("UI 6. móvil compacta layout sin usar transform scale", async () => {
   const css = await readFile(path.join(appDirectory, "globals.css"), "utf8");
-  const mobile = css.slice(css.lastIndexOf("@media (max-width: 640px)"));
-  assert.match(mobile, /font-size: 13\.5px/);
-  assert.match(mobile, /padding: var\(--atlas-space-3\)/);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*?body\s*\{[\s\S]*?font-size: 13\.5px/);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*?padding: var\(--atlas-space-3\)/);
   assert.doesNotMatch(css, /transform\s*:\s*scale\s*\(/i);
 });
 
@@ -91,4 +91,21 @@ test("UI 13. el rediseño no toca módulos del motor desde la capa cliente", asy
   const source = await readFile(path.join(appDirectory, "atlas-functional-client.js"), "utf8");
   assert.doesNotMatch(source, /setSportsScore|setPreliminaryProbability|setFixtureId/);
   assert.match(source, /Number\(result\?\.selectedFixtureId\) !== requestedFixtureId/);
+});
+
+test("UI 14. navegación móvil separa destinos y acciones de sesión", async () => {
+  const [source, css] = await Promise.all([readFile(path.join(appDirectory, "atlas-functional-client.js"), "utf8"), readFile(path.join(appDirectory, "globals.css"), "utf8")]);
+  assert.match(source, /className="p2-main-destinations"/);
+  assert.match(source, /className="p2-nav-utilities"/);
+  assert.match(css, /\.p2-main-tabs\s*\{[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/);
+  assert.match(css, /\.p2-main-tabs \.p2-main-destinations button\s*\{[\s\S]*?min-height: 44px;[\s\S]*?border: 1px solid/);
+  assert.match(css, /\.p2-nav-utilities\s*\{[\s\S]*?border-top: 1px solid/);
+});
+
+test("UI 15. Atlas LIVE muestra lectura, viabilidad y precio por separado", async () => {
+  const source = await readFile(path.join(appDirectory, "atlas-live.js"), "utf8");
+  assert.match(source, /Lectura deportiva/);
+  assert.match(source, /Viabilidad LIVE/);
+  assert.match(source, /Línea LIVE actual evaluada como candidato independiente/);
+  assert.match(source, /director\.market_viability/);
 });

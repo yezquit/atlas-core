@@ -21,7 +21,7 @@ export default async function Home() {
             <h1>ATLAS</h1>
             <p className="atlas-byline">by <strong>YEZQUIT</strong></p>
           </div>
-          <Image className="yezquit-brand-signature" src="/brand/yezquit-master.png" width="1536" height="1024" alt="Identidad maestra YEZQUIT" priority />
+          <Image className="yezquit-brand-signature" src="/brand/yezquit-master.png" width="1254" height="1254" alt="Identidad maestra YEZQUIT" priority unoptimized />
         </header>
         <p className="subtitle">Comprender antes de decidir.</p>
         <p className="functional-intro">

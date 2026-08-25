@@ -4,15 +4,56 @@ import { useCallback, useEffect, useState } from "react";
 import { displayProviderStatus, displaySelectionLabel } from "./presentation-labels";
 
 const MARKET_LABELS = { goals: "Goles", corners: "Córners", cards: "Tarjetas", total_shots: "Remates totales", shots_on_goal: "Remates a puerta" };
+const VIABILITY_LABELS = {
+  pending: "Línea vigente y pendiente",
+  already_crossed: "Línea ya cruzada",
+  already_reached: "Línea ya alcanzada",
+  line_not_live: "Línea exacta no disponible",
+  quote_unavailable: "Cuota no disponible",
+  stale: "Cotización vencida",
+  blocked: "Mercado bloqueado",
+  provider_unavailable: "Proveedor no disponible",
+  current_line_unknown: "Línea actual desconocida",
+  unsupported: "Mercado no soportado",
+};
+
+function viabilityLabel(value) {
+  return VIABILITY_LABELS[value] || "No accionable actualmente";
+}
 
 function LiveAnalysis({ analysis, onSave, saveState }) {
   const { snapshot, director } = analysis;
   const markets = (analysis.market_assessments || []).filter((item) => item.candidate);
   return <section className="p2-live-analysis" aria-labelledby="live-result-title">
     <header><p className="eyebrow">Captura EN VIVO · minuto {snapshot.minute}</p><h2 id="live-result-title">{snapshot.home_team} {snapshot.score.home} - {snapshot.score.away} {snapshot.away_team}</h2><p>Actualizado {new Date(snapshot.captured_at).toLocaleTimeString("es-CO")} · {displayProviderStatus(snapshot.status.long || snapshot.status.short)}</p></header>
-    <section className={`p2-live-director p2-live-director-${director.analysis_decision.status}`}><p className="eyebrow">DirectorAtlas</p><h3>{director.analysis_decision.label}</h3><p>{director.analysis_decision.explanation}</p>{director.selection ? <p><strong>{MARKET_LABELS[director.market_evaluated?.family] || director.market_evaluated?.family}: {displaySelectionLabel(director.selection)}</strong> · respaldo {director.sports_verdict.sports_score}/100 · confianza {director.analysis_confidence_score}/100</p> : null}<p>{director.price_assessment.message}</p>{director.analysis_decision.status === "yes" ? <button type="button" className="secondary-button" onClick={onSave} disabled={saveState.kind === "loading"}>{saveState.kind === "loading" ? "Guardando…" : "Guardar pronóstico EN VIVO"}</button> : null}{saveState.message ? <small role="status">{saveState.message}</small> : null}</section>
+    <section className={`p2-live-director p2-live-director-${director.analysis_decision.status}`}>
+      <p className="eyebrow">DirectorAtlas</p>
+      <h3>{director.analysis_decision.label}</h3>
+      <p>{director.analysis_decision.explanation}</p>
+      {director.selection ? <p><strong>{MARKET_LABELS[director.market_evaluated?.family] || director.market_evaluated?.family}: {displaySelectionLabel(director.selection)}</strong></p> : null}
+      <div className="p2-live-decision-grid" aria-label="Lectura y viabilidad de la selección">
+        <span><small>Lectura deportiva</small><strong>{director.sports_verdict?.sports_score ?? 0}/100</strong></span>
+        <span><small>Confianza</small><strong>{director.analysis_confidence_score}/100</strong></span>
+        <span><small>Viabilidad LIVE</small><strong>{viabilityLabel(director.market_viability?.status)}</strong></span>
+        <span><small>Precio</small><strong>{director.price_assessment?.decimal_odds ? `@${director.price_assessment.decimal_odds}` : "No utilizable"}</strong></span>
+      </div>
+      <p>{director.price_assessment.message}</p>
+      {director.analysis_decision.status === "yes" ? <button type="button" className="secondary-button" onClick={onSave} disabled={saveState.kind === "loading"}>{saveState.kind === "loading" ? "Guardando…" : "Guardar pronóstico EN VIVO"}</button> : null}
+      {saveState.message ? <small role="status">{saveState.message}</small> : null}
+    </section>
     <div className="p2-live-stats">{Object.entries(snapshot.totals || {}).map(([key, value]) => <span key={key}><small>{MARKET_LABELS[key] || key}</small><strong>{value ?? "No disponible"}</strong></span>)}</div>
-    <section><h3>Mercados evaluados</h3><div className="p2-live-markets">{markets.map((item) => <article key={item.market_family}><h4>{MARKET_LABELS[item.market_family] || item.market_family}</h4><p><strong>{displaySelectionLabel(item.candidate.selection)}</strong></p><p>Acumulado {item.projection.current_total} · proyección acotada {item.projection.projected_total}</p><p>Respaldo {item.candidate.sports_score}/100 · confianza {item.candidate.confidence_score}/100</p>{item.candidate.active_quote ? <p>Cuota EN VIVO: {item.candidate.active_quote.bookmaker_name || "Proveedor"} @{item.candidate.active_quote.decimal_odds}</p> : <p>Sin cuota EN VIVO exacta y vigente.</p>}</article>)}</div></section>
+    <section><h3>Mercados evaluados</h3><div className="p2-live-markets">{markets.map((item) => {
+      const currentLine = item.operational_candidate;
+      const lineChanged = currentLine && Number(currentLine.line) !== Number(item.candidate.line);
+      return <article key={item.market_family}>
+        <h4>{MARKET_LABELS[item.market_family] || item.market_family}</h4>
+        <p><strong>Lectura deportiva: {displaySelectionLabel(item.candidate.selection)}</strong></p>
+        <p>Acumulado {item.projection.current_total} · proyección acotada {item.projection.projected_total}</p>
+        <p>Respaldo {item.candidate.sports_score}/100 · confianza {item.candidate.confidence_score}/100</p>
+        <p className={`p2-live-viability p2-live-viability-${item.candidate.live_viability?.viable ? "pending" : "unavailable"}`}>{viabilityLabel(item.candidate.live_viability?.status)}</p>
+        {lineChanged ? <div className="p2-live-current-line"><small>Línea LIVE actual evaluada como candidato independiente</small><strong>{displaySelectionLabel(currentLine.selection)}</strong><span>Respaldo propio {currentLine.sports_score}/100</span>{currentLine.active_quote ? <span>{currentLine.active_quote.bookmaker_name || "Proveedor"} @{currentLine.active_quote.decimal_odds}</span> : null}</div> : item.candidate.active_quote ? <p>Cuota EN VIVO: {item.candidate.active_quote.bookmaker_name || "Proveedor"} @{item.candidate.active_quote.decimal_odds}</p> : null}
+      </article>;
+    })}</div></section>
     <details><summary>Ver captura y trazabilidad técnica</summary><pre>{JSON.stringify(analysis, null, 2)}</pre></details>
   </section>;
 }

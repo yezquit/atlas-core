@@ -15,7 +15,7 @@ export default async function LoginPage() {
     <main className="login-page">
       <section className="login-card" aria-labelledby="login-title">
         <div className="login-brand-visual">
-          <Image className="yezquit-brand-mark" src="/brand/yezquit-master.png" width="1536" height="1024" alt="Identidad maestra YEZQUIT" priority />
+          <Image className="yezquit-brand-mark" src="/brand/yezquit-master.png" width="1254" height="1254" alt="Identidad maestra YEZQUIT" priority unoptimized />
         </div>
         <div className="login-access">
           <p className="eyebrow">Inteligencia Deportiva</p>

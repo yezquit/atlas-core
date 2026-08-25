@@ -1,6 +1,7 @@
 import { fixtureStatTotal } from "./intelligenceUtils.js";
+import { assessLiveMarketViability } from "./liveMarketViability.js";
 
-export const LIVE_ANALYSIS_VERSION = "atlas-live-v1";
+export const LIVE_ANALYSIS_VERSION = "atlas-live-v1.1";
 export const LIVE_ACTIVE_STATUSES = Object.freeze(["1H", "HT", "2H", "ET", "BT", "P"]);
 
 const FINAL_STATUSES = new Set(["FT", "AET", "PEN"]);
@@ -198,18 +199,20 @@ function liveBetContainers(item) {
   return [...direct, ...bookmakers];
 }
 
-export function normalizeLiveOdds(payload = [], { fixtureId, fetchedAt, now = new Date().toISOString() } = {}) {
+export function inspectLiveOdds(payload = [], { fixtureId, fetchedAt, now = new Date().toISOString() } = {}) {
   const observed = parsedTime(fetchedAt);
   const current = parsedTime(now);
-  if (observed === null || current === null || current - observed > 120_000 || observed - current > 30_000) return [];
+  const envelopeStale = observed === null || current === null || current - observed > 120_000 || observed - current > 30_000;
   const quotes = [];
+  const diagnostics = [];
   for (const item of payload || []) {
-    if (Number(item?.fixture?.id ?? item?.fixture_id) !== Number(fixtureId)) continue;
-    if (!item?.status || typeof item.status !== "object") continue;
+    const itemFixtureId = Number(item?.fixture?.id ?? item?.fixture_id);
+    const fixtureMatches = itemFixtureId === Number(fixtureId);
+    const hasLiveStatus = Boolean(item?.status && typeof item.status === "object");
     const updated = parsedTime(item.update);
-    if (updated === null || current - updated > 120_000 || updated - current > 30_000) continue;
+    const itemStale = updated === null || current === null || current - updated > 120_000 || updated - current > 30_000;
     const liveStatus = item.status || {};
-    if (liveStatus.stopped === true || liveStatus.blocked === true || liveStatus.finished === true) continue;
+    const itemBlocked = liveStatus.stopped === true || liveStatus.blocked === true || liveStatus.finished === true;
     for (const { bet, bookmaker } of liveBetContainers(item)) {
       const family = marketFamilyFromBet(bet?.name);
       if (!family) continue;
@@ -217,21 +220,42 @@ export function normalizeLiveOdds(payload = [], { fixtureId, fetchedAt, now = ne
         const direction = directionFrom(value?.value || value?.label || value?.name);
         const line = number(value?.handicap ?? String(value?.value || value?.label || "").match(/-?\d+(?:[.,]\d+)?/)?.[0]);
         const decimalOdds = number(value?.odd ?? value?.odds);
-        if (!direction || line === null || decimalOdds === null || decimalOdds <= 1 || value?.suspended === true || value?.main === false) continue;
-        quotes.push(Object.freeze({
+        if (!direction || line === null) continue;
+        const identity = {
           contract: "LiveOddsQuote",
           version: 1,
-          quote_id: `live:${fixtureId}:${bookmaker?.id || "unknown"}:${bet?.id || normalized(bet?.name)}:${direction}:${line}:${fetchedAt}`,
+          quote_id: `live:${itemFixtureId || fixtureId}:${bookmaker?.id || "unknown"}:${bet?.id || normalized(bet?.name)}:${direction}:${line}:${fetchedAt}`,
           mode: "live",
-          fixture_id: Number(fixtureId),
+          fixture_id: itemFixtureId,
           market_family: family,
           direction,
           selection: `${direction === "over" ? "Over" : "Under"} ${line}`,
           line,
+          observed_at: item.update || null,
+          fetched_at: fetchedAt || null,
+        };
+        const diagnosticStatus = !fixtureMatches
+          ? "fixture_mismatch"
+          : !hasLiveStatus
+            ? "unsupported"
+            : envelopeStale || itemStale
+              ? "stale"
+              : itemBlocked || value?.suspended === true
+                ? "blocked"
+                : value?.main === false
+                  ? "not_main"
+                  : decimalOdds === null || decimalOdds <= 1
+                    ? "quote_unavailable"
+                    : null;
+        if (diagnosticStatus) {
+          diagnostics.push(Object.freeze({ ...identity, status: diagnosticStatus }));
+          continue;
+        }
+        quotes.push(Object.freeze({
+          ...identity,
           decimal_odds: decimalOdds,
           bookmaker_name: bookmaker?.name || item?.bookmaker?.name || null,
-          observed_at: item.update,
-          fetched_at: fetchedAt,
+          market_status: "open",
           freshness: "fresh",
           verification_status: "verified_live_provider",
           source_status: "verified_live_current",
@@ -239,13 +263,26 @@ export function normalizeLiveOdds(payload = [], { fixtureId, fetchedAt, now = ne
       }
     }
   }
-  return quotes;
+  return Object.freeze({ quotes, diagnostics });
+}
+
+export function normalizeLiveOdds(payload = [], options = {}) {
+  return inspectLiveOdds(payload, options).quotes;
 }
 
 function matchingLiveQuote(candidate, quotes) {
   return quotes
     .filter((quote) => quote.mode === "live" && quote.freshness === "fresh" && quote.source_status === "verified_live_current" && Number(quote.fixture_id) === Number(candidate.fixture_id) && quote.market_family === candidate.market_family && quote.direction === candidate.direction && Number(quote.line) === Number(candidate.line))
     .sort((left, right) => right.decimal_odds - left.decimal_odds)[0] || null;
+}
+
+function matchingLiveDiagnostic(candidate, diagnostics) {
+  return diagnostics.find((item) =>
+    Number(item.fixture_id) === Number(candidate.fixture_id) &&
+    item.market_family === candidate.market_family &&
+    item.direction === candidate.direction &&
+    Number(item.line) === Number(candidate.line)
+  ) || null;
 }
 
 function confidenceFor(snapshot, family) {
@@ -255,38 +292,92 @@ function confidenceFor(snapshot, family) {
   return Math.round(clamp(35 + elapsedFactor * 25 + (hasFamilyData ? 12 : 0) + statisticsCoverage * 10, 30, 82));
 }
 
-export function buildLiveMarketAssessments(snapshot, liveQuotes = []) {
+function sportsCandidateFor({ snapshot, family, projection, line, confidence, origin }) {
+  const direction = projection.projected_additional >= 0.75 ? "over" : "under";
+  const margin = direction === "over" ? projection.projected_total - line : line - projection.projected_total;
+  const sportsScore = Math.round(clamp(48 + Math.max(0, margin) * 24 + (confidence - 40) * 0.35, 42, 84));
+  return {
+    candidate_id: `live:${snapshot.fixture_id}:${family}:${direction}:${line}`,
+    candidate_origin: origin,
+    fixture_id: snapshot.fixture_id,
+    market_family: family,
+    direction,
+    line,
+    selection: `${direction === "over" ? "Over" : "Under"} ${line}`,
+    current_total: projection.current_total,
+    projected_total: projection.projected_total,
+    sports_score: sportsScore,
+    confidence_score: confidence,
+    estimated_probability: null,
+    probability_status: "unavailable",
+    reasons: [`Minuto ${snapshot.minute}: ${projection.current_total} acumulado(s); proyección acotada ${projection.projected_total}.`, "La proyección reduce el ritmo observado y aplica un máximo dependiente del tiempo restante."],
+    risks: [snapshot.sources.coherence_status === "partial_without_statistics" ? "El snapshot no contiene estadísticas acumuladas completas." : null, confidence < 60 ? "La muestra temporal o la cobertura todavía son limitadas." : null].filter(Boolean),
+  };
+}
+
+function viabilityForCandidate(snapshot, candidate, { liveQuotes, liveOddsDiagnostics, liveOddsProviderStatus, analyzedAt }) {
+  const quote = matchingLiveQuote(candidate, liveQuotes);
+  const diagnostic = matchingLiveDiagnostic(candidate, liveOddsDiagnostics);
+  const viability = assessLiveMarketViability({
+    fixtureId: snapshot.fixture_id,
+    marketFamily: candidate.market_family,
+    direction: candidate.direction,
+    line: candidate.line,
+    currentValue: candidate.current_total,
+    matchMinute: snapshot.minute,
+    matchStatus: snapshot.status.short,
+    quote,
+    providerStatus: liveOddsProviderStatus,
+    providerMarketStatus: diagnostic?.status || quote?.market_status || null,
+    quoteTimestamp: quote?.observed_at || diagnostic?.observed_at || null,
+    now: analyzedAt,
+  });
+  const availableLines = [...new Set(liveQuotes
+    .filter((item) => Number(item.fixture_id) === Number(candidate.fixture_id) && item.market_family === candidate.market_family && item.direction === candidate.direction)
+    .map((item) => item.line))].sort((left, right) => left - right);
+  return {
+    ...viability,
+    reason: viability.status === "line_not_live" && availableLines.length
+      ? "exact_live_line_unavailable_market_moved"
+      : viability.reason,
+    available_lines: availableLines,
+    exact_quote: quote,
+  };
+}
+
+export function buildLiveMarketAssessments(snapshot, liveQuotes = [], {
+  liveOddsDiagnostics = [],
+  liveOddsProviderStatus = "success",
+  analyzedAt = snapshot?.captured_at || new Date().toISOString(),
+} = {}) {
   return Object.keys(PROJECTION_CONFIG).map((family) => {
     const projection = projectLiveTotal({ marketFamily: family, currentTotal: snapshot.totals[family], minute: snapshot.minute, statusShort: snapshot.status.short });
     if (projection.status !== "available") return { contract: "LiveMarketAssessment", version: 1, market_family: family, status: "insufficient_information", projection, candidate: null, reasons: [], risks: [projection.reason] };
-    const line = Number((projection.current_total + 0.5).toFixed(1));
-    const direction = projection.projected_additional >= 0.75 ? "over" : "under";
-    const margin = direction === "over" ? projection.projected_total - line : line - projection.projected_total;
     const confidence = confidenceFor(snapshot, family);
-    const sportsScore = Math.round(clamp(48 + Math.max(0, margin) * 24 + (confidence - 40) * 0.35, 42, 84));
-    const candidate = {
-      fixture_id: snapshot.fixture_id,
-      market_family: family,
-      direction,
-      line,
-      selection: `${direction === "over" ? "Over" : "Under"} ${line}`,
-      current_total: projection.current_total,
-      projected_total: projection.projected_total,
-      sports_score: sportsScore,
-      confidence_score: confidence,
-      estimated_probability: null,
-      probability_status: "unavailable",
-      reasons: [`Minuto ${snapshot.minute}: ${projection.current_total} acumulado(s); proyección acotada ${projection.projected_total}.`, "La proyección reduce el ritmo observado y aplica un máximo dependiente del tiempo restante."],
-      risks: [snapshot.sources.coherence_status === "partial_without_statistics" ? "El snapshot no contiene estadísticas acumuladas completas." : null, confidence < 60 ? "La muestra temporal o la cobertura todavía son limitadas." : null].filter(Boolean),
-    };
-    const quote = matchingLiveQuote(candidate, liveQuotes);
+    const sportsLine = Number((projection.current_total + 0.5).toFixed(1));
+    const sportsReading = sportsCandidateFor({ snapshot, family, projection, line: sportsLine, confidence, origin: "sports_snapshot_reading" });
+    const sportsViability = viabilityForCandidate(snapshot, sportsReading, { liveQuotes, liveOddsDiagnostics, liveOddsProviderStatus, analyzedAt });
+    const candidate = { ...sportsReading, active_quote: sportsViability.exact_quote, live_viability: sportsViability };
+    const operationalCandidates = liveQuotes
+      .filter((quote) => Number(quote.fixture_id) === Number(snapshot.fixture_id) && quote.market_family === family && quote.direction === sportsReading.direction)
+      .filter((quote, index, items) => items.findIndex((item) => Number(item.line) === Number(quote.line)) === index)
+      .map((quote) => {
+        const recalculated = sportsCandidateFor({ snapshot, family, projection, line: Number(quote.line), confidence, origin: "exact_live_line_reanalysis" });
+        const liveViability = viabilityForCandidate(snapshot, recalculated, { liveQuotes, liveOddsDiagnostics, liveOddsProviderStatus, analyzedAt });
+        return { ...recalculated, active_quote: liveViability.exact_quote, live_viability: liveViability };
+      })
+      .sort((left, right) => right.sports_score - left.sports_score || left.line - right.line);
     return {
       contract: "LiveMarketAssessment",
       version: 1,
       market_family: family,
-      status: sportsScore >= 58 ? "available" : "insufficient_information",
+      status: candidate.sports_score >= 58 ? "available" : "insufficient_information",
       projection,
-      candidate: { ...candidate, active_quote: quote },
+      candidate,
+      sports_reading: candidate,
+      operational_candidates: operationalCandidates,
+      operational_candidate: operationalCandidates[0] || null,
+      live_viability: sportsViability,
       reasons: candidate.reasons,
       risks: candidate.risks,
     };
@@ -294,12 +385,49 @@ export function buildLiveMarketAssessments(snapshot, liveQuotes = []) {
 }
 
 export function buildLiveDirectorVerdict(snapshot, assessments) {
-  const candidates = assessments.filter((item) => item.status === "available" && item.candidate).map((item) => item.candidate).sort((left, right) => right.sports_score - left.sports_score || right.confidence_score - left.confidence_score);
-  const primary = candidates[0] || null;
-  const supported = primary && primary.sports_score >= 68 && primary.confidence_score >= 58;
-  const decisionStatus = supported ? "yes" : primary ? "wait" : "no";
-  const labels = { yes: "SÍ, ME GUSTA ESTA OPCIÓN", wait: "ESPERAR", no: "NO ME GUSTA ESTA OPCIÓN" };
-  const explanation = supported ? `El snapshot LIVE respalda ${primary.selection} con datos acumulados y proyección acotada.` : primary ? "La lectura existe, pero la muestra LIVE todavía no alcanza el umbral operativo." : "Los datos LIVE disponibles no sostienen un mercado evaluable.";
+  const sportsCandidates = assessments
+    .filter((item) => item.status === "available" && item.sports_reading)
+    .map((item) => item.sports_reading)
+    .sort((left, right) => right.sports_score - left.sports_score || right.confidence_score - left.confidence_score);
+  const operationalCandidates = assessments
+    .flatMap((item) => item.operational_candidates || [])
+    .filter((candidate) => candidate.live_viability?.viable && candidate.active_quote)
+    .sort((left, right) => right.sports_score - left.sports_score || right.confidence_score - left.confidence_score);
+  const actionable = operationalCandidates.find((candidate) => candidate.sports_score >= 68 && candidate.confidence_score >= 58) || null;
+  const sportsPrimary = sportsCandidates[0] || null;
+  const primary = actionable || sportsPrimary;
+  const sportsSupported = Boolean(sportsPrimary && sportsPrimary.sports_score >= 68 && sportsPrimary.confidence_score >= 58);
+  const decisionStatus = actionable ? "yes" : primary ? "wait" : "no";
+  const labels = {
+    yes: "SÍ, ME GUSTA ESTA OPCIÓN",
+    wait: sportsSupported ? "LECTURA FAVORABLE, LÍNEA NO DISPONIBLE" : "ESPERAR",
+    no: "NO ME GUSTA ESTA OPCIÓN",
+  };
+  const explanation = actionable
+    ? `El snapshot LIVE respalda ${actionable.selection} y existe una línea exacta vigente compatible.`
+    : sportsPrimary && sportsSupported
+      ? `La lectura deportiva favorece ${sportsPrimary.selection}, pero esa línea no es una recomendación LIVE accionable sin mercado exacto vigente.`
+      : primary
+        ? "La lectura existe, pero la muestra LIVE todavía no alcanza el umbral deportivo y operativo."
+        : "Los datos LIVE disponibles no sostienen un mercado evaluable.";
+  const marketViability = primary?.live_viability || { viable: false, status: "current_line_unknown", reason: "live_candidate_unavailable" };
+  const priceAssessment = primary?.active_quote && marketViability.viable
+    ? { status: "observed_live_price_unpriced", mode: "live", bookmaker: primary.active_quote.bookmaker_name, decimal_odds: primary.active_quote.decimal_odds, freshness: primary.active_quote.freshness, source_status: primary.active_quote.source_status, message: "Cuota LIVE vigente observada; Atlas no estima valor sin probabilidad deportiva validada." }
+    : {
+        status: marketViability.status,
+        mode: "live",
+        freshness: marketViability.status === "stale" ? "stale" : "unavailable",
+        source_status: marketViability.status,
+        message: marketViability.status === "provider_unavailable"
+          ? "El proveedor de mercados LIVE no está disponible; no existe una recomendación accionable."
+          : marketViability.status === "blocked"
+            ? "La línea exacta está bloqueada en el mercado LIVE."
+            : marketViability.status === "stale"
+              ? "La cotización exacta está vencida y no puede utilizarse."
+              : ["already_crossed", "already_reached"].includes(marketViability.status)
+                ? "La línea ya fue alcanzada o cruzada y no puede tratarse como apuesta LIVE pendiente."
+                : "No hay una línea LIVE exacta, compatible y vigente para esta lectura deportiva.",
+      };
   return Object.freeze({
     contract: "DirectorLiveVerdict",
     version: 1,
@@ -307,27 +435,29 @@ export function buildLiveDirectorVerdict(snapshot, assessments) {
     mode: "live",
     fixture: { fixture_id: snapshot.fixture_id, home_team: snapshot.home_team, away_team: snapshot.away_team, competition: snapshot.competition, season: snapshot.season, kickoff_utc: snapshot.kickoff_utc },
     live_context: { snapshot_id: snapshot.snapshot_id, minute: snapshot.minute, status: snapshot.status, score: snapshot.score, captured_at: snapshot.captured_at },
-    analysis_decision: { status: decisionStatus, label: labels[decisionStatus], explanation },
+    analysis_decision: { status: decisionStatus, label: labels[decisionStatus], explanation, operationally_actionable: Boolean(actionable) },
     decision_code: decisionStatus,
-    sports_verdict: primary ? { status: supported ? "sports_candidate" : "review_only", ...primary } : { status: "insufficient_information" },
+    sports_verdict: primary ? { status: primary.sports_score >= 68 ? "sports_candidate" : "review_only", ...primary } : { status: "insufficient_information" },
+    market_viability: marketViability,
     market_evaluated: primary ? { family: primary.market_family, label: primary.market_family } : null,
     selection: primary?.selection || null,
     line: primary?.line ?? null,
     analysis_confidence_score: primary?.confidence_score || 0,
     estimated_probability: null,
     probability_status: "unavailable",
-    price_assessment: primary?.active_quote ? { status: "observed_live_price_unpriced", mode: "live", bookmaker: primary.active_quote.bookmaker_name, decimal_odds: primary.active_quote.decimal_odds, freshness: primary.active_quote.freshness, source_status: primary.active_quote.source_status, message: "Cuota LIVE vigente observada; Atlas no estima valor sin probabilidad deportiva validada." } : { status: "unavailable", mode: "live", freshness: "unavailable", source_status: "unavailable", message: "No existe una cuota LIVE compatible y vigente." },
+    price_assessment: priceAssessment,
     reasons: primary?.reasons || [],
     simple_reasons: (primary?.reasons || []).slice(0, 3),
     risks: primary?.risks || [],
   });
 }
 
-export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statistics = null, liveOddsPayload = [], fixtureFetchedAt, statisticsFetchedAt = null, oddsFetchedAt = null, analyzedAt = new Date().toISOString() } = {}) {
+export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statistics = null, liveOddsPayload = [], liveOddsProviderStatus = "success", fixtureFetchedAt, statisticsFetchedAt = null, oddsFetchedAt = null, analyzedAt = new Date().toISOString() } = {}) {
   const snapshotResult = createLiveMatchSnapshot({ fixture, statistics, fixtureFetchedAt, statisticsFetchedAt, oddsFetchedAt, snapshotAt: analyzedAt });
   if (snapshotResult.status !== "success") return { contract: "LiveAnalysisResult", version: 1, status: "unavailable", mode: "live", errorCode: snapshotResult.errorCode, analysis_id: null, snapshot: null, market_assessments: [], director: null };
-  const liveOdds = normalizeLiveOdds(liveOddsPayload, { fixtureId: fixture.fixtureId, fetchedAt: oddsFetchedAt || analyzedAt, now: analyzedAt });
-  const assessments = buildLiveMarketAssessments(snapshotResult.snapshot, liveOdds);
+  const liveOddsInspection = inspectLiveOdds(liveOddsPayload, { fixtureId: fixture.fixtureId, fetchedAt: oddsFetchedAt || analyzedAt, now: analyzedAt });
+  const liveOdds = liveOddsInspection.quotes;
+  const assessments = buildLiveMarketAssessments(snapshotResult.snapshot, liveOdds, { liveOddsDiagnostics: liveOddsInspection.diagnostics, liveOddsProviderStatus, analyzedAt });
   const director = buildLiveDirectorVerdict(snapshotResult.snapshot, assessments);
   return Object.freeze({
     contract: "LiveAnalysisResult",
@@ -342,6 +472,7 @@ export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statisti
     snapshot: snapshotResult.snapshot,
     market_assessments: assessments,
     live_odds: liveOdds,
+    live_odds_diagnostics: liveOddsInspection.diagnostics,
     active_quote: director.sports_verdict?.active_quote || null,
     director,
   });

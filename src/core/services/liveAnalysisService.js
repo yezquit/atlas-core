@@ -36,6 +36,7 @@ export async function analyzeLiveFixture(input, gateway, { idFactory, now = () =
     analysisId: idFactory(), competitionKey: competition.key, fixture: fixtureResult.fixture,
     statistics: statisticsResult?.status === "success" ? statisticsResult.statistics : null,
     liveOddsPayload: oddsResult?.status === "success" ? oddsResult.response : [],
+    liveOddsProviderStatus: oddsResult?.status === "success" ? "success" : "provider_unavailable",
     fixtureFetchedAt: fixtureResult.requestMeta?.fetchedAt || analyzedAt,
     statisticsFetchedAt: statisticsResult?.status === "success" ? statisticsResult.requestMeta?.fetchedAt || analyzedAt : null,
     oddsFetchedAt: oddsResult?.status === "success" ? oddsResult.requestMeta?.fetchedAt || analyzedAt : null,

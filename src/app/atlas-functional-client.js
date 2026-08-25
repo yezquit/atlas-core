@@ -2022,16 +2022,20 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   return (
     <div className="p2-app">
       <nav className="p2-main-tabs" aria-label="Modos principales">
-        <button type="button" aria-current={mainMode === "home" ? "page" : undefined} onClick={() => setMainMode("home")}>Inicio</button>
-        <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Analizar jornada</button>
-        <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
-        <button type="button" aria-current={mainMode === "live" ? "page" : undefined} onClick={() => setMainMode("live")}>Atlas EN VIVO</button>
-        <button type="button" aria-current={mainMode === "combinations" ? "page" : undefined} onClick={() => setMainMode("combinations")}>Parlay y Soñadora Atlas</button>
-        <button type="button" aria-current={mainMode === "memory" ? "page" : undefined} onClick={() => setMainMode("memory")}>Memoria Atlas · rendimiento</button>
-        <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
-        <button type="button" aria-current={mainMode === "bets" ? "page" : undefined} onClick={() => setMainMode("bets")}>Mis apuestas</button>
-        <button type="button" className="secondary-button" onClick={startNewSearch}>Nueva búsqueda</button>
-        <button type="button" className="secondary-button p2-logout-button" onClick={logout} disabled={loggingOut} title={`Sesión ${ownerId}`}>{loggingOut ? "Cerrando…" : "Cerrar sesión"}</button>
+        <div className="p2-main-destinations">
+          <button type="button" aria-current={mainMode === "home" ? "page" : undefined} onClick={() => setMainMode("home")}>Inicio</button>
+          <button type="button" aria-current={mainMode === "journey" ? "page" : undefined} onClick={() => setMainMode("journey")}>Analizar jornada</button>
+          <button type="button" aria-current={mainMode === "match" ? "page" : undefined} onClick={() => setMainMode("match")}>Analizar partido</button>
+          <button type="button" aria-current={mainMode === "live" ? "page" : undefined} onClick={() => setMainMode("live")}>Atlas EN VIVO</button>
+          <button type="button" aria-current={mainMode === "combinations" ? "page" : undefined} onClick={() => setMainMode("combinations")}>Parlay y Soñadora Atlas</button>
+          <button type="button" aria-current={mainMode === "memory" ? "page" : undefined} onClick={() => setMainMode("memory")}>Memoria Atlas · rendimiento</button>
+          <button type="button" aria-current={mainMode === "history" ? "page" : undefined} onClick={() => setMainMode("history")}>Historial</button>
+          <button type="button" aria-current={mainMode === "bets" ? "page" : undefined} onClick={() => setMainMode("bets")}>Mis apuestas</button>
+        </div>
+        <div className="p2-nav-utilities" aria-label="Acciones de sesión">
+          <button type="button" className="secondary-button p2-new-search-button" onClick={startNewSearch}>Nueva búsqueda</button>
+          <button type="button" className="secondary-button p2-logout-button" onClick={logout} disabled={loggingOut} title={`Sesión ${ownerId}`}>{loggingOut ? "Cerrando…" : "Cerrar sesión"}</button>
+        </div>
       </nav>
       <AtlasGlossary />
 

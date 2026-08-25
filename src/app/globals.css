@@ -6810,3 +6810,161 @@ pre {
     gap: var(--atlas-space-4);
   }
 }
+
+/* Atlas Personal V2.4: navegación móvil separada y lectura LIVE operativa. */
+.p2-main-destinations,
+.p2-nav-utilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--atlas-space-1);
+}
+
+.p2-main-destinations {
+  flex: 1 1 auto;
+}
+
+.p2-nav-utilities {
+  margin-left: auto;
+}
+
+.p2-main-tabs .p2-logout-button {
+  margin-left: 0;
+}
+
+.yezquit-brand-signature {
+  width: 92px;
+  height: 92px;
+  aspect-ratio: 1;
+}
+
+.login-brand-visual {
+  aspect-ratio: 1;
+}
+
+.p2-live-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--atlas-space-2);
+  margin-block: var(--atlas-space-3);
+}
+
+.p2-live-decision-grid > span,
+.p2-live-current-line {
+  display: grid;
+  gap: 4px;
+  padding: var(--atlas-space-2);
+  border: 1px solid var(--atlas-border);
+  border-radius: var(--atlas-radius-sm);
+  background: var(--atlas-surface-muted);
+}
+
+.p2-live-decision-grid small,
+.p2-live-current-line small {
+  color: var(--atlas-text-secondary);
+}
+
+.p2-live-viability {
+  width: fit-content;
+  margin-block: var(--atlas-space-2);
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.p2-live-viability-pending {
+  color: #17643c;
+  background: #e7f7ee;
+}
+
+.p2-live-viability-unavailable {
+  color: #865713;
+  background: #fff4d6;
+}
+
+@media (max-width: 900px) {
+  .p2-live-decision-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .p2-main-tabs {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--atlas-space-2);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .p2-main-destinations {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .p2-main-tabs .p2-main-destinations button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 8px;
+    border: 1px solid var(--atlas-border);
+    border-radius: var(--atlas-radius-sm);
+    color: var(--atlas-text-secondary);
+    background: var(--atlas-surface);
+    box-shadow: 0 3px 10px rgba(22, 55, 88, 0.06);
+    font-size: 0.69rem;
+    line-height: 1.15;
+  }
+
+  .p2-main-tabs .p2-main-destinations button[aria-current="page"] {
+    border-color: var(--atlas-primary);
+    color: #ffffff;
+    background: var(--atlas-primary);
+    box-shadow: 0 0 0 2px var(--atlas-primary-soft);
+  }
+
+  .p2-nav-utilities {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-left: 0;
+    padding-top: var(--atlas-space-2);
+    border-top: 1px solid var(--atlas-border);
+  }
+
+  .p2-main-tabs .p2-nav-utilities button {
+    min-height: 44px;
+    border: 1px solid var(--atlas-border);
+    background: var(--atlas-surface-muted);
+  }
+
+  .p2-main-tabs .p2-nav-utilities .p2-logout-button {
+    border-color: rgba(195, 59, 73, 0.32);
+    color: var(--atlas-negative);
+    background: #fff6f6;
+  }
+
+  .yezquit-brand-signature {
+    width: 64px;
+    height: 64px;
+  }
+
+  .login-brand-visual {
+    width: min(260px, 100%);
+    margin-inline: auto;
+    aspect-ratio: 1;
+  }
+
+  .p2-live-decision-grid {
+    gap: 6px;
+    margin-block: var(--atlas-space-2);
+  }
+
+  .p2-live-decision-grid > span {
+    padding: 8px;
+  }
+}
