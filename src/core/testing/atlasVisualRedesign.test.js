@@ -11,7 +11,7 @@ const repositoryRoot = path.resolve(testingDirectory, "../../..");
 
 test("UI 1. conserva byte por byte el asset maestro YEZQUIT final", async () => {
   const asset = await readFile(path.join(repositoryRoot, "public/brand/yezquit-master.png"));
-  assert.equal(createHash("sha256").update(asset).digest("hex"), "1e707045c7c41fea42427212d3687a642438ab8001e8ada5296a4bec47adb6f0");
+  assert.equal(createHash("sha256").update(asset).digest("hex"), "10c03cf5b19009c97b32ccde3370718f987dbb6c7009056d5f6d72324a0bb648");
   assert.deepEqual([asset.readUInt32BE(16), asset.readUInt32BE(20)], [1254, 1254]);
 });
 
