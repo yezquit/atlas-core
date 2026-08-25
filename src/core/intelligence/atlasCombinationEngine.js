@@ -331,6 +331,72 @@ function priceCoverage(selections) {
   };
 }
 
+function editedCombinationResult(combination, selections, { editing = true } = {}) {
+  const target = Number(combination?.requested_selections);
+  const limits = COMBINATION_LIMITS[combination?.product];
+  const inspected = (selections || []).map((candidate) => inspectCombinationCandidate(candidate).candidate);
+  const warnings = correlationWarnings(inspected);
+  const coverage = priceCoverage(inspected);
+  const current = inspected.length;
+  const targetComplete = Number.isInteger(target) && current === target;
+  const canConfirm = Boolean(limits && current >= limits.minimum && current <= limits.maximum);
+  const correlationLevel = warnings.includes("same_fixture_same_market_family") ? "high" : warnings.length ? "medium" : "low";
+  const status = targetComplete ? "ready" : "editing";
+  const productLabel = combination?.product === COMBINATION_PRODUCT.DREAM ? "Soñadora Atlas" : "Parlay Atlas";
+  const minimum = limits?.minimum ?? 0;
+  const directorMessage = targetComplete
+    ? buildDirectorCombinationMessage({ product: combination.product, status: "ready", selections: current })
+    : canConfirm
+      ? `${productLabel} conserva ${current}/${target} selecciones. Puedes mantener la combinación reducida o completar manualmente la pata pendiente.`
+      : `${productLabel} conserva ${current}/${target} selecciones durante la edición, pero no puede confirmarse hasta alcanzar al menos ${minimum}.`;
+
+  return {
+    ...combination,
+    status,
+    editing,
+    selections: inspected,
+    current_selections: current,
+    target_selections: target,
+    target_complete: targetComplete,
+    can_confirm: canConfirm,
+    confirmation_status: canConfirm ? (targetComplete ? "target_complete" : "valid_reduced") : "blocked_minimum",
+    confirmation_block_reason: canConfirm ? null : "minimum_product_selections",
+    combined_decimal_odds: coverage.status === "complete" ? combinedDecimalOdds(inspected) : null,
+    price_coverage: coverage,
+    risk: riskFor(combination.product, inspected, warnings),
+    correlation: { level: correlationLevel, warnings },
+    director_message: directorMessage,
+  };
+}
+
+export function removeCombinationSelection(combination, selectionKey) {
+  if (!combination || !selectionKey || !Array.isArray(combination.selections)) return combination;
+  const removalIndex = combination.selections.findIndex((candidate) => candidate.selection_key === selectionKey);
+  if (removalIndex < 0) return combination;
+  const remaining = combination.selections.filter((_, index) => index !== removalIndex);
+  return editedCombinationResult(combination, remaining);
+}
+
+export function addCombinationSelection(combination, candidate) {
+  if (!combination || !candidate || !Array.isArray(combination.selections)) return combination;
+  const inspection = inspectCombinationCandidate(candidate);
+  const key = inspection.candidate.selection_key;
+  if (!inspection.sports_eligible || !key) return combination;
+  if (combination.selections.some((item) => item.selection_key === key)) return combination;
+  if (combination.selections.length >= Number(combination.requested_selections)) return combination;
+  return editedCombinationResult(combination, [...combination.selections, inspection.candidate]);
+}
+
+export function updateCombinationSelection(combination, candidate) {
+  if (!combination || !candidate || !Array.isArray(combination.selections)) return combination;
+  const inspection = inspectCombinationCandidate(candidate);
+  const key = inspection.candidate.selection_key;
+  const replacementIndex = combination.selections.findIndex((item) => item.selection_key === key);
+  if (replacementIndex < 0 || !inspection.sports_eligible) return combination;
+  const updated = combination.selections.map((item, index) => index === replacementIndex ? inspection.candidate : item);
+  return editedCombinationResult(combination, updated, { editing: combination.editing === true });
+}
+
 function addDiversifiedCandidates(chosen, eligible, target, product) {
   const passes = product === COMBINATION_PRODUCT.DREAM ? [false, true] : [false];
   for (const allowSecondFixtureSelection of passes) {

@@ -24,6 +24,8 @@ function viabilityLabel(value) {
 function LiveAnalysis({ analysis, onSave, saveState }) {
   const { snapshot, director } = analysis;
   const markets = (analysis.market_assessments || []).filter((item) => item.candidate);
+  const originalReading = director.original_sports_reading || director.sports_verdict;
+  const liveMarketVerdict = director.live_market_verdict;
   return <section className="p2-live-analysis" aria-labelledby="live-result-title">
     <header><p className="eyebrow">Captura EN VIVO · minuto {snapshot.minute}</p><h2 id="live-result-title">{snapshot.home_team} {snapshot.score.home} - {snapshot.score.away} {snapshot.away_team}</h2><p>Actualizado {new Date(snapshot.captured_at).toLocaleTimeString("es-CO")} · {displayProviderStatus(snapshot.status.long || snapshot.status.short)}</p></header>
     <section className={`p2-live-director p2-live-director-${director.analysis_decision.status}`}>
@@ -32,7 +34,8 @@ function LiveAnalysis({ analysis, onSave, saveState }) {
       <p>{director.analysis_decision.explanation}</p>
       {director.selection ? <p><strong>{MARKET_LABELS[director.market_evaluated?.family] || director.market_evaluated?.family}: {displaySelectionLabel(director.selection)}</strong></p> : null}
       <div className="p2-live-decision-grid" aria-label="Lectura y viabilidad de la selección">
-        <span><small>Lectura deportiva</small><strong>{director.sports_verdict?.sports_score ?? 0}/100</strong></span>
+        <span><small>Lectura deportiva original</small><strong>{originalReading?.sports_score ?? 0}/100</strong></span>
+        <span><small>Mercado LIVE evaluado</small><strong>{liveMarketVerdict?.sports_score ?? "No disponible"}{Number.isFinite(Number(liveMarketVerdict?.sports_score)) ? "/100" : ""}</strong></span>
         <span><small>Confianza</small><strong>{director.analysis_confidence_score}/100</strong></span>
         <span><small>Viabilidad LIVE</small><strong>{viabilityLabel(director.market_viability?.status)}</strong></span>
         <span><small>Precio</small><strong>{director.price_assessment?.decimal_odds ? `@${director.price_assessment.decimal_odds}` : "No utilizable"}</strong></span>

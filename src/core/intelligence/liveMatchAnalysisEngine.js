@@ -385,6 +385,10 @@ export function buildLiveMarketAssessments(snapshot, liveQuotes = [], {
 }
 
 export function buildLiveDirectorVerdict(snapshot, assessments) {
+  const allSportsReadings = assessments
+    .filter((item) => item.sports_reading)
+    .map((item) => item.sports_reading)
+    .sort((left, right) => right.sports_score - left.sports_score || right.confidence_score - left.confidence_score);
   const sportsCandidates = assessments
     .filter((item) => item.status === "available" && item.sports_reading)
     .map((item) => item.sports_reading)
@@ -395,6 +399,8 @@ export function buildLiveDirectorVerdict(snapshot, assessments) {
     .sort((left, right) => right.sports_score - left.sports_score || right.confidence_score - left.confidence_score);
   const actionable = operationalCandidates.find((candidate) => candidate.sports_score >= 68 && candidate.confidence_score >= 58) || null;
   const sportsPrimary = sportsCandidates[0] || null;
+  const originalSportsReading = allSportsReadings[0] || null;
+  const liveMarketPrimary = actionable || operationalCandidates[0] || null;
   const primary = actionable || sportsPrimary;
   const sportsSupported = Boolean(sportsPrimary && sportsPrimary.sports_score >= 68 && sportsPrimary.confidence_score >= 58);
   const decisionStatus = actionable ? "yes" : primary ? "wait" : "no";
@@ -437,6 +443,8 @@ export function buildLiveDirectorVerdict(snapshot, assessments) {
     live_context: { snapshot_id: snapshot.snapshot_id, minute: snapshot.minute, status: snapshot.status, score: snapshot.score, captured_at: snapshot.captured_at },
     analysis_decision: { status: decisionStatus, label: labels[decisionStatus], explanation, operationally_actionable: Boolean(actionable) },
     decision_code: decisionStatus,
+    original_sports_reading: originalSportsReading ? { status: originalSportsReading.sports_score >= 68 && originalSportsReading.confidence_score >= 58 ? "sports_candidate" : "review_only", ...originalSportsReading } : { status: "insufficient_information" },
+    live_market_verdict: liveMarketPrimary ? { status: actionable ? "actionable" : "not_actionable", ...liveMarketPrimary } : { status: "unavailable" },
     sports_verdict: primary ? { status: primary.sports_score >= 68 ? "sports_candidate" : "review_only", ...primary } : { status: "insufficient_information" },
     market_viability: marketViability,
     market_evaluated: primary ? { family: primary.market_family, label: primary.market_family } : null,
@@ -473,7 +481,7 @@ export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statisti
     market_assessments: assessments,
     live_odds: liveOdds,
     live_odds_diagnostics: liveOddsInspection.diagnostics,
-    active_quote: director.sports_verdict?.active_quote || null,
+    active_quote: director.live_market_verdict?.status === "actionable" ? director.live_market_verdict.active_quote : null,
     director,
   });
 }

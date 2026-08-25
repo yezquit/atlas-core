@@ -5,10 +5,13 @@ import {
   COMBINATION_LIMITS,
   COMBINATION_MODE,
   COMBINATION_PRODUCT,
+  addCombinationSelection,
   buildAtlasCombination,
   combinationSelectionKey,
   inspectCombinationCandidate,
   normalizeCombinationTarget,
+  removeCombinationSelection,
+  updateCombinationSelection,
 } from "@/core/intelligence/atlasCombinationEngine";
 import { findFixtureQuoteEntry } from "@/core/intelligence/fixtureQuoteLedger";
 import { createManualOdds } from "@/core/intelligence/oddsIntelligence";
@@ -257,6 +260,15 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
   }
 
   function toggleCandidate(key) {
+    if (combination?.editing) {
+      const alreadySelected = combination.selections.some((item) => item.selection_key === key);
+      const updated = alreadySelected
+        ? removeCombinationSelection(combination, key)
+        : addCombinationSelection(combination, candidates.find((item) => item.selection_key === key));
+      setCombination(updated);
+      setSelectedKeys((updated?.selections || []).map((item) => item.selection_key));
+      return;
+    }
     setSelectedKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
     setCombination(null);
   }
@@ -291,15 +303,22 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
     const updatedCandidates = candidates.map((item) => item.selection_key === key ? { ...item, active_quote: quote } : item);
     setManualQuotes((current) => ({ ...current, [key]: quote }));
     setManualErrors((current) => ({ ...current, [key]: null }));
-    setCombination(buildAtlasCombination({ candidates: updatedCandidates, product, mode, selections: selectionCount, selectedKeys }));
+    const selectedCandidate = updatedCandidates.find((item) => item.selection_key === key);
+    setCombination(combination?.selections?.some((item) => item.selection_key === key)
+      ? updateCombinationSelection(combination, selectedCandidate)
+      : buildAtlasCombination({ candidates: updatedCandidates, product, mode, selections: selectionCount, selectedKeys }));
   }
 
   function removePreparedSelection(key) {
-    const remaining = (combination?.selections || []).map((item) => item.selection_key).filter((item) => item !== key);
-    setMode(COMBINATION_MODE.MIXED);
-    setSelectedKeys(remaining);
-    setCombination(null);
+    const updated = removeCombinationSelection(combination, key);
+    setSelectedKeys((updated?.selections || []).map((item) => item.selection_key));
+    setCombination(updated);
   }
+
+  const editableSelectionKeys = combination?.editing
+    ? combination.selections.map((item) => item.selection_key)
+    : selectedKeys;
+  const showsPreparedCombination = combination && ["ready", "editing"].includes(combination.status);
 
   return (
     <section className="p2-mode p2-combination-builder" aria-labelledby="combination-title">
@@ -346,16 +365,17 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
 
       {journey ? <section className="p2-combination-universe">
         <div className="p2-combination-summary"><h3>Universo disponible</h3><p>{candidates.length} candidatos deportivos · {eligibleCount} elegibles deportivamente.</p><p>La falta de cuota no elimina una selección con soporte suficiente. Atlas muestra la cobertura económica por separado y nunca inventa precios.</p></div>
-        <div className="p2-combination-candidate-grid">{candidates.map((candidate) => <CandidateCard key={candidate.selection_key} candidate={candidate} selectable={mode !== COMBINATION_MODE.AUTOMATIC} selected={selectedKeys.includes(candidate.selection_key)} onToggle={toggleCandidate} />)}</div>
+        <div className="p2-combination-candidate-grid">{candidates.map((candidate) => <CandidateCard key={candidate.selection_key} candidate={candidate} selectable={mode !== COMBINATION_MODE.AUTOMATIC || combination?.editing === true} selected={editableSelectionKeys.includes(candidate.selection_key)} onToggle={toggleCandidate} />)}</div>
         <button type="button" className="primary-button p2-primary" onClick={generateCombination}>Generar {productName(product)}</button>
       </section> : null}
 
       {combination ? <section className={`p2-combination-result p2-combination-result-${combination.status}`} aria-live="polite">
         <p className="eyebrow">DirectorAtlas</p>
-        <h3>{combination.status === "ready" ? `${productName(product)} preparada` : "No se pudo construir la combinación"}</h3>
+        <h3>{combination.status === "ready" ? `${productName(product)} preparada` : combination.status === "editing" ? `${productName(product)} en edición` : "No se pudo construir la combinación"}</h3>
         <p>{combination.director_message || combination.message}</p>
-        {combination.status === "ready" ? <>
-          <div className="p2-combination-metrics"><span><small>Cuota combinada</small><strong>{combination.combined_decimal_odds ?? "Completa no disponible"}</strong></span><span><small>Cobertura de precios</small><strong>{combination.price_coverage.available} de {combination.price_coverage.total}</strong></span><span><small>Riesgo</small><strong>{combination.risk.level === "high" ? "Alto" : combination.risk.level === "medium" ? "Medio" : "Bajo"}</strong></span><span><small>Perfil</small><strong>{combination.combination_profile === "very_conservative" ? "Muy conservador" : combination.combination_profile === "conservative" ? "Conservador" : "Equilibrado"}</strong></span><span><small>Modo</small><strong>{modeName(combination.mode)}</strong></span></div>
+        {showsPreparedCombination ? <>
+          <div className="p2-combination-metrics"><span><small>Selecciones</small><strong>{combination.selections.length}/{combination.requested_selections}</strong></span><span><small>Cuota combinada</small><strong>{combination.combined_decimal_odds ?? "Completa no disponible"}</strong></span><span><small>Cobertura de precios</small><strong>{combination.price_coverage.available} de {combination.price_coverage.total}</strong></span><span><small>Riesgo</small><strong>{combination.risk.level === "high" ? "Alto" : combination.risk.level === "medium" ? "Medio" : "Bajo"}</strong></span><span><small>Perfil</small><strong>{combination.combination_profile === "very_conservative" ? "Muy conservador" : combination.combination_profile === "conservative" ? "Conservador" : "Equilibrado"}</strong></span><span><small>Modo</small><strong>{modeName(combination.mode)}</strong></span></div>
+          {combination.editing && !combination.target_complete ? <p className="p2-combination-warning">Estado actual: {combination.selections.length}/{combination.requested_selections}. {combination.can_confirm ? "La combinación reducida conserva el mínimo del producto." : "Faltan selecciones para alcanzar el mínimo válido del producto."}</p> : null}
           {product === COMBINATION_PRODUCT.DREAM ? <p className="p2-combination-warning">Alto riesgo: el resultado depende de que todas las selecciones se cumplan.</p> : null}
           {combination.price_coverage.status !== "complete" ? <p>Cuota combinada completa no disponible: {combination.price_coverage.available} de {combination.price_coverage.total} selecciones tienen precio compatible y vigente.</p> : null}
           <ol className="p2-combination-legs">{combination.selections.map((candidate) => <li key={candidate.selection_key}><div><strong>{candidate.fixture}</strong><span>{displaySelectionLabel(candidate.selection)} · {displayMarketLabel(candidate.marketId || candidate.market)} · {candidate.price_usable ? `@${candidate.decimal_odds}` : "Cuota no disponible"}</span><small><strong>Soporte Atlas:</strong> {candidate.sports_score}/100 · Perfil: {candidate.combination_profile === "very_conservative" ? "Muy conservador" : candidate.combination_profile === "conservative" ? "Conservador" : "Equilibrado"} · Muestra efectiva: {candidate.sample_size_effective ?? "No disponible"}</small>{!candidate.price_usable ? <div className="p2-inline-actions"><label><span>Ingresar cuota</span><input inputMode="decimal" placeholder="Ej. 1.43" value={manualDrafts[candidate.selection_key] || ""} onChange={(event) => setManualDrafts((current) => ({ ...current, [candidate.selection_key]: event.target.value }))} /></label><button type="button" className="secondary-button" onClick={() => addManualQuote(candidate)}>Ingresar cuota</button>{manualErrors[candidate.selection_key] ? <small>{manualErrors[candidate.selection_key]}</small> : null}</div> : null}</div><button type="button" className="secondary-button" onClick={() => removePreparedSelection(candidate.selection_key)}>Quitar</button></li>)}</ol>
