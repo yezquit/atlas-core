@@ -3,7 +3,7 @@ import { DATA_LOAD_STATUS } from "../contracts/atlasContracts.js";
 import { LINE_ORIGIN, OPERATIONAL_ENGINE_VERSION, phaseForKickoff } from "../contracts/operationalContracts.js";
 import { calculateAnalysisConfidence } from "../intelligence/analysisConfidence.js";
 import { buildAnalysisVersion, compareAnalysisVersions } from "../intelligence/analysisVersions.js";
-import { buildGeminiResearchPrompt, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
+import { buildGeminiResearchPrompt, extractSupplementaryRefereeEvidence, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
 import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
 import { buildOperationalRanking, buildScoutAtlas } from "../intelligence/scoutAtlas.js";
@@ -305,6 +305,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     geminiContext = { ...geminiContext, selected_items: (geminiContext.items || []).filter((item) => item.selected) };
   }
   const selectedGemini = geminiContext?.valid_for_reanalysis ? geminiContext.selected_items || [] : [];
+  const supplementaryRefereeEvidence = extractSupplementaryRefereeEvidence(selectedGemini);
   const geminiImpacts = mapGeminiImpacts(selectedGemini);
   const contradictions = selectedGemini.filter((item) => item.kind === "contradiction").map((item) => item.text);
   const geminiLimitations = selectedGemini.filter((item) => item.kind === "not_found" || item.impact === "limiting").map((item) => item.summary || item.text);
@@ -675,7 +676,7 @@ selections: input.dreamSelections || 5,
     historicalQuote,
     lineOrigin,
     preMatchContext: context,
-    gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, reanalysis_message: contextReanalysisMessage },
+    gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, supplementary_referee_evidence: supplementaryRefereeEvidence, reanalysis_message: contextReanalysisMessage },
     confidence,
     operationalCompleteness,
     preliminaryProbability,

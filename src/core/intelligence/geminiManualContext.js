@@ -25,9 +25,28 @@ function normalize(value) {
     .trim();
 }
 
+const CITE_MARKER_PATTERN = /\s*\[cite:\s*[^\]]+\]/gi;
+
+function stripCitationMarkers(value) {
+  return String(value || "").replace(CITE_MARKER_PATTERN, "").trim();
+}
+
 function extractUrls(text) {
-  return [...new Set(String(text || "").match(/https?:\/\/[^\s)>\]}]+/gi) || [])]
-    .map((url) => url.replace(/[.,;:]+$/, ""));
+  const candidates = String(text || "").match(/https?:\/\/[^\s<>"'\[\]]+/gi) || [];
+  const urls = candidates.flatMap((candidate) => {
+    const cleaned = candidate
+      .split(/\\?\((?=https?:\/\/)/i, 1)[0]
+      .replace(/\\(?=[()[\]])/g, "")
+      .replace(/\\+$/g, "")
+      .replace(/[)>},.;:]+$/g, "");
+    try {
+      const parsed = new URL(cleaned);
+      return [parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null];
+    } catch {
+      return [];
+    }
+  }).filter(Boolean);
+  return [...new Set(urls)];
 }
 
 function extractPublicationDates(text) {
@@ -177,7 +196,8 @@ function countersFor(items) {
   return {
     detected: items.length,
     selected: items.filter((item) => item.selected).length,
-    rejected: items.filter((item) => !item.selected).length,
+    unselected: items.filter((item) => !item.selected && item.eligible_for_selection !== false).length,
+    rejected: items.filter((item) => item.eligible_for_selection === false).length,
     rumors: items.filter((item) => item.kind === GEMINI_ITEM_KIND.RUMOR).length,
     limitations: items.filter((item) => [GEMINI_ITEM_KIND.CONTRADICTION, GEMINI_ITEM_KIND.NOT_FOUND].includes(item.kind)).length,
   };
@@ -284,12 +304,15 @@ export function buildGeminiResearchPrompt({ fixture, competition, market, select
 }
 
 function sectionFromLine(line) {
-  const candidate = normalize(line.replace(/^[#*\s\[\]]+|[:*\s\[\]]+$/g, ""));
+  const candidate = normalize(stripCitationMarkers(line)
+    .replace(/^\s*(?:#{1,6}\s*)?(?:[-•]\s*)?(?:\d+[.)]\s*)?/, "")
+    .replace(/[*_`\[\]]/g, "")
+    .replace(/\s*:\s*(?:ninguno|ninguna|ningun|none|sin elementos|no hay)?\s*$/i, ""));
   return SECTION_ALIASES[candidate] || null;
 }
 
 function structuredFieldFromLine(line) {
-  const match = String(line || "").match(/^\s*(?:[-*•]\s*)?(HECHO|IMPACTO|FUENTE|URL|FECHA)\s*:\s*(.*)$/i);
+  const match = stripCitationMarkers(line).match(/^\s*(?:(?:[-*•]|\d+[.)])\s*)?(?:\*\*|__)?\s*(HECHO|IMPACTO|FUENTE|URL|FECHA)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.*?)\s*(?:\*\*|__)?\s*$/i);
   if (!match) return null;
   const key = {
     hecho: "fact",
@@ -298,7 +321,7 @@ function structuredFieldFromLine(line) {
     url: "url",
     fecha: "date",
   }[normalize(match[1])];
-  return { key, value: match[2].trim() };
+  return { key, value: stripCitationMarkers(match[2]) };
 }
 
 function isEmptySectionValue(line) {
@@ -340,7 +363,7 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
       sawSection = true;
       continue;
     }
-    const trimmed = rawLine.trim();
+    const trimmed = stripCitationMarkers(rawLine);
     if (!currentKind || !trimmed) continue;
     if (isEmptySectionValue(trimmed)) continue;
     const field = structuredFieldFromLine(rawLine);
@@ -361,7 +384,7 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
       if (activeField) currentFields[activeField] = [currentFields[activeField], trimmed].filter(Boolean).join(" ");
       continue;
     }
-    const content = rawLine.replace(/^\s*[-*•\d.)]+\s*/, "").trim();
+    const content = stripCitationMarkers(rawLine.replace(/^\s*[-*•\d.)]+\s*/, ""));
     if (!content) continue;
     items.push(buildItem(content, currentKind, items.length, sourceOptions));
   }
@@ -398,7 +421,9 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
     item.fixture_compatible = !itemFixtureIds.some((id) => id !== expectedFixtureId) && !incompatibleDate;
     if (!item.fixture_compatible) {
       item.selected = false;
+      item.eligible_for_selection = false;
       item.validation_status = "unverified";
+      item.selection_warning = "Este elemento no coincide con el fixture validado y no puede incorporarse.";
     }
   }
   return {
@@ -424,6 +449,32 @@ export function parseGeminiResponse(text, { fixture, expectedLine = null, expect
       ...(items.some((item) => item.kind === GEMINI_ITEM_KIND.RUMOR) ? ["rumors_present"] : []),
     ],
   };
+}
+
+export function extractSupplementaryRefereeEvidence(items = []) {
+  const patterns = [
+    /(?:el\s+)?(?:árbitro|arbitro|referee)\s+(?:designad[oa]|confirmad[oa])(?:\s+(?:es|será|sera))?\s*[:\-]?\s*([^.;\n]+)/iu,
+    /(?:el\s+)?(?:árbitro|arbitro|referee)(?:\s+del\s+(?:partido|fixture))?\s+(?:es|será|sera)\s+([^.;\n]+)/iu,
+  ];
+  for (const item of items) {
+    if (item?.kind !== GEMINI_ITEM_KIND.CONFIRMED || item?.verification_status !== "user_reported" || item?.fixture_compatible === false || !item?.urls?.length) continue;
+    const fact = stripCitationMarkers(item.fact || item.summary || item.text);
+    const match = patterns.map((pattern) => fact.match(pattern)).find(Boolean);
+    const refereeName = match?.[1]?.replace(/[*_`\[\]]/g, "").trim();
+    if (!refereeName || refereeName.length > 100) continue;
+    return {
+      referee_name: refereeName,
+      provenance: "user_reported_supplementary_evidence",
+      verification_status: "user_reported",
+      provider_verified: false,
+      evidence_item_id: item.id,
+      source_name: item.source_name || null,
+      source_url: item.source_url || null,
+      publication_date: item.publication_date || null,
+      display_message: `Árbitro confirmado por evidencia complementaria: ${refereeName}`,
+    };
+  }
+  return null;
 }
 
 export function selectGeminiItems(context, selectedIds = []) {

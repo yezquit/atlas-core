@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
-import { parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
+import { extractSupplementaryRefereeEvidence, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
 import { buildScoutAtlas } from "../intelligence/scoutAtlas.js";
 
 const clientPath = new URL("../../app/atlas-functional-client.js", import.meta.url);
@@ -209,7 +209,7 @@ test("24. el parser conserva una URL larga", () => {
 test("25. el caso Sport Recife vs Londrina deja de fragmentarse", () => {
   const context = parse(realResponse);
   assert.equal(context.items.length, 8);
-  assert.deepEqual(context.counters, { detected: 8, selected: 0, rejected: 8, rumors: 0, limitations: 4 });
+  assert.deepEqual(context.counters, { detected: 8, selected: 0, unselected: 4, rejected: 4, rumors: 0, limitations: 4 });
   assert.deepEqual(context.items.reduce((counts, item) => ({ ...counts, [item.kind]: (counts[item.kind] || 0) + 1 }), {}), { confirmed: 3, probable: 1, not_found: 4 });
   const manuallySelected = selectGeminiItems(context, [context.items[3].id]);
   assert.equal(manuallySelected.selected_items.length, 1);
@@ -244,4 +244,97 @@ test("30. la cuota continúa posterior al análisis completo", async () => {
   const source = await readFile(clientPath, "utf8");
   assert.match(source, /\{analysisCompleted \? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry"/);
   assert.match(source, /evaluatePrice: Boolean\(reanalysis && manualQuoteReady\)/);
+});
+
+test("31. un bloque completo reconoce una URL bare", () => {
+  const item = parse(`HECHOS CONFIRMADOS\n${block({ source: "Infobae", url: "https://www.infobae.com/colombia/deportes/noticia" })}`).items[0];
+  assert.deepEqual(item.urls, ["https://www.infobae.com/colombia/deportes/noticia"]);
+  assert.equal(item.eligible_for_selection, true);
+});
+
+test("32. un bloque completo reconoce URL Markdown y Markdown anidado", () => {
+  const valueStats = "https://valuestats.com.co/america-junior";
+  const winSports = "https://www.winsports.co/futbol-colombiano/arbitro-america-junior";
+  const context = parse(String.raw`## HECHOS CONFIRMADOS
+**HECHO:** La alineación titular fue publicada.
+**IMPACTO:** sin cambio.
+**FUENTE:** ValueStats
+**URL:** [${valueStats}](${valueStats})
+**FECHA:** 26 de agosto de 2026
+
+**HECHO:** El árbitro designado es Carlos Ortega.
+**IMPACTO:** sin cambio.
+**FUENTE:** Win Sports
+**URL:** [[${winSports}\](${winSports})](${winSports})
+**FECHA:** 26 de agosto de 2026`);
+  assert.equal(context.items.length, 2);
+  assert.deepEqual(context.items.map((item) => item.source_url), [valueStats, winSports]);
+  assert.deepEqual(context.urls, [valueStats, winSports]);
+});
+
+test("33. marcadores cite no fragmentan ni contaminan el hecho", () => {
+  const context = parse(`1. HECHOS CONFIRMADOS
+HECHO: El delantero titular está disponible. [cite: 1.2.1]
+[cite: 1.2.2]
+IMPACTO: fortalece el ataque. [cite: 1.2.3]
+FUENTE: Infobae
+URL: https://www.infobae.com/colombia/deportes/america-junior
+FECHA: 26 de agosto de 2026`);
+  assert.equal(context.items.length, 1);
+  assert.doesNotMatch(context.items[0].fact, /cite:/i);
+  assert.doesNotMatch(context.items[0].impact_text, /cite:/i);
+});
+
+test("34. tres hechos estructurados producen exactamente tres elementos", () => {
+  const context = parse(`HECHOS CONFIRMADOS
+${block({ fact: "El delantero titular está disponible.", source: "Infobae", url: "https://www.infobae.com/deportes/uno" })}
+${block({ fact: "El volumen de remates fue publicado.", source: "ValueStats", url: "https://valuestats.com.co/dos" })}
+${block({ fact: "El árbitro designado es Carlos Ortega.", source: "Win Sports", url: "https://www.winsports.co/tres" })}
+RUMORES: NINGUNO
+CONTRADICCIONES: NINGUNO`);
+  assert.equal(context.items.length, 3);
+  assert.equal(context.counters.detected, 3);
+  assert.equal(context.counters.rumors, 0);
+  assert.equal(context.counters.limitations, 0);
+});
+
+test("35. fuente desconocida con URL y fixture compatibles admite selección manual como user_reported", () => {
+  const context = parse(`HECHOS CONFIRMADOS\n${block({ fact: "El delantero titular está ausente por lesión.", source: "Medio local nuevo", url: "https://medio-local.example/america-junior" })}`);
+  const item = context.items[0];
+  assert.equal(item.source_classification, "unknown");
+  assert.equal(item.verification_status, "user_reported");
+  assert.equal(item.selected, false);
+  assert.equal(item.eligible_for_selection, true);
+  const selected = selectGeminiItems(context, [item.id]);
+  assert.equal(selected.selected_items.length, 1);
+  assert.equal(selected.selected_items[0].verification_status, "user_reported");
+});
+
+test("36. contadores distinguen no seleccionado de rechazado", () => {
+  const context = parse(`HECHOS CONFIRMADOS
+${block({ fact: "El delantero titular está ausente por lesión.", source: "Medio local", url: "https://medio-local.example/uno" })}
+HECHO: Dato sin URL.
+IMPACTO: sin cambio.
+FUENTE: Medio local
+FECHA: 26 de agosto de 2026`);
+  assert.deepEqual(context.counters, { detected: 2, selected: 0, unselected: 1, rejected: 1, rumors: 0, limitations: 0 });
+});
+
+test("37. evidencia arbitral seleccionada conserva procedencia suplementaria sin verificar proveedor", async () => {
+  const context = parse(`HECHOS CONFIRMADOS\n${block({ fact: "El árbitro designado es Carlos Ortega.", impact: "sin cambio. Registra 5.12 amarillas por partido en 17 encuentros.", source: "Win Sports", url: "https://www.winsports.co/arbitro" })}`);
+  const selected = selectGeminiItems(context, [context.items[0].id]);
+  const refereeEvidence = extractSupplementaryRefereeEvidence(selected.selected_items);
+  assert.equal(refereeEvidence.referee_name, "Carlos Ortega");
+  assert.equal(refereeEvidence.verification_status, "user_reported");
+  assert.equal(refereeEvidence.provider_verified, false);
+  assert.equal(refereeEvidence.display_message, "Árbitro confirmado por evidencia complementaria: Carlos Ortega");
+  assert.equal(refereeEvidence.event_samples, undefined);
+  const source = await readFile(clientPath, "utf8");
+  assert.match(source, /No sustituye ni verifica el perfil del proveedor/);
+});
+
+test("38. el servicio adjunta evidencia arbitral por separado del refereeProfile base", async () => {
+  const source = await readFile(servicePath, "utf8");
+  assert.match(source, /supplementary_referee_evidence: supplementaryRefereeEvidence/);
+  assert.doesNotMatch(source, /refereeProfile\s*=\s*supplementaryRefereeEvidence/);
 });

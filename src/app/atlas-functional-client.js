@@ -468,6 +468,7 @@ function GeminiContextSummary({ analysis, onShowExpert }) {
   const items = analysis?.gemini?.applied_items || [];
   if (!items.length) return null;
   const summary = analysis.gemini?.summary || analysis.director?.context_summary || {};
+  const supplementaryReferee = analysis.gemini?.supplementary_referee_evidence;
   return (
     <section className="p2-history-compare" aria-labelledby="context-summary-title">
       <h3 id="context-summary-title">Resumen del contexto incorporado</h3>
@@ -476,6 +477,7 @@ function GeminiContextSummary({ analysis, onShowExpert }) {
         <ListBlock title="Elementos contrarios" items={(summary.unfavorable || []).slice(0, 3)} />
         <ListBlock title="Limitaciones" items={(summary.limitations || []).slice(0, 3)} />
       </div>
+      {supplementaryReferee ? <p><strong>{supplementaryReferee.display_message}</strong> <small>Procedencia: evidencia suplementaria reportada por el usuario; no verificada por el proveedor.</small></p> : null}
       <button type="button" className="secondary-button" onClick={onShowExpert}>Ver contexto completo</button>
     </section>
   );
@@ -623,6 +625,7 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
   if (!director) return null;
   const price = director.price_assessment;
   const geminiItems = analysis.gemini?.applied_items || [];
+  const supplementaryReferee = analysis.gemini?.supplementary_referee_evidence;
   const presentation = buildSimpleDirectorPresentation(director, { geminiItems, historicalQuote: analysis.historicalQuote });
   const analysisDecision = presentation.analysis_decision;
   const priceDecision = presentation.price_decision;
@@ -672,6 +675,7 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
       </div>
       <section className="p2-simple-gemini-evidence" aria-labelledby="simple-gemini-evidence-title">
         <h3 id="simple-gemini-evidence-title">Evidencia Gemini relevante</h3>
+        {supplementaryReferee ? <p><strong>{supplementaryReferee.display_message}</strong></p> : null}
         {geminiItems.length
           ? <ul>{geminiItems.slice(0, 3).map((item) => <li key={item.id}>{item.summary || item.text}</li>)}</ul>
           : <p>La respuesta fue validada, pero ningún elemento superó el filtro para modificar el análisis.</p>}
@@ -798,6 +802,7 @@ function ExpertResult({ analysis }) {
   const metadata = analysis.competitionMetadata;
   const league = analysis.leagueProfile;
   const referee = analysis.refereeProfile;
+  const supplementaryReferee = analysis.gemini?.supplementary_referee_evidence;
   const venue = analysis.venueWeatherContext;
   const telemetry = analysis.telemetry;
   return (
@@ -894,6 +899,18 @@ function ExpertResult({ analysis }) {
           ["Faltas por partido", referee?.fouls_per_match],
           ["Comparación compatible con liga", referee?.league_comparison?.compatible],
         ]} />
+        {supplementaryReferee ? (
+          <div className="p2-source-details">
+            <p><strong>{supplementaryReferee.display_message}</strong></p>
+            <p>Procedencia: evidencia suplementaria reportada por el usuario. No sustituye ni verifica el perfil del proveedor.</p>
+            <DefinitionGrid entries={[
+              ["Fuente suplementaria", supplementaryReferee.source_name],
+              ["URL", supplementaryReferee.source_url],
+              ["Fecha", supplementaryReferee.publication_date],
+              ["Verificación del proveedor", supplementaryReferee.provider_verified],
+            ]} />
+          </div>
+        ) : null}
         <ListBlock title="Advertencias" items={referee?.warnings} />
       </Accordion>
 
@@ -1018,6 +1035,10 @@ function ExpertResult({ analysis }) {
 
 function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleItem, onValidate, onReanalyze, onNewResearch, status }) {
   if (!analysis?.gemini?.prompt) return null;
+  const contextItems = context?.items || [];
+  const selectedCount = contextItems.filter((item) => item.eligible_for_selection !== false && selectedIds.includes(item.id)).length;
+  const unselectedCount = contextItems.filter((item) => item.eligible_for_selection !== false && !selectedIds.includes(item.id)).length;
+  const rejectedCount = contextItems.filter((item) => item.eligible_for_selection === false).length;
   async function copyPrompt() {
     await navigator.clipboard.writeText(analysis.gemini.prompt);
   }
@@ -1048,8 +1069,9 @@ function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleI
             ["Fuentes encontradas", context.urls?.length],
             ["Recibido", formatDate(context.received_at)],
             ["Elementos detectados", context.counters?.detected],
-            ["Seleccionados", selectedIds.length],
-            ["Rechazados", (context.items?.length || 0) - selectedIds.length],
+            ["Seleccionados", selectedCount],
+            ["No seleccionados", unselectedCount],
+            ["Rechazados por validación", rejectedCount],
             ["Rumores", context.counters?.rumors],
             ["Limitaciones", context.counters?.limitations],
           ]} />
