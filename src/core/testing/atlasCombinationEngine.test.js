@@ -10,6 +10,7 @@ import {
   combinationSelectionKey,
   inspectCombinationCandidate,
   mergeJourneyExplorations,
+  removeCombinationSelection,
   validateCombinationRequest,
 } from "../intelligence/atlasCombinationEngine.js";
 import { buildDreamParlays } from "../intelligence/dreamParlayEngine.js";
@@ -353,4 +354,126 @@ test("la unión multidía elimina el mismo candidato repetido", () => {
 test("Soñadora no tiene tope artificial de cuota total objetivo", () => {
   const results = buildDreamParlays(Array.from({ length: 5 }, (_, index) => ({ id: index, decimalOdds: 3 })), { selections: 5 });
   assert.equal(results[0].totalOdds, 243);
+});
+
+test("Parlay automático diversifica familias cuando el soporte es comparable", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { marketId: "goals", sportsScore: 91 }),
+      candidate(2, { marketId: "goals", sportsScore: 90 }),
+      candidate(3, { marketId: "corners", line: 8.5, sportsScore: 89 }),
+      candidate(4, { marketId: "total_shots", line: 24.5, sportsScore: 88 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 3,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(["goals", "corners", "total_shots"]));
+});
+
+test("Parlay automático no fuerza diversidad con alternativas claramente peores", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { marketId: "goals", sportsScore: 94 }),
+      candidate(2, { marketId: "goals", sportsScore: 93 }),
+      candidate(3, { marketId: "goals", sportsScore: 92 }),
+      candidate(4, { marketId: "corners", line: 8.5, sportsScore: 75 }),
+      candidate(5, { marketId: "total_shots", line: 24.5, sportsScore: 70 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 3,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(["goals"]));
+});
+
+test("la diversidad ignora alternativas que violan fixture o correlación", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { fixtureId: 77, marketId: "goals", sportsScore: 91 }),
+      candidate(2, { fixtureId: 88, marketId: "goals", sportsScore: 90 }),
+      candidate(3, { fixtureId: 77, marketId: "corners", line: 8.5, sportsScore: 89 }),
+      candidate(4, { fixtureId: 99, marketId: "total_shots", line: 24.5, sportsScore: 88 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 2,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.ok(!result.selections.some((item) => item.fixture_id === 77 && item.market_family === "corners"));
+  assert.ok(result.selections.some((item) => item.market_family === "total_shots"));
+});
+
+test("modo mixto cuenta la familia de una pata fija al diversificar", () => {
+  const fixed = candidate(1, { marketId: "goals", sportsScore: 86 });
+  const leadingGoal = candidate(2, { marketId: "goals", sportsScore: 94 });
+  const corners = candidate(3, { marketId: "corners", line: 8.5, sportsScore: 92 });
+  const shots = candidate(4, { marketId: "total_shots", line: 24.5, sportsScore: 91 });
+  const result = buildAtlasCombination({
+    candidates: [fixed, leadingGoal, corners, shots],
+    product: "parlay",
+    mode: "mixed",
+    selections: 3,
+    selectedKeys: [combinationSelectionKey(fixed)],
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(["goals", "corners", "total_shots"]));
+  assert.ok(!result.selections.some((item) => item.selection_key === combinationSelectionKey(leadingGoal)));
+});
+
+test("modo manual no aplica diversidad automática", () => {
+  const firstGoal = candidate(1, { marketId: "goals", sportsScore: 91 });
+  const secondGoal = candidate(2, { marketId: "goals", sportsScore: 90 });
+  const corners = candidate(3, { marketId: "corners", line: 8.5, sportsScore: 89 });
+  const selectedKeys = [combinationSelectionKey(firstGoal), combinationSelectionKey(secondGoal)];
+  const result = buildAtlasCombination({ candidates: [firstGoal, secondGoal, corners], product: "parlay", mode: "manual", selections: 2, selectedKeys });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(result.selections.map((item) => item.selection_key), selectedKeys);
+  assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(["goals"]));
+});
+
+test("Soñadora larga conserva el ranking de estabilidad y no altera datos deportivos", () => {
+  const aggressive = candidate(1, { fixtureId: 500, marketId: "goals", sportsScore: 88, lineStabilityScore: 0, uncertaintyLow: 0.3, uncertaintyHigh: 0.9, sampleSize: 5 });
+  const stable = candidate(2, { fixtureId: 500, marketId: "corners", line: 8.5, sportsScore: 86, lineStabilityScore: 100, uncertaintyLow: 0.58, uncertaintyHigh: 0.68, sampleSize: 30 });
+  const rest = Array.from({ length: 7 }, (_, index) => candidate(index + 10, { sportsScore: 84 - index }));
+  const candidates = [aggressive, stable, ...rest];
+  const before = JSON.stringify(candidates);
+  const result = buildAtlasCombination({ candidates, product: "dream", mode: "automatic", selections: 8 });
+
+  assert.equal(result.status, "ready");
+  assert.ok(result.selections.some((item) => item.selection_key === combinationSelectionKey(stable)));
+  assert.ok(!result.selections.some((item) => item.selection_key === combinationSelectionKey(aggressive)));
+  assert.equal(JSON.stringify(candidates), before);
+  for (const selected of result.selections) {
+    const source = candidates.find((item) => combinationSelectionKey(item) === selected.selection_key);
+    assert.equal(selected.sports_score, source.sportsScore);
+    assert.equal(selected.probability, source.probability);
+  }
+});
+
+test("quitar una pata conserva exactamente el orden relativo restante", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { marketId: "goals", sportsScore: 91 }),
+      candidate(2, { marketId: "goals", sportsScore: 90 }),
+      candidate(3, { marketId: "corners", line: 8.5, sportsScore: 89 }),
+      candidate(4, { marketId: "total_shots", line: 24.5, sportsScore: 88 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 4,
+  });
+  const originalKeys = result.selections.map((item) => item.selection_key);
+  const edited = removeCombinationSelection(result, originalKeys[1]);
+
+  assert.deepEqual(edited.selections.map((item) => item.selection_key), originalKeys.filter((_, index) => index !== 1));
+  assert.equal(edited.mode, "automatic");
+  assert.equal(edited.requested_selections, 4);
 });

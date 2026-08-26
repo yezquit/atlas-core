@@ -20,6 +20,7 @@ export const COMBINATION_LIMITS = Object.freeze({
 const CURRENT_QUOTE_STATUSES = new Set(["verified_provider", "user_reported"]);
 const CURRENT_SOURCE_STATUSES = new Set(["verified_current", "user_reported_current"]);
 const MINIMUM_SPORTS_SCORE = 58;
+const COMPARABLE_MARKET_FAMILY_GAP = 4;
 const BLOCKING_SPORTS_STATUSES = new Set([
   "blocked",
   "insufficient_data",
@@ -400,12 +401,23 @@ export function updateCombinationSelection(combination, candidate) {
 function addDiversifiedCandidates(chosen, eligible, target, product) {
   const passes = product === COMBINATION_PRODUCT.DREAM ? [false, true] : [false];
   for (const allowSecondFixtureSelection of passes) {
-    if (chosen.length === target) break;
-    for (const candidate of eligible) {
-      if (chosen.some((item) => item.selection_key === candidate.selection_key)) continue;
-      if (!canAppend(chosen, candidate, product, allowSecondFixtureSelection)) continue;
-      chosen.push(candidate);
-      if (chosen.length === target) break;
+    while (chosen.length < target) {
+      const validCandidates = eligible.filter((candidate) => (
+        !chosen.some((item) => item.selection_key === candidate.selection_key)
+        && canAppend(chosen, candidate, product, allowSecondFixtureSelection)
+      ));
+      if (!validCandidates.length) break;
+
+      const bestCandidate = validCandidates[0];
+      const usedFamilies = new Set(chosen.map((candidate) => candidate.market_family));
+      const comparableUnusedFamily = usedFamilies.has(bestCandidate.market_family)
+        ? validCandidates.find((candidate) => (
+          !usedFamilies.has(candidate.market_family)
+          && bestCandidate.sports_score - candidate.sports_score <= COMPARABLE_MARKET_FAMILY_GAP
+        ))
+        : null;
+
+      chosen.push(comparableUnusedFamily || bestCandidate);
     }
   }
 }
