@@ -1082,6 +1082,7 @@ function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleI
 function BetTrackerView({ timezone }) {
   const [bets, setBets] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [settlingBetId, setSettlingBetId] = useState(null);
   const [betState, setBetState] = useState(
     state("Carga tus apuestas registradas en Atlas.")
   );
@@ -1130,6 +1131,29 @@ function BetTrackerView({ timezone }) {
   initBets();
 }, []);
 
+  async function settleBet(betId, outcome) {
+    if (settlingBetId) return;
+    setSettlingBetId(betId);
+    setBetState(state("Liquidando apuesta…", "loading"));
+    try {
+      const response = await fetch("/api/bets", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ betId, outcome, resultSource: "manual_user_input" }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setBetState(state(result?.message || "No fue posible liquidar la apuesta.", "provider_error", result?.errorCode));
+        return;
+      }
+      await loadBets();
+    } catch {
+      setBetState(state("No fue posible conectar con el registro de apuestas.", "provider_error"));
+    } finally {
+      setSettlingBetId(null);
+    }
+  }
+
   return (
     <section className="p2-mode" aria-labelledby="bets-title">
       <div className="p2-mode-heading">
@@ -1177,33 +1201,63 @@ function BetTrackerView({ timezone }) {
       ) : null}
 
       <div className="p2-history-list">
-        {bets.map((bet) => (
-          <article key={bet.bet_id} className="p2-history-entry">
-            <div>
-              <strong>
-                {bet.home_team || "Local"} vs {bet.away_team || "Visitante"}
-              </strong>
-              <p>
-                {displaySelection(bet.selection)}
-                {bet.line !== null && bet.line !== undefined ? ` · línea ${bet.line}` : ""}
-              </p>
-              <small>
-                {bet.bookmaker} @{bet.decimal_odds} · {formatValue(bet.stake_amount)} {bet.currency}
-              </small>
-              <small>
-                {formatDate(bet.kickoff_utc, timezone)} · Estado: {displayStatus(bet.status)}
-              </small>
-              <small>
-                Atlas: {bet.atlas_price_decision || "No disponible"}
-              </small>
-              {bet.status !== "pending" ? (
+        {bets.map((bet) => {
+          const isCombination = bet.bet_type === "combination";
+          const productLabel = bet.product === "dream" ? "Soñadora" : "Parlay";
+          return (
+            <article key={bet.bet_id} className="p2-history-entry">
+              <div>
+                <strong>
+                  {isCombination
+                    ? `${productLabel} · ${bet.legs?.length || 0} patas`
+                    : `${bet.home_team || "Local"} vs ${bet.away_team || "Visitante"}`}
+                </strong>
+                {isCombination ? (
+                  <>
+                    <span className="p2-chip">{productLabel}</span>
+                    <details className="p2-source-details">
+                      <summary>Ver {bet.legs?.length || 0} patas</summary>
+                      <ol>
+                        {(bet.legs || []).map((leg, index) => (
+                          <li key={`${bet.bet_id}-${index}`}>
+                            <strong>{leg.home_team && leg.away_team ? `${leg.home_team} vs ${leg.away_team}` : leg.fixture || `Partido ${leg.fixture_id}`}</strong>
+                            <span>{displaySelection(leg.selection)}{leg.line !== null && leg.line !== undefined ? ` · línea ${leg.line}` : ""} · {displayMarketLabel(leg.market_family)}</span>
+                            <small>Soporte Atlas: {leg.sports_score ?? "No disponible"}{leg.decimal_odds ? ` · cuota individual @${leg.decimal_odds}` : ""}</small>
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  </>
+                ) : (
+                  <p>
+                    {displaySelection(bet.selection)}
+                    {bet.line !== null && bet.line !== undefined ? ` · línea ${bet.line}` : ""}
+                  </p>
+                )}
                 <small>
-                  Retorno: {formatValue(bet.payout)} {bet.currency} · Ganancia/pérdida: {formatValue(bet.profit_loss)} {bet.currency}
+                  {bet.bookmaker} @{bet.decimal_odds} · {formatValue(bet.stake_amount)} {bet.currency}
                 </small>
-              ) : null}
-            </div>
-          </article>
-        ))}
+                <small>
+                  {isCombination ? `Registrada ${formatDate(bet.placed_at, timezone)}` : formatDate(bet.kickoff_utc, timezone)} · Estado: {displayStatus(bet.status)}
+                </small>
+                <small>
+                  {isCombination ? `Origen de cuota: ${bet.odds_source === "atlas_complete_coverage" ? "Cobertura Atlas completa" : "Informada manualmente"}` : `Atlas: ${bet.atlas_price_decision || "No disponible"}`}
+                </small>
+                {bet.status !== "pending" ? (
+                  <small>
+                    Retorno: {formatValue(bet.payout)} {bet.currency} · Ganancia/pérdida: {formatValue(bet.profit_loss)} {bet.currency}
+                  </small>
+                ) : (
+                  <div className="p2-inline-actions p2-result-entry">
+                    <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "won")}>Ganada</button>
+                    <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "lost")}>Perdida</button>
+                    <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "void")}>Nula</button>
+                  </div>
+                )}
+              </div>
+            </article>
+          );
+        })}
       </div>
 
       {betState.status === "success" && !bets.length ? (

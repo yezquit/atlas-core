@@ -6,6 +6,15 @@ import {
 export const DEFAULT_LOCAL_USER_ID = "local-user";
 
 const VALID_BET_OUTCOMES = new Set(["won", "lost", "void"]);
+const VALID_COMBINATION_MODES = new Set(["automatic", "manual", "mixed"]);
+const COMBINATION_LIMITS = Object.freeze({
+  parlay: Object.freeze({ minimum: 2, maximum: 4 }),
+  dream: Object.freeze({ minimum: 5, maximum: 15 }),
+});
+const VALID_COMBINATION_ODDS_SOURCES = new Set([
+  "atlas_complete_coverage",
+  "manual_user_input",
+]);
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -25,6 +34,41 @@ function positiveNumber(value, field) {
 
 function roundMoney(value) {
   return Number(Number(value).toFixed(2));
+}
+
+function combinationLegSnapshot(leg = {}) {
+  const fixtureId = Number(leg.fixture_id ?? leg.fixtureId);
+  const marketFamily = leg.market_family ?? leg.marketId ?? null;
+
+  if (!Number.isInteger(fixtureId) || fixtureId <= 0) {
+    throw new TypeError("combination_leg_fixture_id_required");
+  }
+  if (!marketFamily) {
+    throw new TypeError("combination_leg_market_family_required");
+  }
+
+  return Object.freeze({
+    fixture_id: fixtureId,
+    competition: leg.competition ?? null,
+    home_team: leg.home_team ?? leg.homeTeam ?? null,
+    away_team: leg.away_team ?? leg.awayTeam ?? null,
+    fixture: leg.fixture ?? null,
+    kickoff_utc: leg.kickoff_utc ?? leg.kickoffUtc ?? leg.kickoff ?? null,
+    market_family: String(marketFamily),
+    selection: leg.selection ?? null,
+    direction: leg.direction ?? null,
+    line: numberOrNull(leg.line),
+    sports_score: numberOrNull(leg.sports_score ?? leg.sportsScore),
+    preliminary_probability: numberOrNull(
+      leg.preliminary_probability ?? leg.preliminaryProbability ?? leg.probability
+    ),
+    decimal_odds: numberOrNull(leg.decimal_odds ?? leg.decimalOdds),
+    economic_status:
+      leg.economic_status ??
+      leg.economic_price_status ??
+      leg.price_status ??
+      null,
+  });
 }
 
 export function createBetRecord({
@@ -108,6 +152,80 @@ export function createBetRecord({
     profit_loss: null,
 
     analyzed_at: analyzedAt,
+    placed_at: placedAt,
+    settled_at: null,
+  });
+}
+
+export function createCombinationBetRecord({
+  betId,
+  userId = DEFAULT_LOCAL_USER_ID,
+  ownerId = PERSONAL_OWNER_ID,
+  combinationId,
+  product,
+  mode,
+  legs,
+  bookmaker,
+  decimalOdds,
+  oddsSource,
+  stakeAmount,
+  stakeUnits = null,
+  currency = "COP",
+  placedAt = new Date().toISOString(),
+} = {}) {
+  if (!betId) throw new TypeError("bet_id_required");
+  if (!userId) throw new TypeError("user_id_required");
+  if (!ownerId) throw new TypeError("owner_id_required");
+  if (!combinationId) throw new TypeError("combination_id_required");
+  if (!bookmaker) throw new TypeError("bookmaker_required");
+
+  const limits = COMBINATION_LIMITS[product];
+  if (!limits) throw new TypeError("invalid_combination_product");
+  if (!VALID_COMBINATION_MODES.has(mode)) {
+    throw new TypeError("invalid_combination_mode");
+  }
+  if (!Array.isArray(legs) || legs.length < limits.minimum || legs.length > limits.maximum) {
+    throw new TypeError("invalid_combination_leg_count");
+  }
+  if (!VALID_COMBINATION_ODDS_SOURCES.has(oddsSource)) {
+    throw new TypeError("invalid_combination_odds_source");
+  }
+
+  const odds = positiveNumber(decimalOdds, "decimal_odds");
+  if (odds <= 1) throw new TypeError("decimal_odds_must_be_greater_than_one");
+  const amount = positiveNumber(stakeAmount, "stake_amount");
+  const units =
+    stakeUnits === null || stakeUnits === undefined || stakeUnits === ""
+      ? null
+      : positiveNumber(stakeUnits, "stake_units");
+  const immutableLegs = Object.freeze(legs.map(combinationLegSnapshot));
+
+  return Object.freeze({
+    contract: "BetRecord",
+    version: 2,
+
+    bet_id: String(betId),
+    user_id: String(userId),
+    owner_id: String(ownerId),
+    bet_type: "combination",
+    combination_id: String(combinationId),
+    product,
+    mode,
+    legs: immutableLegs,
+
+    bookmaker: String(bookmaker),
+    decimal_odds: odds,
+    odds_source: oddsSource,
+
+    stake_amount: amount,
+    stake_units: units,
+    currency: String(currency || "COP").toUpperCase(),
+
+    status: "pending",
+    result_source: null,
+    actual_total: null,
+    payout: null,
+    profit_loss: null,
     placed_at: placedAt,
     settled_at: null,
   });

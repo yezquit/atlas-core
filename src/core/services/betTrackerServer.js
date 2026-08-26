@@ -9,6 +9,7 @@ import {
 import {
   DEFAULT_LOCAL_USER_ID,
   createBetRecord,
+  createCombinationBetRecord,
   settleBetRecord,
 } from "../infrastructure/betLedger.js";
 import { createFileBetLedger } from "../infrastructure/betLedgerServer.js";
@@ -95,6 +96,62 @@ export async function registerTrackedBet({
 
   await ledger.appendBet(bet);
 
+  return bet;
+}
+
+export async function registerTrackedCombinationBet({
+  combinationId,
+  product,
+  mode,
+  legs,
+  bookmaker,
+  decimalOdds,
+  oddsSource,
+  priceCoverageStatus = null,
+  atlasCombinedOdds = null,
+  stakeAmount,
+  stakeUnits = null,
+  currency = "COP",
+}) {
+  if (oddsSource === "atlas_complete_coverage") {
+    const suppliedOdds = Number(decimalOdds);
+    const atlasOdds = Number(atlasCombinedOdds);
+    if (
+      priceCoverageStatus !== "complete" ||
+      !Number.isFinite(atlasOdds) ||
+      atlasOdds <= 1 ||
+      suppliedOdds !== atlasOdds
+    ) {
+      throw new Error("La cuota Atlas solo puede usarse con cobertura completa y sin alteraciones.");
+    }
+  }
+
+  const ledger = await betStore.repository();
+  const duplicate = (await ledger.list({ ownerId: PERSONAL_OWNER_ID }))
+    .find((bet) => bet?.combination_id === combinationId);
+
+  if (duplicate) {
+    throw new Error("Esta combinación ya tiene una apuesta registrada.");
+  }
+
+  const bet = createCombinationBetRecord({
+    betId: randomUUID(),
+    userId: DEFAULT_LOCAL_USER_ID,
+    ownerId: PERSONAL_OWNER_ID,
+    combinationId,
+    product,
+    mode,
+    legs,
+    bookmaker,
+    decimalOdds,
+    oddsSource,
+    stakeAmount,
+    stakeUnits,
+    currency,
+    placedAt: new Date().toISOString(),
+  });
+
+  await ledger.appendBet(bet);
   return bet;
 }
 

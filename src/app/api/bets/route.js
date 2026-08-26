@@ -3,6 +3,7 @@ import {
   getMyBetSummary,
   listMyTrackedBets,
   registerTrackedBet,
+  registerTrackedCombinationBet,
   settleTrackedBet,
 } from "@/core/services/betTrackerServer";
 import { requirePersonalSession } from "@/core/auth/personalAccessPolicy";
@@ -84,7 +85,9 @@ export async function POST(request) {
     );
   }
 
-  if (!input?.analysisId) {
+  const isCombination = input?.betType === "combination";
+
+  if (!isCombination && !input?.analysisId) {
     return Response.json(
       {
         status: "unavailable",
@@ -93,6 +96,40 @@ export async function POST(request) {
       },
       { status: 400 }
     );
+  }
+
+  if (isCombination) {
+    const totalOdds = Number(input.decimalOdds);
+    if (!input?.combinationId || !input?.bookmaker || !Array.isArray(input?.legs)) {
+      return Response.json(
+        {
+          status: "unavailable",
+          errorCode: "combination_data_required",
+          message: "La combinación, la casa y sus patas son obligatorias.",
+        },
+        { status: 400 }
+      );
+    }
+    if (!Number.isFinite(totalOdds) || totalOdds <= 1) {
+      return Response.json(
+        {
+          status: "unavailable",
+          errorCode: "invalid_combination_odds",
+          message: "La cuota combinada real debe ser mayor que uno.",
+        },
+        { status: 400 }
+      );
+    }
+    if (!["atlas_complete_coverage", "manual_user_input"].includes(input.oddsSource)) {
+      return Response.json(
+        {
+          status: "unavailable",
+          errorCode: "invalid_combination_odds_source",
+          message: "Debe indicarse el origen de la cuota combinada.",
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const stakeAmount = Number(input.stakeAmount);
@@ -130,12 +167,27 @@ export async function POST(request) {
   }
 
   try {
-    const bet = await registerTrackedBet({
-      analysisId: input.analysisId,
-      stakeAmount,
-      stakeUnits,
-      currency: input.currency || "COP",
-    });
+    const bet = isCombination
+      ? await registerTrackedCombinationBet({
+          combinationId: input.combinationId,
+          product: input.product,
+          mode: input.mode,
+          legs: input.legs,
+          bookmaker: input.bookmaker,
+          decimalOdds: Number(input.decimalOdds),
+          oddsSource: input.oddsSource,
+          priceCoverageStatus: input.priceCoverageStatus,
+          atlasCombinedOdds: input.atlasCombinedOdds,
+          stakeAmount,
+          stakeUnits,
+          currency: input.currency || "COP",
+        })
+      : await registerTrackedBet({
+          analysisId: input.analysisId,
+          stakeAmount,
+          stakeUnits,
+          currency: input.currency || "COP",
+        });
 
     return Response.json(
       {

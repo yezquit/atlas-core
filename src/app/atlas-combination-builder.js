@@ -68,6 +68,138 @@ function modeName(mode) {
   return "Automático";
 }
 
+function fixtureTeams(fixture) {
+  const teams = String(fixture || "").split(/\s+vs\s+/i);
+  return teams.length === 2
+    ? { homeTeam: teams[0], awayTeam: teams[1] }
+    : { homeTeam: null, awayTeam: null };
+}
+
+function combinationLegSnapshot(candidate) {
+  const teams = fixtureTeams(candidate.fixture);
+  return {
+    fixture_id: candidate.fixture_id,
+    competition: candidate.competition ?? null,
+    home_team: candidate.home_team ?? candidate.homeTeam ?? teams.homeTeam,
+    away_team: candidate.away_team ?? candidate.awayTeam ?? teams.awayTeam,
+    fixture: candidate.fixture ?? null,
+    kickoff_utc: candidate.kickoff_utc ?? candidate.kickoff ?? null,
+    market_family: candidate.market_family,
+    selection: candidate.selection ?? null,
+    direction: candidate.direction ?? null,
+    line: candidate.line ?? null,
+    sports_score: candidate.sports_score ?? null,
+    preliminary_probability:
+      candidate.preliminary_probability ?? candidate.probability ?? null,
+    decimal_odds: candidate.price_usable ? candidate.decimal_odds : null,
+    economic_status:
+      candidate.economic_price_status ?? candidate.price_status ?? null,
+  };
+}
+
+function combinationIsTrackable(combination) {
+  const limits = COMBINATION_LIMITS[combination?.product];
+  const count = combination?.selections?.length || 0;
+  return Boolean(
+    combination?.combination_id &&
+    ["ready", "editing"].includes(combination?.status) &&
+    limits &&
+    count >= limits.minimum &&
+    count <= limits.maximum
+  );
+}
+
+function CombinationBetRegistration({ combination }) {
+  const [bookmaker, setBookmaker] = useState("");
+  const [stakeAmount, setStakeAmount] = useState("");
+  const [decimalOdds, setDecimalOdds] = useState("");
+  const [currency, setCurrency] = useState("COP");
+  const [stakeUnits, setStakeUnits] = useState("");
+  const [registration, setRegistration] = useState({ status: "idle", message: "" });
+  const submissionRef = useRef(false);
+
+  function updateTotalOdds(value) {
+    setDecimalOdds(value);
+    if (!["idle", "success"].includes(registration.status)) {
+      setRegistration({ status: "idle", message: "" });
+    }
+  }
+
+  async function registerCombinationBet(event) {
+    event.preventDefault();
+    if (submissionRef.current || registration.status === "loading" || registration.status === "success") return;
+
+    const totalOdds = Number(String(decimalOdds).replace(",", "."));
+    const amount = Number(String(stakeAmount).replace(",", "."));
+    const units = stakeUnits === "" ? null : Number(String(stakeUnits).replace(",", "."));
+
+    if (!bookmaker.trim() || !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(totalOdds) || totalOdds <= 1) {
+      setRegistration({ status: "error", message: "Completa casa, valor apostado y cuota combinada real." });
+      return;
+    }
+    if (units !== null && (!Number.isFinite(units) || units <= 0)) {
+      setRegistration({ status: "error", message: "Las unidades deben ser mayores que cero." });
+      return;
+    }
+
+    submissionRef.current = true;
+    setRegistration({ status: "loading", message: "Registrando combinación…" });
+    try {
+      const response = await fetch("/api/bets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          betType: "combination",
+          combinationId: combination.combination_id,
+          product: combination.product,
+          mode: combination.mode,
+          legs: combination.selections.map(combinationLegSnapshot),
+          bookmaker: bookmaker.trim(),
+          decimalOdds: totalOdds,
+          oddsSource: "manual_user_input",
+          priceCoverageStatus: combination.price_coverage?.status || null,
+          atlasCombinedOdds: null,
+          stakeAmount: amount,
+          stakeUnits: units,
+          currency: currency.trim() || "COP",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        submissionRef.current = false;
+        setRegistration({ status: "error", message: result?.message || "No fue posible registrar la combinación." });
+        return;
+      }
+      setRegistration({
+        status: "success",
+        message: `${productName(combination.product)} registrada como una apuesta @${result.bet.decimal_odds}.`,
+      });
+    } catch {
+      submissionRef.current = false;
+      setRegistration({ status: "error", message: "No fue posible conectar con el registro de apuestas." });
+    }
+  }
+
+  return (
+    <form className="p2-entry-panel p2-combination-bet-form" onSubmit={registerCombinationBet}>
+      <p className="eyebrow">BET TRACKER</p>
+      <h4>Registrar apuesta</h4>
+      <p>Confirma la cuota total realmente aceptada por la casa. Atlas no recalcula ni inventa este precio.</p>
+      <div className="p2-combination-settings">
+        <label><span>Casa de apuestas</span><input required value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
+        <label><span>Valor apostado</span><input required inputMode="decimal" value={stakeAmount} onChange={(event) => setStakeAmount(event.target.value)} placeholder="Ej. 10000" /></label>
+        <label><span>Cuota combinada real</span><input required inputMode="decimal" value={decimalOdds} onChange={(event) => updateTotalOdds(event.target.value)} placeholder="Ej. 4.25" /><small>Cuota total informada por el usuario; no se multiplican automáticamente las cuotas de las patas.</small></label>
+        <label><span>Moneda</span><input required value={currency} onChange={(event) => setCurrency(event.target.value)} /></label>
+        <label><span>Unidades opcionales</span><input inputMode="decimal" value={stakeUnits} onChange={(event) => setStakeUnits(event.target.value)} placeholder="Ej. 1" /></label>
+      </div>
+      <button type="submit" className="primary-button" disabled={registration.status === "loading" || registration.status === "success"}>
+        {registration.status === "loading" ? "Registrando…" : registration.status === "success" ? "Apuesta registrada" : "Registrar apuesta"}
+      </button>
+      {registration.message ? <p role={registration.status === "error" ? "alert" : "status"}>{registration.message}</p> : null}
+    </form>
+  );
+}
+
 function enrichCandidate(candidate, ledger, manualQuote = null) {
   const operation = findFixtureQuoteEntry(ledger, candidate);
   const quote = manualQuote || candidate.activeQuote || candidate.active_quote || operation?.active_quote || operation?.latest_known_quote || null;
@@ -275,7 +407,10 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
 
   function generateCombination() {
     const target = commitSelectionCount();
-    setCombination(buildAtlasCombination({ candidates, product, mode, selections: target, selectedKeys }));
+    const prepared = buildAtlasCombination({ candidates, product, mode, selections: target, selectedKeys });
+    setCombination(prepared.status === "ready"
+      ? { ...prepared, combination_id: globalThis.crypto.randomUUID() }
+      : prepared);
   }
 
   function addManualQuote(candidate) {
@@ -380,6 +515,9 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
           {combination.price_coverage.status !== "complete" ? <p>Cuota combinada completa no disponible: {combination.price_coverage.available} de {combination.price_coverage.total} selecciones tienen precio compatible y vigente.</p> : null}
           <ol className="p2-combination-legs">{combination.selections.map((candidate) => <li key={candidate.selection_key}><div><strong>{candidate.fixture}</strong><span>{displaySelectionLabel(candidate.selection)} · {displayMarketLabel(candidate.marketId || candidate.market)} · {candidate.price_usable ? `@${candidate.decimal_odds}` : "Cuota no disponible"}</span><small><strong>Soporte Atlas:</strong> {candidate.sports_score}/100 · Perfil: {candidate.combination_profile === "very_conservative" ? "Muy conservador" : candidate.combination_profile === "conservative" ? "Conservador" : "Equilibrado"} · Muestra efectiva: {candidate.sample_size_effective ?? "No disponible"}</small>{!candidate.price_usable ? <div className="p2-inline-actions"><label><span>Ingresar cuota</span><input inputMode="decimal" placeholder="Ej. 1.43" value={manualDrafts[candidate.selection_key] || ""} onChange={(event) => setManualDrafts((current) => ({ ...current, [candidate.selection_key]: event.target.value }))} /></label><button type="button" className="secondary-button" onClick={() => addManualQuote(candidate)}>Ingresar cuota</button>{manualErrors[candidate.selection_key] ? <small>{manualErrors[candidate.selection_key]}</small> : null}</div> : null}</div><button type="button" className="secondary-button" onClick={() => removePreparedSelection(candidate.selection_key)}>Quitar</button></li>)}</ol>
           {combination.correlation.warnings.length ? <p>Correlación advertida: {combination.correlation.warnings.map(displayCorrelationLabel).join(", ")}.</p> : <p>La propuesta evita repetir selecciones altamente correlacionadas del mismo partido y mercado.</p>}
+          {combinationIsTrackable(combination)
+            ? <CombinationBetRegistration key={`${combination.combination_id}:${combination.selections.map((item) => item.selection_key).join("|")}:${combination.combined_decimal_odds ?? "unpriced"}`} combination={combination} />
+            : <p className="p2-combination-warning">La combinación no alcanza el mínimo necesario para registrarse como apuesta.</p>}
         </> : null}
       </section> : null}
     </section>
