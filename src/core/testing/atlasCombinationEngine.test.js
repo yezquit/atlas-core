@@ -185,7 +185,7 @@ test("automático evita líneas redundantes del mismo fixture", () => {
   assert.equal(result.selections.filter((item) => item.fixture_id === 77).length, 1);
 });
 
-test("Soñadora prioriza fixtures distintos cuando existen alternativas", () => {
+test("Soñadora permite varias familias del mismo fixture", () => {
   const result = buildAtlasCombination({
     candidates: [
       candidate(1, { fixtureId: 77, marketId: "goals", sportsScore: 95 }),
@@ -200,7 +200,7 @@ test("Soñadora prioriza fixtures distintos cuando existen alternativas", () => 
     selections: 5,
   });
   assert.equal(result.status, "ready");
-  assert.equal(result.selections.filter((item) => item.fixture_id === 77).length, 1);
+  assert.equal(result.selections.filter((item) => item.fixture_id === 77).length, 2);
 });
 
 test("modo manual conserva exactamente las selecciones elegidas", () => {
@@ -210,12 +210,10 @@ test("modo manual conserva exactamente las selecciones elegidas", () => {
   assert.deepEqual(result.selections.map((item) => item.selection_key).sort(), keys.sort());
 });
 
-test("modo manual conserva la elección y advierte correlación alta", () => {
+test("modo manual impide dos líneas de la misma familia y fixture", () => {
   const candidates = [candidate(1, { fixtureId: 77, line: 1.5 }), candidate(2, { fixtureId: 77, line: 2.5 })];
   const result = buildAtlasCombination({ candidates, product: "parlay", mode: "manual", selections: 2, selectedKeys: candidates.map(combinationSelectionKey) });
-  assert.equal(result.status, "ready");
-  assert.equal(result.correlation.level, "high");
-  assert.equal(result.risk.level, "high");
+  assert.equal(result.status, "insufficient_candidates");
 });
 
 test("modo manual exige el número exacto", () => {
@@ -356,6 +354,80 @@ test("Soñadora no tiene tope artificial de cuota total objetivo", () => {
   assert.equal(results[0].totalOdds, 243);
 });
 
+test("Parlay de cuatro permite cuatro familias distintas del mismo fixture", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { fixtureId: 77, marketId: "goals", line: 2.5, sportsScore: 92 }),
+      candidate(2, { fixtureId: 77, marketId: "corners", line: 8.5, sportsScore: 91 }),
+      candidate(3, { fixtureId: 77, marketId: "cards", line: 4.5, sportsScore: 90 }),
+      candidate(4, { fixtureId: 77, marketId: "total_shots", line: 24.5, sportsScore: 89 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 4,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.selections.length, 4);
+  assert.deepEqual(
+    new Set(result.selections.map((item) => item.market_family)),
+    new Set(["goals", "corners", "cards", "total_shots"]),
+  );
+  assert.deepEqual(new Set(result.selections.map((item) => item.fixture_id)), new Set([77]));
+});
+
+test("automático rechaza dos líneas goals del mismo fixture", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { fixtureId: 77, marketId: "goals", line: 1.5, sportsScore: 92 }),
+      candidate(2, { fixtureId: 77, marketId: "goals", line: 2.5, sportsScore: 91 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 2,
+  });
+
+  assert.equal(result.status, "insufficient_candidates");
+  assert.equal(result.selections.length, 1);
+});
+
+test("Soñadora permite las cinco familias reales del mismo fixture", () => {
+  const families = ["goals", "corners", "cards", "total_shots", "shots_on_goal"];
+  const result = buildAtlasCombination({
+    candidates: families.map((marketId, index) => candidate(index + 1, {
+      fixtureId: 77,
+      marketId,
+      line: index + 1.5,
+      sportsScore: 92 - index,
+    })),
+    product: "dream",
+    mode: "automatic",
+    selections: 5,
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(families));
+  assert.deepEqual(new Set(result.selections.map((item) => item.fixture_id)), new Set([77]));
+});
+
+test("modo mixto respeta la familia ya ocupada dentro del fixture", () => {
+  const fixedGoal = candidate(1, { fixtureId: 77, marketId: "goals", line: 1.5, sportsScore: 86 });
+  const repeatedGoal = candidate(2, { fixtureId: 77, marketId: "goals", line: 2.5, sportsScore: 94 });
+  const corners = candidate(3, { fixtureId: 77, marketId: "corners", line: 8.5, sportsScore: 92 });
+  const cards = candidate(4, { fixtureId: 77, marketId: "cards", line: 4.5, sportsScore: 91 });
+  const result = buildAtlasCombination({
+    candidates: [fixedGoal, repeatedGoal, corners, cards],
+    product: "parlay",
+    mode: "mixed",
+    selections: 3,
+    selectedKeys: [combinationSelectionKey(fixedGoal)],
+  });
+
+  assert.equal(result.status, "ready");
+  assert.ok(!result.selections.some((item) => item.selection_key === combinationSelectionKey(repeatedGoal)));
+  assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(["goals", "corners", "cards"]));
+});
+
 test("Parlay automático diversifica familias cuando el soporte es comparable", () => {
   const result = buildAtlasCombination({
     candidates: [
@@ -391,7 +463,7 @@ test("Parlay automático no fuerza diversidad con alternativas claramente peores
   assert.deepEqual(new Set(result.selections.map((item) => item.market_family)), new Set(["goals"]));
 });
 
-test("la diversidad ignora alternativas que violan fixture o correlación", () => {
+test("la diversidad admite otra familia válida del mismo fixture", () => {
   const result = buildAtlasCombination({
     candidates: [
       candidate(1, { fixtureId: 77, marketId: "goals", sportsScore: 91 }),
@@ -405,8 +477,7 @@ test("la diversidad ignora alternativas que violan fixture o correlación", () =
   });
 
   assert.equal(result.status, "ready");
-  assert.ok(!result.selections.some((item) => item.fixture_id === 77 && item.market_family === "corners"));
-  assert.ok(result.selections.some((item) => item.market_family === "total_shots"));
+  assert.ok(result.selections.some((item) => item.fixture_id === 77 && item.market_family === "corners"));
 });
 
 test("modo mixto cuenta la familia de una pata fija al diversificar", () => {

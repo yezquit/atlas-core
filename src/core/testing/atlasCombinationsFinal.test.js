@@ -136,10 +136,10 @@ test("23. automático conserva diversidad de fixtures", () => {
   assert.equal(new Set(result.selections.map((item) => item.fixture_id)).size, 3);
 });
 
-test("24. la correlación del mismo fixture y familia queda advertida", () => {
+test("24. el modo manual bloquea el mismo fixture y familia", () => {
   const items = [candidate(1, { fixtureId: 9, line: 1.5 }), candidate(2, { fixtureId: 9, line: 2.5 })];
   const result = buildAtlasCombination({ candidates: items, product: "parlay", mode: "manual", selections: 2, selectedKeys: items.map(combinationSelectionKey) });
-  assert.equal(result.correlation.level, "high");
+  assert.equal(result.status, "insufficient_candidates");
 });
 
 test("25. Soporte Atlas es visible y las cuotas automáticas usan identidad exacta", async () => {

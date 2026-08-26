@@ -296,11 +296,12 @@ function uniqueInspections(candidates) {
   return [...deduplicated.values()];
 }
 
-function canAppend(selected, candidate, product, allowSecondFixtureSelection = false) {
-  if (selected.some((item) => assessCombinationCorrelation(item, candidate).level === "high")) return false;
-  const sameFixtureCount = selected.filter((item) => Number(item.fixture_id) === Number(candidate.fixture_id)).length;
-  const maximumPerFixture = product === COMBINATION_PRODUCT.DREAM && allowSecondFixtureSelection ? 2 : 1;
-  return sameFixtureCount < maximumPerFixture;
+function canAppend(selected, candidate) {
+  return !selected.some((item) => assessCombinationCorrelation(item, candidate).level === "high");
+}
+
+function selectionsAreCompatible(selections) {
+  return selections.every((candidate, index) => canAppend(selections.slice(0, index), candidate));
 }
 
 function correlationWarnings(selections) {
@@ -384,6 +385,7 @@ export function addCombinationSelection(combination, candidate) {
   const key = inspection.candidate.selection_key;
   if (!inspection.sports_eligible || !key) return combination;
   if (combination.selections.some((item) => item.selection_key === key)) return combination;
+  if (!canAppend(combination.selections, inspection.candidate)) return combination;
   if (combination.selections.length >= Number(combination.requested_selections)) return combination;
   return editedCombinationResult(combination, [...combination.selections, inspection.candidate]);
 }
@@ -398,27 +400,24 @@ export function updateCombinationSelection(combination, candidate) {
   return editedCombinationResult(combination, updated, { editing: combination.editing === true });
 }
 
-function addDiversifiedCandidates(chosen, eligible, target, product) {
-  const passes = product === COMBINATION_PRODUCT.DREAM ? [false, true] : [false];
-  for (const allowSecondFixtureSelection of passes) {
-    while (chosen.length < target) {
-      const validCandidates = eligible.filter((candidate) => (
-        !chosen.some((item) => item.selection_key === candidate.selection_key)
-        && canAppend(chosen, candidate, product, allowSecondFixtureSelection)
-      ));
-      if (!validCandidates.length) break;
+function addDiversifiedCandidates(chosen, eligible, target) {
+  while (chosen.length < target) {
+    const validCandidates = eligible.filter((candidate) => (
+      !chosen.some((item) => item.selection_key === candidate.selection_key)
+      && canAppend(chosen, candidate)
+    ));
+    if (!validCandidates.length) break;
 
-      const bestCandidate = validCandidates[0];
-      const usedFamilies = new Set(chosen.map((candidate) => candidate.market_family));
-      const comparableUnusedFamily = usedFamilies.has(bestCandidate.market_family)
-        ? validCandidates.find((candidate) => (
-          !usedFamilies.has(candidate.market_family)
-          && bestCandidate.sports_score - candidate.sports_score <= COMPARABLE_MARKET_FAMILY_GAP
-        ))
-        : null;
+    const bestCandidate = validCandidates[0];
+    const usedFamilies = new Set(chosen.map((candidate) => candidate.market_family));
+    const comparableUnusedFamily = usedFamilies.has(bestCandidate.market_family)
+      ? validCandidates.find((candidate) => (
+        !usedFamilies.has(candidate.market_family)
+        && bestCandidate.sports_score - candidate.sports_score <= COMPARABLE_MARKET_FAMILY_GAP
+      ))
+      : null;
 
-      chosen.push(comparableUnusedFamily || bestCandidate);
-    }
+    chosen.push(comparableUnusedFamily || bestCandidate);
   }
 }
 
@@ -441,8 +440,9 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
     .sort((left, right) => compareCombinationCandidates(left, right, product, validation.count));
   const requestedKeys = [...new Set(selectedKeys.filter(Boolean))];
   const fixed = requestedKeys.map((key) => eligible.find((candidate) => candidate.selection_key === key)).filter(Boolean);
+  const fixedSelectionsAreCompatible = selectionsAreCompatible(fixed);
 
-  if (mode === COMBINATION_MODE.MANUAL && (requestedKeys.length !== validation.count || fixed.length !== validation.count)) {
+  if (mode === COMBINATION_MODE.MANUAL && (requestedKeys.length !== validation.count || fixed.length !== validation.count || !fixedSelectionsAreCompatible)) {
     return {
       contract: "AtlasCombinationResult",
       version: 2,
@@ -453,11 +453,15 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
       selections: fixed,
       eligible_candidates: eligible,
       rejected_candidates: inspected.filter((item) => !item.sports_eligible),
-      director_message: buildDirectorCombinationMessage({ product, status: "manual_incomplete", selections: validation.count }),
+      director_message: buildDirectorCombinationMessage({
+        product,
+        status: fixedSelectionsAreCompatible ? "manual_incomplete" : "fixed_selection_invalid",
+        selections: validation.count,
+      }),
     };
   }
 
-  if (mode === COMBINATION_MODE.MIXED && (requestedKeys.length > validation.count || fixed.length !== requestedKeys.length)) {
+  if (mode === COMBINATION_MODE.MIXED && (requestedKeys.length > validation.count || fixed.length !== requestedKeys.length || !fixedSelectionsAreCompatible)) {
     return {
       contract: "AtlasCombinationResult",
       version: 2,
@@ -474,7 +478,7 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
 
   const chosen = mode === COMBINATION_MODE.AUTOMATIC ? [] : [...fixed];
   if (mode !== COMBINATION_MODE.MANUAL) {
-    addDiversifiedCandidates(chosen, eligible, validation.count, product);
+    addDiversifiedCandidates(chosen, eligible, validation.count);
   }
 
   if (chosen.length !== validation.count) {
