@@ -143,6 +143,34 @@ test("7. CONTRADICCIONES espera únicamente NINGUNO cuando está vacío", () => 
   assert.match(prompt, /CONTRADICCIONES\nSi no existen, escribe únicamente: NINGUNO/);
 });
 
+test("integridad: el prompt prohíbe inventar, asumir, deducir e inferir", () => {
+  assert.match(prompt, /prohibido inventar, asumir, deducir, completar por inferencia/i);
+  assert.match(prompt, /No conviertas una inferencia en hecho confirmado/i);
+});
+
+test("integridad: el prompt prohíbe reutilizar información antigua", () => {
+  assert.match(prompt, /reutilizar información antigua para rellenar vacíos/i);
+  assert.match(prompt, /No reutilices datos de partidos anteriores o temporadas anteriores/i);
+});
+
+test("integridad: el prompt exige evidencia explícita para la designación arbitral", () => {
+  assert.match(prompt, /REGLA ESPECIAL DE ÁRBITRO/);
+  assert.match(prompt, /vincule explícitamente el nombre del árbitro con el FIXTURE EXACTO/i);
+  assert.match(prompt, /No infieras árbitro usando partidos anteriores, perfiles estadísticos, historial del árbitro/i);
+});
+
+test("integridad: el prompt dirige datos no confirmados al estado correspondiente", () => {
+  assert.match(prompt, /plausible pero no confirmado[\s\S]*INFORMACIÓN PROBABLE/);
+  assert.match(prompt, /no existe evidencia actual, específica y verificable[\s\S]*DATOS NO ENCONTRADOS/);
+});
+
+test("integridad: el prompt conserva URL específica, contradicciones y el bloque estructurado", () => {
+  assert.match(prompt, /Cada HECHO CONFIRMADO debe conservar HECHO, IMPACTO, FUENTE, URL y FECHA/);
+  assert.match(prompt, /La URL debe respaldar específicamente el hecho/);
+  assert.match(prompt, /Si existen fuentes contradictorias: CONTRADICCIONES/);
+  assert.match(prompt, /HECHO \+ IMPACTO \+ FUENTE \+ URL \+ FECHA forman UN MISMO BLOQUE/);
+});
+
 test("8. el prompt sigue prohibiendo recomendaciones y probabilidades", () => {
   assert.match(prompt, /No recomiendes apostar/);
   assert.match(prompt, /no generes probabilidades/i);
