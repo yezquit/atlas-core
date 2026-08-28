@@ -54,7 +54,7 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
     if (!candidate && generated.reason === "insufficient_distribution_data") reason = "Muestra insuficiente.";
     else if (!candidate && (assessment?.available_evidence?.length || 0) < (assessment?.data_requirements?.length || 0) * 0.7) reason = "Cobertura insuficiente.";
     else if (!candidate && (assessment?.risk_flags || []).some((item) => /crític|critical|depend/i.test(item))) reason = "Dependencia crítica.";
-    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mayor sports_score del ranking general.";
+    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mejor opción del ranking deportivo por elegibilidad y probabilidad estimada.";
     return {
       market_family: generated.market_family,
       market_label: assessment?.market_label || generated.market_family,
@@ -70,7 +70,7 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
     families_compared: families.map((item) => item.market_label),
     best_by_family: families,
     why_market_won: winner
-      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por su respaldo deportivo (${winner.sports_score}/100), no por el orden inicial.`
+      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por el ranking deportivo V3 (elegibilidad y probabilidad estimada), no por el orden inicial.`
       : "No hubo un candidato destacado.",
   };
 }
@@ -402,6 +402,9 @@ function toJourneyCandidate({ analysis, candidate, comparison }) {
     direction: candidate.direction,
     line: candidate.line,
     probability: candidate.preliminary_probability,
+    estimatedProbability: candidate.estimated_probability,
+    probabilityPercent: candidate.probability_percent,
+    probabilityClassification: candidate.probability_classification,
     uncertaintyLow: candidate.uncertainty_low,
     uncertaintyHigh: candidate.uncertainty_high,
     confidence: candidate.sports_score,
@@ -701,7 +704,9 @@ export async function scanSportsJourney(input, gateway) {
 
   const maximumCandidates = Math.max(1, Math.min(50, Number(input.maximumCandidates) || 50));
   const competitionProfiles = Array.isArray(input.competitionProfiles) ? input.competitionProfiles : [];
-  const highlightedSports = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
+  const highlightedSports = rankJourneyCandidatesByProbability(
+    analysisCandidates.filter((entry) => entry.candidate?.ranking_eligible === true)
+  ).slice(0, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
   const combinationSports = selectCombinationJourneyCandidates(combinationEntries, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
   const pricedUniverse = await recoverJourneyCandidateOdds(
     [...new Map([...highlightedSports, ...combinationSports].map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate])).values()],
@@ -755,6 +760,31 @@ export async function scanSportsJourney(input, gateway) {
     executionTimeMs: Date.now() - startedAt,
     telemetry,
   };
+}
+
+export function rankJourneyCandidatesByProbability(entries = []) {
+  return [...entries].sort((left, right) => {
+    const leftProbability = Number.isFinite(left.candidate?.estimated_probability) ? left.candidate.estimated_probability : -1;
+    const rightProbability = Number.isFinite(right.candidate?.estimated_probability) ? right.candidate.estimated_probability : -1;
+    if (rightProbability !== leftProbability) return rightProbability - leftProbability;
+
+    const leftWidth = Number.isFinite(left.candidate?.uncertainty_high) && Number.isFinite(left.candidate?.uncertainty_low)
+      ? left.candidate.uncertainty_high - left.candidate.uncertainty_low : Infinity;
+    const rightWidth = Number.isFinite(right.candidate?.uncertainty_high) && Number.isFinite(right.candidate?.uncertainty_low)
+      ? right.candidate.uncertainty_high - right.candidate.uncertainty_low : Infinity;
+    if (leftWidth !== rightWidth) return leftWidth - rightWidth;
+
+    const leftSample = Number.isFinite(left.candidate?.sample_size_effective) ? left.candidate.sample_size_effective : -1;
+    const rightSample = Number.isFinite(right.candidate?.sample_size_effective) ? right.candidate.sample_size_effective : -1;
+    if (rightSample !== leftSample) return rightSample - leftSample;
+
+    const leftSupport = Number.isFinite(left.candidate?.technical_support_score) ? left.candidate.technical_support_score : -1;
+    const rightSupport = Number.isFinite(right.candidate?.technical_support_score) ? right.candidate.technical_support_score : -1;
+    if (rightSupport !== leftSupport) return rightSupport - leftSupport;
+
+    if (left.analysis.fixture.fixtureId !== right.analysis.fixture.fixtureId) return left.analysis.fixture.fixtureId - right.analysis.fixture.fixtureId;
+    return left.candidate.candidate_id.localeCompare(right.candidate.candidate_id);
+  });
 }
 
 export function selectDiverseJourneyCandidates(entries = [], maximum = 5, comparableGap = 4) {

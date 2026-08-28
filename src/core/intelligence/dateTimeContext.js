@@ -1,5 +1,12 @@
 export const DEFAULT_ATLAS_TIMEZONE = "America/Bogota";
 
+export function todayLocalDateString(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = String(referenceDate.getMonth() + 1).padStart(2, "0");
+  const day = String(referenceDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function isValidTimeZone(value) {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());

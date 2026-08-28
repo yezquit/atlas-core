@@ -93,6 +93,8 @@ test("5. candidato no evaluable no recibe estimated_probability=0", () => {
   const [ranked] = rankMarketCandidates([candidate({ probability_status: "unavailable", preliminary_probability: null })], { marketAssessments: assessments() });
   assert.equal(ranked.estimated_probability, null);
   assert.notEqual(ranked.estimated_probability, 0);
+  assert.equal(ranked.overall_status, OVERALL_STATUS.INSUFFICIENT);
+  assert.equal(ranked.ranking_eligible, false);
 });
 
 test("6. estimated_probability presente pero inválida no cae silenciosamente a preliminary_probability", () => {
@@ -191,6 +193,8 @@ test("14. SPORTS_PENDING_PRICE y REVIEW_ONLY (elegibles reales, sin cuota) no se
   const byId = Object.fromEntries(ranked.map((item) => [item.candidate_id, item]));
   assert.equal(byId["spp-68"].overall_status, OVERALL_STATUS.SPORTS_PENDING_PRICE);
   assert.equal(byId["review-85"].overall_status, OVERALL_STATUS.REVIEW_ONLY);
+  assert.equal(byId["spp-68"].ranking_eligible, true);
+  assert.equal(byId["review-85"].ranking_eligible, true);
   // Ninguno de los dos estados es tratado como NOT_VIABLE/BLOCKED/INSUFFICIENT: manda la probabilidad mayor.
   assert.equal(ranked[0].candidate_id, "review-85");
 });
@@ -211,6 +215,8 @@ test("15. un candidato NOT_VIABLE nunca rankea sobre uno elegible aunque tenga m
   const byId = Object.fromEntries(ranked.map((item) => [item.candidate_id, item]));
   assert.ok(byId["not-viable-91"].sports_score < 45);
   assert.equal(byId["not-viable-91"].overall_status, OVERALL_STATUS.NOT_VIABLE);
+  assert.equal(byId["not-viable-91"].ranking_eligible, false);
+  assert.equal(byId["eligible-82"].ranking_eligible, true);
   assert.equal(ranked[0].candidate_id, "eligible-82");
 });
 

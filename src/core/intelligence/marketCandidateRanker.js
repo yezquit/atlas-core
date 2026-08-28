@@ -169,11 +169,13 @@ export function rankMarketCandidates(candidates = [], { quotes = [], preferredQu
         : null,
       line_stability_score: calculateLineStabilityScore(candidate),
     };
+    const candidateOverallStatus = overallStatus(enriched, price.status, blocked);
     return {
       ...enriched,
       price_status: price.status,
       price_quote: price.quote,
-      overall_status: overallStatus(enriched, price.status, blocked),
+      overall_status: candidateOverallStatus,
+      ranking_eligible: !isIneligibleForRanking(candidateOverallStatus),
       rank_reason: rankReason(enriched),
       simple_sports_reasons: buildSimpleSportsReasons(enriched, { homeTeamProfile, awayTeamProfile }),
       ranker_version: MARKET_CANDIDATE_RANKER_VERSION,

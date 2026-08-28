@@ -97,10 +97,10 @@ test("3. la tarjeta sencilla declara preselección y no recomendación", async (
   assert.match(source, /Mejor opción inicial/);
 });
 
-test("4. seleccionar candidato abre el flujo de investigación", async () => {
+test("4. seleccionar candidato abre el análisis deportivo inicial", async () => {
   const source = await readFile(clientPath, "utf8");
   assert.match(source, />Analizar esta opción</);
-  assert.match(source, /Preparar investigación Gemini/);
+  assert.match(source, /Analizar deportivamente/);
 });
 
 test("5. antes de Gemini la vista sencilla usa análisis inicial", async () => {

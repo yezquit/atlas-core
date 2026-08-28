@@ -231,12 +231,15 @@ test("3. comparación de familias visible", async () => {
   assert.match(source, /Ver comparación de mercados/);
 });
 
-test("4. goles gana por puntaje, no por orden", () => {
+test("4. mensaje de ganador refleja el ranking deportivo V3", () => {
   const corners = sportsCandidate({ candidate_id: "corners:over:8.5", market_family: "corners", line: 8.5, selection: "Over 8.5", sports_score: 50, rank: 2 });
   const goals = sportsCandidate({ sports_score: 88.5, rank: 1 });
   const comparison = buildJourneyFamilyComparison({ primary: goals, generated: [{ market_family: "corners", candidates: [corners] }, { market_family: "goals", candidates: [goals] }], ranked_candidates: [goals, corners] }, [{ market_family: "corners", market_label: "Córners" }, { market_family: "goals", market_label: "Goles" }]);
   assert.equal(comparison.best_by_family[1].best_score, 88.5);
-  assert.match(comparison.why_market_won, /respaldo deportivo.*no por el orden inicial/i);
+  assert.match(
+    comparison.why_market_won,
+    /ranking deportivo v3.*no por el orden inicial/i
+  );
 });
 
 test("5. formato de muestra efectiva 26.6", async () => {
