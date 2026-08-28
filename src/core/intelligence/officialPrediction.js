@@ -45,14 +45,11 @@ function normalizedDirection(value) {
   return null;
 }
 
+// Usada únicamente por el snapshot PREMATCH (ver estimatedProbability en
+// createOfficialPredictionSnapshot); LIVE nunca la consume y siempre fija
+// estimated_probability en null de forma explícita.
 function probabilityFrom(analysis) {
-  const director = analysis?.director || {};
-  const preliminary = analysis?.preliminary_probability || {};
-  return finiteNumber(
-    preliminary.point_estimate ??
-    director.estimated_probability ??
-    director.sports_verdict?.preliminary_probability
-  );
+  return finiteNumber(analysis?.director?.sports_verdict?.estimated_probability);
 }
 
 function uncertaintyFrom(analysis, key) {
@@ -244,6 +241,11 @@ export function createOfficialPredictionSnapshot(analysis, {
     },
     confidence_score: finiteNumber(analysis.analysis_confidence?.analysis_confidence_score ?? director.analysis_confidence_score),
     sports_score: finiteNumber(sports.sports_score),
+    probability_percent: finiteNumber(sports.probability_percent),
+    probability_classification: sports.probability_classification || null,
+    sample_size_effective: finiteNumber(sports.sample_size_effective),
+    technical_support_score: finiteNumber(sports.technical_support_score),
+    ranking_eligible: sports.ranking_eligible === true,
     public_director_decision: {
       status: publicPresentation.status,
       label: publicPresentation.label || null,

@@ -52,7 +52,7 @@ function analysis(overrides = {}) {
       probability_uncertainty_low: 0.61,
       probability_uncertainty_high: 0.78,
       probability_methodology: "distribution-v1",
-      sports_verdict: { status: "sports_candidate", selection: "Under 2.5", direction: "under", line: 2.5, sports_score: 78, message: "Atlas respalda deportivamente Under 2.5." },
+      sports_verdict: { status: "sports_candidate", selection: "Under 2.5", direction: "under", line: 2.5, sports_score: 78, estimated_probability: 0.7, message: "Atlas respalda deportivamente Under 2.5." },
       price_assessment: { status: "favorable_preliminary", freshness: "fresh", source_status: "user_reported_current", bookmaker: "Betano", decimal_odds: 1.83 },
       market_suitability: "suitable_under_conditions",
       simple_reasons: ["Distribución reciente compatible."],
@@ -361,4 +361,61 @@ test("30. la ruta autenticada expone listar, registrar y resolver", async () => 
   assert.match(route, /export async function POST/);
   assert.match(route, /export async function PATCH/);
   assert.match(route, /requirePersonalSession/);
+});
+
+function v3SportsVerdict(overrides = {}) {
+  return {
+    status: "sports_candidate",
+    selection: "Under 2.5",
+    direction: "under",
+    line: 2.5,
+    sports_score: 78,
+    estimated_probability: 0.73,
+    preliminary_probability: 0.61,
+    probability_percent: 70,
+    probability_classification: "BUENA",
+    sample_size_effective: 24,
+    technical_support_score: 65,
+    ranking_eligible: true,
+    message: "Atlas respalda deportivamente Under 2.5.",
+    ...overrides,
+  };
+}
+
+test("31. los 5 campos V3 quedan congelados en el snapshot con su valor exacto", () => {
+  const source = analysis({ director: { sports_verdict: v3SportsVerdict() } });
+  const result = snapshot({}, source);
+  assert.equal(result.probability_percent, 70);
+  assert.equal(result.probability_classification, "BUENA");
+  assert.equal(result.sample_size_effective, 24);
+  assert.equal(result.technical_support_score, 65);
+  assert.equal(result.ranking_eligible, true);
+  assert.ok(Object.isFrozen(result));
+});
+
+test("32. estimated_probability se copia de sports_verdict.estimated_probability, nunca de preliminary_probability", () => {
+  const source = analysis({ director: { sports_verdict: v3SportsVerdict({ estimated_probability: 0.73, preliminary_probability: 0.61 }) } });
+  const result = snapshot({}, source);
+  assert.equal(result.estimated_probability, 0.73);
+  assert.notEqual(result.estimated_probability, 0.61);
+});
+
+test("33. preliminary_probability no sustituye datos V3 ausentes en el snapshot", () => {
+  const result = snapshot();
+  assert.equal(result.probability_percent, null);
+  assert.equal(result.probability_classification, null);
+  assert.equal(result.sample_size_effective, null);
+  assert.equal(result.technical_support_score, null);
+  assert.equal(result.ranking_eligible, false);
+});
+
+test("34. resolver una predicción no modifica los campos V3 originales", () => {
+  const source = analysis({ director: { sports_verdict: v3SportsVerdict() } });
+  const before = snapshot({}, source);
+  const after = resolveOfficialPrediction(before, { actualTotal: 2, source: "manual_user_input" });
+  assert.equal(after.probability_percent, before.probability_percent);
+  assert.equal(after.probability_classification, before.probability_classification);
+  assert.equal(after.sample_size_effective, before.sample_size_effective);
+  assert.equal(after.technical_support_score, before.technical_support_score);
+  assert.equal(after.ranking_eligible, before.ranking_eligible);
 });
