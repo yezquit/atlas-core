@@ -2,7 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { createServerSportsGateway } from "./sportsIntelligenceServer.js";
-import { analyzeLiveFixture, listLiveFixtures } from "./liveAnalysisService.js";
+import { getOperationalHistoryRepository } from "./operationalAnalysisServer.js";
+import { analyzeLiveFixture, listLiveFixtures, selectLatestPrematchAnalysis } from "./liveAnalysisService.js";
 
 const recent = new Map();
 const MAX_RECENT = 100;
@@ -20,7 +21,15 @@ export function listLiveFixturesOnServer(input) {
 }
 
 export async function analyzeLiveFixtureOnServer(input) {
-  return remember(await analyzeLiveFixture(input, createServerSportsGateway("live"), { idFactory: randomUUID }));
+  // Contexto prematch: solo se acepta la última versión guardada que sea
+  // genuinamente anterior al kickoff (phase !== "pre_match_closed" y
+  // kickoff_distance_minutes > 0, campos ya existentes). Nunca se fabrica
+  // ni se consulta al proveedor; si no existe una versión así, queda null.
+  const fixtureId = Number(input?.fixtureId);
+  const prematchContext = Number.isInteger(fixtureId) && fixtureId > 0
+    ? selectLatestPrematchAnalysis(await (await getOperationalHistoryRepository()).list({ fixtureId }))
+    : null;
+  return remember(await analyzeLiveFixture(input, createServerSportsGateway("live"), { idFactory: randomUUID, prematchContext }));
 }
 
 export function getRecentLiveAnalysis(analysisId) {

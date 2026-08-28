@@ -460,7 +460,7 @@ export function buildLiveDirectorVerdict(snapshot, assessments) {
   });
 }
 
-export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statistics = null, liveOddsPayload = [], liveOddsProviderStatus = "success", fixtureFetchedAt, statisticsFetchedAt = null, oddsFetchedAt = null, analyzedAt = new Date().toISOString() } = {}) {
+export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statistics = null, liveOddsPayload = [], liveOddsProviderStatus = "success", fixtureFetchedAt, statisticsFetchedAt = null, oddsFetchedAt = null, analyzedAt = new Date().toISOString(), prematchContext = null } = {}) {
   const snapshotResult = createLiveMatchSnapshot({ fixture, statistics, fixtureFetchedAt, statisticsFetchedAt, oddsFetchedAt, snapshotAt: analyzedAt });
   if (snapshotResult.status !== "success") return { contract: "LiveAnalysisResult", version: 1, status: "unavailable", mode: "live", errorCode: snapshotResult.errorCode, analysis_id: null, snapshot: null, market_assessments: [], director: null };
   const liveOddsInspection = inspectLiveOdds(liveOddsPayload, { fixtureId: fixture.fixtureId, fetchedAt: oddsFetchedAt || analyzedAt, now: analyzedAt });
@@ -483,5 +483,9 @@ export function analyzeLiveMatch({ analysisId, competitionKey, fixture, statisti
     live_odds_diagnostics: liveOddsInspection.diagnostics,
     active_quote: director.live_market_verdict?.status === "actionable" ? director.live_market_verdict.active_quote : null,
     director,
+    // Contexto prematch, sin modificar: nunca alimenta el cálculo LIVE de
+    // arriba (snapshot/assessments/director ya están construidos). Puede
+    // ser null si no existe una versión prematch guardada para el fixture.
+    prematch_context: prematchContext || null,
   });
 }

@@ -21,6 +21,27 @@ function viabilityLabel(value) {
   return VIABILITY_LABELS[value] || "No accionable actualmente";
 }
 
+function prematchProbabilityLabel(value) {
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : "No disponible";
+}
+
+function LivePrematchContext({ prematchContext }) {
+  if (!prematchContext) {
+    return <section className="p2-live-prematch p2-live-prematch-empty" aria-labelledby="live-prematch-title">
+      <p className="eyebrow">CONTEXTO PREMATCH</p>
+      <h3 id="live-prematch-title">Sin contexto prematch</h3>
+      <p>No hay un análisis prepartido guardado para este partido; solo se muestra la lectura EN VIVO.</p>
+    </section>;
+  }
+  const prematchDirector = prematchContext.director || {};
+  return <section className="p2-live-prematch" aria-labelledby="live-prematch-title">
+    <p className="eyebrow">CONTEXTO PREMATCH</p>
+    <h3 id="live-prematch-title">Lo que Atlas ya sabía antes del partido</h3>
+    <p><strong>{displaySelectionLabel(prematchDirector.selection || prematchDirector.market_evaluated?.label)}</strong></p>
+    <p><small>Probabilidad estimada prematch</small> <strong>{prematchProbabilityLabel(prematchDirector.estimated_probability)}</strong></p>
+  </section>;
+}
+
 function LiveAnalysis({ analysis, onSave, saveState }) {
   const { snapshot, director } = analysis;
   const markets = (analysis.market_assessments || []).filter((item) => item.candidate);
@@ -28,6 +49,8 @@ function LiveAnalysis({ analysis, onSave, saveState }) {
   const liveMarketVerdict = director.live_market_verdict;
   return <section className="p2-live-analysis" aria-labelledby="live-result-title">
     <header><p className="eyebrow">Captura EN VIVO · minuto {snapshot.minute}</p><h2 id="live-result-title">{snapshot.home_team} {snapshot.score.home} - {snapshot.score.away} {snapshot.away_team}</h2><p>Actualizado {new Date(snapshot.captured_at).toLocaleTimeString("es-CO")} · {displayProviderStatus(snapshot.status.long || snapshot.status.short)}</p></header>
+    <LivePrematchContext prematchContext={analysis.prematch_context} />
+    <p className="eyebrow p2-live-now-heading">AHORA EN VIVO</p>
     <section className={`p2-live-director p2-live-director-${director.analysis_decision.status}`}>
       <p className="eyebrow">DirectorAtlas</p>
       <h3>{director.analysis_decision.label}</h3>
@@ -67,12 +90,26 @@ export default function AtlasLive({ competitions, defaultTimezone = "America/Bog
   const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState({ fixtureId: "", competitionKey: competitions[0]?.key || "" });
   const [saveState, setSaveState] = useState({ kind: "idle", message: "" });
+  const [selectedLiveCompetitionKeys, setSelectedLiveCompetitionKeys] = useState(() => competitions.map((item) => item.key));
+
+  function toggleLiveCompetition(key) {
+    setSelectedLiveCompetitionKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+  }
 
   const refresh = useCallback(async () => {
+    if (!selectedLiveCompetitionKeys.length) {
+      setCatalog({ fixtures: [], status: "empty", message: "Selecciona al menos una competición para buscar partidos en vivo." });
+      return;
+    }
     setCatalog((current) => ({ ...current, status: "loading", message: "Consultando partidos en vivo…" }));
-    try { const response = await fetch(`/api/football/live?timezone=${encodeURIComponent(defaultTimezone)}`, { cache: "no-store" }); const body = await response.json(); setCatalog(response.ok ? body : { ...body, fixtures: [] }); }
+    try {
+      const params = new URLSearchParams({ timezone: defaultTimezone, competitionKeys: selectedLiveCompetitionKeys.join(",") });
+      const response = await fetch(`/api/football/live?${params}`, { cache: "no-store" });
+      const body = await response.json();
+      setCatalog(response.ok ? body : { ...body, fixtures: [] });
+    }
     catch { setCatalog({ status: "provider_error", fixtures: [], message: "No fue posible conectar con el proveedor EN VIVO." }); }
-  }, [defaultTimezone]);
+  }, [defaultTimezone, selectedLiveCompetitionKeys]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -92,9 +129,10 @@ export default function AtlasLive({ competitions, defaultTimezone = "America/Bog
 
   return <section className="p2-mode p2-live" aria-labelledby="atlas-live-title">
     <div className="p2-mode-heading"><p className="eyebrow">Lectura durante el partido</p><h2 id="atlas-live-title">Atlas EN VIVO</h2><p>Usa capturas actuales del marcador y estadísticas disponibles. No reutiliza cuotas prepartido ni inventa datos ausentes.</p></div>
+    <fieldset className="p2-live-competitions"><legend>Competiciones a consultar EN VIVO</legend>{competitions.map((item) => <label key={item.key}><input type="checkbox" checked={selectedLiveCompetitionKeys.includes(item.key)} onChange={() => toggleLiveCompetition(item.key)} />{item.localName}</label>)}</fieldset>
     <div className="p2-live-toolbar"><button type="button" className="primary-button p2-primary" onClick={refresh} disabled={catalog.status === "loading"}>{catalog.status === "loading" ? "Actualizando…" : "Actualizar EN VIVO"}</button><p role="status">{catalog.message}</p></div>
     <div className="p2-live-fixtures">{(catalog.fixtures || []).map((fixture) => <article key={fixture.fixtureId} className="p2-live-fixture"><p className="eyebrow">{fixture.competition?.name}</p><h3>{fixture.teams?.home?.name} vs {fixture.teams?.away?.name}</h3><strong className="p2-live-score">{fixture.score?.goals?.home ?? "–"} - {fixture.score?.goals?.away ?? "–"}</strong><p>Minuto {fixture.status?.elapsed} · {displayProviderStatus(fixture.status?.long || fixture.status?.short)}</p><small>ID del partido {fixture.fixtureId}</small><button type="button" className="primary-button p2-primary" disabled={busy} onClick={() => analyze(fixture.fixtureId, fixture.competitionKey)}>{busy ? "Analizando…" : "Analizar en vivo"}</button></article>)}</div>
-    {catalog.status === "empty" ? <p className="p2-live-empty">No hay partidos en vivo ahora mismo en las competiciones configuradas.</p> : null}
+    {catalog.status === "empty" ? <p className="p2-live-empty">{catalog.message || "No hay partidos en vivo ahora mismo en las competiciones seleccionadas."}</p> : null}
     <details className="p2-live-manual"><summary>Analizar un partido EN VIVO conocido</summary><div className="p2-live-manual-grid"><label><span>Competición</span><select value={manual.competitionKey} onChange={(event) => setManual({ ...manual, competitionKey: event.target.value })}>{competitions.map((item) => <option key={item.key} value={item.key}>{item.localName}</option>)}</select></label><label><span>ID del partido</span><input inputMode="numeric" value={manual.fixtureId} onChange={(event) => setManual({ ...manual, fixtureId: event.target.value })} placeholder="ID exacto" /></label><button type="button" className="secondary-button" disabled={busy || !manual.fixtureId} onClick={() => analyze(manual.fixtureId, manual.competitionKey)}>Analizar partido</button></div></details>
     {analysis ? <LiveAnalysis analysis={analysis} onSave={save} saveState={saveState} /> : null}
   </section>;

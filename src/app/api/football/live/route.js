@@ -14,7 +14,11 @@ export async function GET(request) {
   const access = requirePersonalSession(request);
   if (!access.ok) return access.response;
   const url = new URL(request.url);
-  const result = await listLiveFixturesOnServer({ competitions: API_FOOTBALL_COMPETITIONS, timezone: url.searchParams.get("timezone") || process.env.ATLAS_DEFAULT_TIMEZONE || "America/Bogota" });
+  const requestedKeys = (url.searchParams.get("competitionKeys") || "").split(",").map((key) => key.trim()).filter(Boolean);
+  const competitions = requestedKeys.length
+    ? API_FOOTBALL_COMPETITIONS.filter((item) => requestedKeys.includes(item.key))
+    : API_FOOTBALL_COMPETITIONS;
+  const result = await listLiveFixturesOnServer({ competitions, timezone: url.searchParams.get("timezone") || process.env.ATLAS_DEFAULT_TIMEZONE || "America/Bogota" });
   return Response.json(result, { status: statusCode(result) });
 }
 
