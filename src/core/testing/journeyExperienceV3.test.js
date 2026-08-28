@@ -94,23 +94,23 @@ test("3. la UI inicializa la fecha con todayLocalDateString y ya no la deja vac�
   assert.equal(source.includes('setDate("")'), false);
 });
 
-test("4. escanear jornada acepta hasta 50 partidos y respeta el límite", async () => {
+test("4. escanear jornada analiza TODOS los fixtures elegibles, sin tope artificial de 50", async () => {
   const fixtures = Array.from({ length: 60 }, (_, index) => targetFixture(8_000 + index));
   const result = await scanSportsJourney(
-    { ...journeyBase, marketIds: ["goals"], maximumFixtures: 999 },
+    { ...journeyBase, marketIds: ["goals"] },
     gateway({ fixturesForDate: fixtures })
   );
   assert.equal(result.status, DATA_LOAD_STATUS.SUCCESS);
-  assert.equal(result.fixturesReviewed, 50);
+  assert.equal(result.fixturesReviewed, 60);
 });
 
-test("5. escanear jornada respeta un máximo válido menor a 50", async () => {
+test("5. un maximumFixtures explícito ya no trunca el análisis (causa raíz eliminada)", async () => {
   const fixtures = Array.from({ length: 20 }, (_, index) => targetFixture(8_200 + index));
   const result = await scanSportsJourney(
     { ...journeyBase, marketIds: ["goals"], maximumFixtures: 12 },
     gateway({ fixturesForDate: fixtures })
   );
-  assert.equal(result.fixturesReviewed, 12);
+  assert.equal(result.fixturesReviewed, 20);
 });
 
 test("6. búsqueda general puede producir candidatos de varias familias soportadas a la vez", async () => {

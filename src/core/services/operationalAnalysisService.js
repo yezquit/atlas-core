@@ -170,11 +170,28 @@ export function selectExactRequestedCandidate(marketSelection, { marketFamily, r
     Number(candidate.line) === Number(requestedLine) &&
     (!direction || candidate.direction === direction)
   );
-  if (!exactCandidate) return marketSelection;
+  // La línea escrita por el usuario es una restricción dura: si Atlas no
+  // puede calcular exactamente esa línea, lo declara explícitamente en vez
+  // de sustituirla en silencio por otra línea del mismo mercado. El mejor
+  // candidato general queda disponible solo como alternativa, nunca como
+  // respuesta al pedido exacto.
+  if (!exactCandidate) {
+    const sameFamilyAlternatives = (marketSelection.ranked_candidates || []).filter((candidate) => candidate.market_family === marketFamily);
+    return {
+      ...marketSelection,
+      primary: null,
+      alternatives: sameFamilyAlternatives.slice(0, 3),
+      exact_requested_line_unavailable: true,
+      requested_line: Number(requestedLine),
+      requested_direction: direction,
+      explanation: `Atlas no tiene información suficiente para calcular exactamente ${requestedSelection} ${requestedLine}${marketFamily ? ` (${marketFamily})` : ""}. No se sustituye por otra línea.`,
+    };
+  }
   return {
     ...marketSelection,
     primary: exactCandidate,
     alternatives: marketSelection.ranked_candidates.filter((candidate) => candidate.candidate_id !== exactCandidate.candidate_id).slice(0, 3),
+    exact_requested_line_unavailable: false,
     explanation: exactLineExplanation(exactCandidate.selection, { lineOrigin }),
   };
 }
@@ -414,7 +431,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const primaryCandidate = shouldUseOperationalCandidate && operationalCandidate
     ? operationalCandidate
     : marketSelection.primary;
-  const marketAssessment = base.marketAssessments.find((item) => item.market_family === primaryCandidate?.market_family) || null;
+  const marketAssessment = base.marketAssessments.find((item) => item.market_family === (primaryCandidate?.market_family || manualMarketFamily)) || null;
   const bestProviderOdds = primaryCandidate ? selectBestComparableOdds(oddsResult.quotes, {
     marketFamily: primaryCandidate.market_family,
     selection: primaryCandidate.selection,

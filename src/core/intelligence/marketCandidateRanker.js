@@ -224,6 +224,18 @@ function lineProfiles(ranked) {
   return { most_probable: mostProbable, best_balance: bestBalance, aggressive };
 }
 
+// Prioriza como alternativas otras líneas viables de la MISMA familia que el
+// candidato principal (p. ej. Over 1.5 / Over 2.5 cuando el principal es
+// Over 0.5), en vez de un simple top-3 global que puede quedar copado por
+// otras familias y esconder alternativas deportivas fuertes del mismo mercado.
+function selectAlternatives(ranked, primary) {
+  if (!primary) return ranked.slice(0, 3);
+  const rest = ranked.filter((candidate) => candidate.candidate_id !== primary.candidate_id);
+  const sameFamily = rest.filter((candidate) => candidate.market_family === primary.market_family);
+  const otherFamilies = rest.filter((candidate) => candidate.market_family !== primary.market_family);
+  return [...sameFamily, ...otherFamilies].slice(0, 3);
+}
+
 export function buildRankedMarketSelection(input = {}) {
   const analysisMode = input.analysisMode === "specific" || (input.requestedMarketId && input.requestedMarketId !== "open") ? "specific" : "general";
   const assessments = analysisMode === "specific" ? (input.marketAssessments || []).filter((item) => item.market_family === input.requestedMarketId) : (input.marketAssessments || []);
@@ -245,7 +257,7 @@ export function buildRankedMarketSelection(input = {}) {
   return {
     contract: "RankedMarketSelection", version: 1, analysis_mode: analysisMode,
     requested_market_family: analysisMode === "specific" ? input.requestedMarketId : null,
-    generated, ranked_candidates: ranked, primary, alternatives: ranked.slice(1, 4), line_profiles: lineProfiles(ranked),
+    generated, ranked_candidates: ranked, primary, alternatives: selectAlternatives(ranked, primary), line_profiles: lineProfiles(ranked),
     explanation: primary ? `${primary.selection}: posición general Scout #${primary.overall_rank} y posición dentro de ${primary.market_family} #${primary.family_rank}; la cuota no intervino en el ranking deportivo.` : "No se generaron candidatos compatibles con la muestra disponible.",
   };
 }

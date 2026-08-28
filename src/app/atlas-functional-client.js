@@ -1688,7 +1688,6 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   );
   const [journeyMarketIds, setJourneyMarketIds] = useState(markets.map((market) => market.id));
   const [journeyAnalysisMode, setJourneyAnalysisMode] = useState("general");
-  const [maximumFixtures, setMaximumFixtures] = useState(50);
   const [journeyState, setJourneyState] = useState(state("Configura la jornada y pulsa “Escanear jornada”."));
   const [journey, setJourney] = useState(null);
   const journeyRequest = useRef(null);
@@ -1895,8 +1894,6 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           timezone: defaultTimezone,
           competitionKeys: journeyCompetitionKeys,
           marketIds: journeyMarketIds,
-          maximumFixtures,
-          maximumCandidates: maximumFixtures,
           analysisMode: journeyAnalysisMode,
         }),
       });
@@ -2053,6 +2050,11 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
 
   async function reanalyzeWithManualOdds() {
     if (!manualQuoteReady) return;
+    await runOperationalAnalysis({ reanalysis: true });
+  }
+
+  async function correctLineAndReanalyze() {
+    if (!line.trim()) return;
     await runOperationalAnalysis({ reanalysis: true });
   }
 
@@ -2239,18 +2241,30 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               <label><input type="radio" name="journey-analysis-mode" checked={journeyAnalysisMode === "specific"} onChange={() => { setJourneyAnalysisMode("specific"); setJourneyMarketIds([journeyMarketIds[0] || markets[0]?.id || "goals"]); invalidateJourney(); }} />Analizar un mercado específico</label>
             </fieldset>
             <h3>2 · Elige las competiciones</h3>
+            <div className="p2-inline-actions">
+              <button type="button" className="secondary-button" onClick={() => { setJourneyCompetitionKeys(competitions.map((competition) => competition.key)); invalidateJourney(); }}>Seleccionar todas</button>
+              <button type="button" className="secondary-button" onClick={() => { setJourneyCompetitionKeys([]); invalidateJourney(); }}>Deseleccionar todas</button>
+            </div>
             <div className="p2-competition-groups">
-              {competitionGroups.map((group) => (
-                <fieldset key={group.id}>
-                  <legend>{group.label}</legend>
-                  {group.competitions.map((competition) => (
-                    <label key={competition.key}>
-                      <input type="checkbox" checked={journeyCompetitionKeys.includes(competition.key)} onChange={() => toggleJourneyCompetition(competition.key)} />
-                      <span>{competition.localName}<small>{displayStatus(competition.verificationStatus)}</small></span>
-                    </label>
-                  ))}
-                </fieldset>
-              ))}
+              {competitionGroups.map((group) => {
+                const groupKeys = group.competitions.map((competition) => competition.key);
+                const allGroupSelected = groupKeys.every((key) => journeyCompetitionKeys.includes(key));
+                return (
+                  <fieldset key={group.id}>
+                    <legend>{group.label}</legend>
+                    <div className="p2-inline-actions">
+                      <button type="button" className="secondary-button" onClick={() => { setJourneyCompetitionKeys((current) => [...new Set([...current, ...groupKeys])]); invalidateJourney(); }} disabled={allGroupSelected}>Seleccionar grupo</button>
+                      <button type="button" className="secondary-button" onClick={() => { setJourneyCompetitionKeys((current) => current.filter((key) => !groupKeys.includes(key))); invalidateJourney(); }} disabled={!journeyCompetitionKeys.some((key) => groupKeys.includes(key))}>Deseleccionar grupo</button>
+                    </div>
+                    {group.competitions.map((competition) => (
+                      <label key={competition.key}>
+                        <input type="checkbox" checked={journeyCompetitionKeys.includes(competition.key)} onChange={() => toggleJourneyCompetition(competition.key)} />
+                        <span>{competition.localName}<small>{displayStatus(competition.verificationStatus)}</small></span>
+                      </label>
+                    ))}
+                  </fieldset>
+                );
+              })}
             </div>
           </div>
 
@@ -2265,11 +2279,6 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               ))}
               <small>Todos están seleccionados inicialmente. Scout no utiliza cuotas.</small>
             </fieldset>
-            <label>
-              <span>4 · Máximo de partidos a revisar</span>
-              <input type="number" min="1" max="50" value={maximumFixtures} onChange={(event) => { setMaximumFixtures(Math.max(1, Math.min(50, Number(event.target.value) || 1))); invalidateJourney(); }} />
-              <small>Entre 1 y 50 partidos seleccionados para revisión.</small>
-            </label>
           </div>
 
           <button type="button" className="primary-button p2-primary" onClick={scanJourney} disabled={journeyState.status === "loading"}>
@@ -2397,6 +2406,12 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           {analysisForDisplay?.director ? <AnalysisResult key={`${analysisForDisplay.selectedFixtureId}-${analysisForDisplay.analysisVersion?.analysis_id || "result"}`} analysis={analysisForDisplay} analysisCompleted={analysisCompleted} candidateQuotes={candidateQuotes} onQuoteChange={updateCandidateQuote} onEvaluatePrices={() => runOperationalAnalysis({ reanalysis: true })} showComparison={showActiveComparison} /> : null}
           {analysis?.marketSelection?.primary ? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry" aria-labelledby="user-quote-form-title">
             <p className="eyebrow" id="user-quote-form-title">INTRODUCIR CUOTA</p>
+            <label>
+              <span>Línea exacta de tu casa</span>
+              <input inputMode="decimal" value={line} onChange={(event) => setLine(event.target.value)} placeholder={String(analysis?.director?.line ?? "")} />
+              <small>Si tu casa ofrece una línea distinta a la analizada ({analysis?.director?.line ?? "sin línea"}), corrígela aquí primero y reanaliza. Esto no requiere casa, cuota ni hora todavía, y no reutiliza la probabilidad de la línea anterior.</small>
+            </label>
+            <button type="button" className="secondary-button" onClick={correctLineAndReanalyze} disabled={!line.trim() || Number(line) === Number(analysis?.director?.line) || analysisState.status === "loading"}>Corregir línea de la casa y reanalizar</button>
             <p>{staleAnalysisQuote ? "La cuota anterior venció. Introduce un precio actual para volver a decidir." : analysisCompleted ? "Puedes actualizar la cuota si cambió desde la última consulta." : "Con el análisis deportivo listo, introduce la cuota para evaluar el precio; Gemini es un paso posterior."}</p>
             <label><span>Casa</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
             <label><span>Cuota decimal</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.65" /></label>

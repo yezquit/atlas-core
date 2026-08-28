@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COMBINATION_LIMITS,
   COMBINATION_MODE,
@@ -13,6 +13,7 @@ import {
   removeCombinationSelection,
   updateCombinationSelection,
 } from "@/core/intelligence/atlasCombinationEngine";
+import { todayLocalDateString } from "@/core/intelligence/dateTimeContext";
 import { findFixtureQuoteEntry } from "@/core/intelligence/fixtureQuoteLedger";
 import { createManualOdds } from "@/core/intelligence/oddsIntelligence";
 import {
@@ -233,7 +234,11 @@ function enrichCandidate(candidate, ledger, manualQuote = null) {
   };
 }
 
-function CandidateCard({ candidate, selected, selectable, onToggle }) {
+function candidateLineGroupKey(candidate) {
+  return `${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}`;
+}
+
+function CandidateCard({ candidate, selected, selectable, onToggle, correctionDraft, onCorrectionDraftChange, onCorrectLine, correctionStatus, correctionError }) {
   const inspection = inspectCombinationCandidate(candidate);
   const normalized = inspection.candidate;
   const label = displaySelectionLabel(candidate.selection || `${candidate.direction === "under" ? "Under" : "Over"} ${candidate.line}`);
@@ -251,6 +256,12 @@ function CandidateCard({ candidate, selected, selectable, onToggle }) {
         <small>Probabilidad preliminar {percent(candidate.probability)}</small>
         <small><strong>Estado deportivo:</strong> {inspection.sports_eligible ? "Elegible deportivamente" : "Soporte deportivo insuficiente"}</small>
         <small><strong>Información económica:</strong> {priceLabel}{normalized.price_usable ? "" : " · no se utiliza para calcular la cuota combinada"}</small>
+        <div className="p2-inline-actions">
+          <label><span>Línea de tu casa (si es distinta)</span><input inputMode="decimal" placeholder={String(candidate.line)} value={correctionDraft || ""} onChange={(event) => onCorrectionDraftChange(candidate, event.target.value)} /></label>
+          <button type="button" className="secondary-button" onClick={() => onCorrectLine(candidate)} disabled={correctionStatus === "loading" || !correctionDraft || Number(correctionDraft) === Number(candidate.line)}>Corregir línea y reanalizar</button>
+        </div>
+        {correctionStatus === "loading" ? <small>Reanalizando línea exacta…</small> : null}
+        {correctionError ? <small className="p2-quote-warning">{correctionError}</small> : null}
       </div>
       {selectable ? (
         <label className="p2-combination-toggle">
@@ -265,6 +276,9 @@ function CandidateCard({ candidate, selected, selectable, onToggle }) {
 export default function AtlasCombinationBuilder({ competitionGroups, markets, defaultTimezone }) {
   const competitions = useMemo(() => competitionGroups.flatMap((group) => group.competitions), [competitionGroups]);
   const [dates, setDates] = useState([""]);
+  useEffect(() => {
+    queueMicrotask(() => setDates((current) => (current.length === 1 && !current[0] ? [todayLocalDateString()] : current)));
+  }, []);
   const [competitionKeys, setCompetitionKeys] = useState(competitions[0] ? [competitions[0].key] : []);
   const [marketIds, setMarketIds] = useState(markets.map((market) => market.id));
   const [product, setProduct] = useState(COMBINATION_PRODUCT.PARLAY);
@@ -280,15 +294,80 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
   const [manualQuotes, setManualQuotes] = useState({});
   const [manualDrafts, setManualDrafts] = useState({});
   const [manualErrors, setManualErrors] = useState({});
+  const [lineCorrections, setLineCorrections] = useState({});
+  const [lineCorrectionDrafts, setLineCorrectionDrafts] = useState({});
+  const [lineCorrectionStatus, setLineCorrectionStatus] = useState({});
+  const [lineCorrectionErrors, setLineCorrectionErrors] = useState({});
   const requestRef = useRef(null);
 
   const selectionCount = targetCounts[product];
 
   const candidates = useMemo(() => (journey?.combinationCandidates || journey?.candidates || []).map((candidate) => {
-    const identity = combinationSelectionKey(candidate);
-    const enriched = enrichCandidate(candidate, ledgers[String(candidate.fixtureId)], manualQuotes[identity]);
+    const correction = lineCorrections[candidateLineGroupKey(candidate)];
+    const corrected = correction ? { ...candidate, ...correction, activeQuote: null, priceStatus: "unavailable" } : candidate;
+    const identity = combinationSelectionKey(corrected);
+    const enriched = enrichCandidate(corrected, ledgers[String(corrected.fixtureId)], manualQuotes[identity]);
     return { ...enriched, selection_key: combinationSelectionKey(enriched) };
-  }), [journey, ledgers, manualQuotes]);
+  }), [journey, ledgers, manualQuotes, lineCorrections]);
+
+  async function correctCandidateLine(candidate) {
+    const groupKey = candidateLineGroupKey(candidate);
+    const draft = lineCorrectionDrafts[groupKey];
+    const newLine = Number(String(draft || "").replace(",", "."));
+    if (!Number.isFinite(newLine)) {
+      setLineCorrectionErrors((current) => ({ ...current, [groupKey]: "Ingresa una línea numérica válida." }));
+      return;
+    }
+    setLineCorrectionStatus((current) => ({ ...current, [groupKey]: "loading" }));
+    setLineCorrectionErrors((current) => ({ ...current, [groupKey]: null }));
+    try {
+      const response = await fetch("/api/football/operational-analysis", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          date: candidate.localCalendarDate || journey?.date || unique(dates)[0],
+          timezone: defaultTimezone,
+          competitionKey: candidate.competitionKey,
+          season: candidate.season,
+          fixtureId: candidate.fixtureId,
+          marketId: candidate.marketId,
+          analysisMode: "specific",
+          line: newLine,
+          selection: candidate.direction,
+          reanalysis: false,
+        }),
+      });
+      const result = await response.json();
+      const primary = result?.marketSelection?.primary;
+      if (!response.ok || !primary || Number(primary.line) !== newLine) {
+        setLineCorrectionStatus((current) => ({ ...current, [groupKey]: "error" }));
+        setLineCorrectionErrors((current) => ({ ...current, [groupKey]: result?.marketSelection?.explanation || "Atlas no tiene información suficiente para calcular exactamente esa línea." }));
+        return;
+      }
+      setLineCorrections((current) => ({
+        ...current,
+        [groupKey]: {
+          line: primary.line,
+          selection: primary.selection,
+          probability: primary.estimated_probability,
+          estimatedProbability: primary.estimated_probability,
+          probabilityPercent: primary.probability_percent,
+          probabilityClassification: primary.probability_classification,
+          uncertaintyLow: primary.uncertainty_low,
+          uncertaintyHigh: primary.uncertainty_high,
+          sampleSize: primary.sample_size_effective,
+          technicalSupport: primary.technical_support_score,
+          sportsScore: primary.sports_score,
+          rankingEligible: primary.ranking_eligible,
+        },
+      }));
+      setLineCorrectionStatus((current) => ({ ...current, [groupKey]: "success" }));
+      setCombination(null);
+    } catch {
+      setLineCorrectionStatus((current) => ({ ...current, [groupKey]: "error" }));
+      setLineCorrectionErrors((current) => ({ ...current, [groupKey]: "No fue posible conectar con Atlas para reanalizar la línea." }));
+    }
+  }
 
   const eligibleCount = candidates.filter((candidate) => inspectCombinationCandidate(candidate).sports_eligible).length;
   const limits = COMBINATION_LIMITS[product];
@@ -373,8 +452,6 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
           timezone: defaultTimezone,
           competitionKeys,
           marketIds,
-          maximumFixtures: 50,
-          maximumCandidates: 50,
           analysisMode: marketIds.length === 1 ? "specific" : "general",
         }),
       });
@@ -506,7 +583,21 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
 
       {journey ? <section className="p2-combination-universe">
         <div className="p2-combination-summary"><h3>Universo disponible</h3><p>{candidates.length} candidatos deportivos · {eligibleCount} elegibles deportivamente.</p><p>La falta de cuota no elimina una selección con soporte suficiente. Atlas muestra la cobertura económica por separado y nunca inventa precios.</p></div>
-        <div className="p2-combination-candidate-grid">{candidates.map((candidate) => <CandidateCard key={candidate.selection_key} candidate={candidate} selectable={mode !== COMBINATION_MODE.AUTOMATIC || combination?.editing === true} selected={editableSelectionKeys.includes(candidate.selection_key)} onToggle={toggleCandidate} />)}</div>
+        <div className="p2-combination-candidate-grid">{candidates.map((candidate) => {
+          const groupKey = candidateLineGroupKey(candidate);
+          return <CandidateCard
+            key={candidate.selection_key}
+            candidate={candidate}
+            selectable={mode !== COMBINATION_MODE.AUTOMATIC || combination?.editing === true}
+            selected={editableSelectionKeys.includes(candidate.selection_key)}
+            onToggle={toggleCandidate}
+            correctionDraft={lineCorrectionDrafts[groupKey]}
+            onCorrectionDraftChange={(item, value) => setLineCorrectionDrafts((current) => ({ ...current, [candidateLineGroupKey(item)]: value }))}
+            onCorrectLine={correctCandidateLine}
+            correctionStatus={lineCorrectionStatus[groupKey]}
+            correctionError={lineCorrectionErrors[groupKey]}
+          />;
+        })}</div>
         <button type="button" className="primary-button p2-primary" onClick={generateCombination}>Generar {productName(product)}</button>
       </section> : null}
 

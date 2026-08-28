@@ -567,7 +567,6 @@ export async function scanSportsJourney(input, gateway) {
       telemetry: gateway.runtime.snapshot(),
     };
   }
-  const maximumFixtures = Math.max(1, Math.min(50, Number(input.maximumFixtures) || 50));
   const referenceNow = input.now || `${input.date}T00:00:00.000Z`;
   const fixtures = [];
   const warnings = [];
@@ -610,8 +609,11 @@ export async function scanSportsJourney(input, gateway) {
     warnings.push(`${count} partido(s) excluido(s) del flujo prepartido: ${reason}.`);
   }
 
+  // Un escaneo debe analizar TODOS los fixtures elegibles descubiertos; el
+  // único límite legítimo es el presupuesto real de solicitudes (budgetExhausted),
+  // nunca un tope artificial de cantidad de partidos.
   const reviewed = [];
-  for (const item of eligibleFixtures.slice(0, maximumFixtures)) {
+  for (const item of eligibleFixtures) {
     if (gateway.runtime.snapshot().budgetExhausted) break;
     const analysis = await analyzeSportsFixture(
       {
@@ -700,7 +702,13 @@ export async function scanSportsJourney(input, gateway) {
     }, new Map())]
   );
 
-  const maximumCandidates = Math.max(1, Math.min(50, Number(input.maximumCandidates) || 50));
+  // Sin tope artificial: si el llamador pide explícitamente un número, se
+  // respeta; si no, no se recorta la lista (no se descarta ningún candidato
+  // ya analizado solo por un límite de presentación inventado).
+  const requestedMaximumCandidates = Number(input.maximumCandidates);
+  const maximumCandidates = Number.isInteger(requestedMaximumCandidates) && requestedMaximumCandidates > 0
+    ? requestedMaximumCandidates
+    : Number.POSITIVE_INFINITY;
   const competitionProfiles = Array.isArray(input.competitionProfiles) ? input.competitionProfiles : [];
   const highlightedSports = rankJourneyCandidatesByProbability(
     analysisCandidates.filter((entry) => entry.candidate?.ranking_eligible === true)
