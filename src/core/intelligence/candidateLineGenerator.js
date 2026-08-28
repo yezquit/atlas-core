@@ -1,5 +1,11 @@
 import { estimatePreliminaryMarketProbability } from "./preliminaryMarketModel.js";
 import { contextShiftForMarket } from "./geminiImpactMapper.js";
+import {
+  ESTIMATED_PROBABILITY_REPRESENTS,
+  classifyProbability,
+  isCalibratedModel,
+  toProbabilityPercent,
+} from "./probabilityClassification.js";
 
 export const CANDIDATE_LINE_GENERATOR_VERSION = "candidate-lines-v1";
 
@@ -140,6 +146,12 @@ export function generateCandidateLines(input = {}) {
         projected_mean: distribution.projected_mean, median: distribution.median, dispersion: distribution.dispersion,
         observed_hit_rate: probability.inputs_used?.find((item) => item.source === "league")?.observed_rate ?? null,
         preliminary_probability: point, probability_status: probability.probability_status,
+        estimated_probability: point,
+        probability_percent: toProbabilityPercent(point),
+        probability_classification: classifyProbability(point),
+        estimated_probability_represents: ESTIMATED_PROBABILITY_REPRESENTS,
+        estimated_probability_is_calibrated: isCalibratedModel(probability.model_validation_status),
+        model_validation_status: probability.model_validation_status,
         uncertainty_low: probability.uncertainty_low, uncertainty_high: probability.uncertainty_high,
         sample_size_effective: probability.sample_size_effective, input_sources: probability.inputs_used || distribution.input_sources,
         limitations: [...new Set([...(distribution.limitations || []), ...(probability.limitations || [])])],

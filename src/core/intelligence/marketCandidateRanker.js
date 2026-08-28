@@ -1,4 +1,11 @@
 import { generateCandidateLines } from "./candidateLineGenerator.js";
+import {
+  ESTIMATED_PROBABILITY_REPRESENTS,
+  classifyProbability,
+  isCalibratedModel,
+  isValidProbability,
+  toProbabilityPercent,
+} from "./probabilityClassification.js";
 
 export const MARKET_CANDIDATE_RANKER_VERSION = "market-candidate-ranker-v1";
 export const PRICE_STATUS = Object.freeze({ VERIFIED_CURRENT: "verified_current", USER_REPORTED_CURRENT: "user_reported_current", STALE: "stale", UNAVAILABLE: "unavailable", INCOMPATIBLE_LINE: "incompatible_line", INCOMPATIBLE_SELECTION: "incompatible_selection" });
@@ -49,6 +56,14 @@ export function selectCandidateQuote(candidate, quotes = [], preferredQuote = nu
     quotePriority(right) - quotePriority(left) || Number(right.decimal_odds) - Number(left.decimal_odds)
   )[0];
   return { quote, status: priceStatusForQuote(quote) };
+}
+
+function deriveEstimatedProbability(candidate) {
+  if (candidate?.probability_status && candidate.probability_status !== "preliminary") return null;
+  if (candidate?.estimated_probability !== undefined) {
+    return isValidProbability(candidate.estimated_probability) ? candidate.estimated_probability : null;
+  }
+  return isValidProbability(candidate?.preliminary_probability) ? candidate.preliminary_probability : null;
 }
 
 export function calculateSportsScore(candidate, { marketAssessment = null, confidenceScore = null } = {}) {
@@ -128,14 +143,26 @@ export function buildSimpleSportsReasons(candidate, { homeTeamProfile = null, aw
   ].filter(Boolean))].slice(0, 3);
 }
 
+function isIneligibleForRanking(overallStatusValue) {
+  return overallStatusValue === OVERALL_STATUS.NOT_VIABLE
+    || overallStatusValue === OVERALL_STATUS.BLOCKED
+    || overallStatusValue === OVERALL_STATUS.INSUFFICIENT;
+}
+
 export function rankMarketCandidates(candidates = [], { quotes = [], preferredQuote = null, marketAssessments = [], confidenceScore = null, blocked = false, homeTeamProfile = null, awayTeamProfile = null } = {}) {
   const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
   const sorted = candidates.map((candidate) => {
     const marketAssessment = assessmentByFamily.get(candidate.market_family) || null;
     const sportsScore = calculateSportsScore(candidate, { marketAssessment, confidenceScore });
     const price = selectCandidateQuote(candidate, quotes, preferredQuote);
+    const estimatedProbability = deriveEstimatedProbability(candidate);
     const enriched = {
       ...candidate,
+      estimated_probability: estimatedProbability,
+      probability_percent: toProbabilityPercent(estimatedProbability),
+      probability_classification: classifyProbability(estimatedProbability),
+      estimated_probability_represents: ESTIMATED_PROBABILITY_REPRESENTS,
+      estimated_probability_is_calibrated: isCalibratedModel(candidate.model_validation_status),
       sports_score: sportsScore,
       technical_support_score: marketAssessment?.technical_support_score !== null && marketAssessment?.technical_support_score !== undefined && Number.isFinite(Number(marketAssessment.technical_support_score))
         ? Number(marketAssessment.technical_support_score)
@@ -152,11 +179,28 @@ export function rankMarketCandidates(candidates = [], { quotes = [], preferredQu
       ranker_version: MARKET_CANDIDATE_RANKER_VERSION,
     };
   }).sort((left, right) => {
-    if (right.sports_score !== left.sports_score) return right.sports_score - left.sports_score;
-    const leftWidth = left.uncertainty_high - left.uncertainty_low;
-    const rightWidth = right.uncertainty_high - right.uncertainty_low;
+    const leftIneligible = isIneligibleForRanking(left.overall_status) ? 1 : 0;
+    const rightIneligible = isIneligibleForRanking(right.overall_status) ? 1 : 0;
+    if (leftIneligible !== rightIneligible) return leftIneligible - rightIneligible;
+
+    const leftProbability = isValidProbability(left.estimated_probability) ? left.estimated_probability : -1;
+    const rightProbability = isValidProbability(right.estimated_probability) ? right.estimated_probability : -1;
+    if (rightProbability !== leftProbability) return rightProbability - leftProbability;
+
+    const leftWidth = Number.isFinite(left.uncertainty_high) && Number.isFinite(left.uncertainty_low)
+      ? left.uncertainty_high - left.uncertainty_low : Infinity;
+    const rightWidth = Number.isFinite(right.uncertainty_high) && Number.isFinite(right.uncertainty_low)
+      ? right.uncertainty_high - right.uncertainty_low : Infinity;
     if (leftWidth !== rightWidth) return leftWidth - rightWidth;
-    if (right.sample_size_effective !== left.sample_size_effective) return right.sample_size_effective - left.sample_size_effective;
+
+    const leftSample = Number.isFinite(left.sample_size_effective) ? left.sample_size_effective : -1;
+    const rightSample = Number.isFinite(right.sample_size_effective) ? right.sample_size_effective : -1;
+    if (rightSample !== leftSample) return rightSample - leftSample;
+
+    const leftSupport = Number.isFinite(left.technical_support_score) ? left.technical_support_score : -1;
+    const rightSupport = Number.isFinite(right.technical_support_score) ? right.technical_support_score : -1;
+    if (rightSupport !== leftSupport) return rightSupport - leftSupport;
+
     const familyOrder = left.market_family.localeCompare(right.market_family);
     if (familyOrder) return familyOrder;
     if (left.line !== right.line) return left.line - right.line;
