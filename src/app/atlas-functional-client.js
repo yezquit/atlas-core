@@ -655,11 +655,10 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
           : "Introduce una cuota actual después de completar la tesis.";
   const contextSummary = analysis.gemini?.summary || director.context_summary || {};
   const baseReasons = (director.simple_reasons || director.reasons || []).slice(0, 3);
-  const decisionReasons = analysisDecision.status === "no"
-    ? [...(contextSummary.unfavorable || []), ...baseReasons].slice(0, 3)
-    : [...(contextSummary.favorable || []), ...baseReasons].slice(0, 3);
+  const decisionReasons = [...new Set(contextSummary.favorable || [])].slice(0, 3);
   const fixtureRisks = (director.red_team?.items || []).filter((item) => item.status === "risk").map((item) => item.text).slice(0, 3);
   const simpleRisks = [...new Set([...(contextSummary.unfavorable || []), ...fixtureRisks])].slice(0, 2);
+  const balanceReasons = [...new Set(baseReasons)].slice(0, 3);
   const fixture = director.fixture || {};
 
   return (
@@ -691,8 +690,9 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         ) : null;
       })()}
       <div className="p2-simple-evidence-grid">
-        <ListBlock title="¿Por qué?" items={decisionReasons} empty="Atlas no encontró razones suficientes para sostener esta opción." />
-        <ListBlock title="¿Qué podría hacerla fallar?" items={simpleRisks} empty="No se identificó un riesgo específico del partido con los datos disponibles." />
+        <ListBlock title="A favor" items={decisionReasons} empty="Atlas no encontró evidencia estructurada a favor." />
+        <ListBlock title="En contra" items={simpleRisks} empty="No se identificó un riesgo específico del partido con los datos disponibles." />
+        <ListBlock title="Balance" items={balanceReasons} empty="No hay evidencia deportiva adicional sin clasificar." />
       </div>
       <section className="p2-simple-gemini-evidence" aria-labelledby="simple-gemini-evidence-title">
         <h3 id="simple-gemini-evidence-title">Evidencia Gemini relevante</h3>
@@ -1465,7 +1465,7 @@ function InitialAnalysisResult({ analysis }) {
     <section className="p2-initial-analysis" data-analysis-stage="initial" aria-labelledby="initial-analysis-title">
       <p className="eyebrow">ANÁLISIS INICIAL</p>
       <h2 id="initial-analysis-title">Completar análisis</h2>
-      <p>Ya revisé los datos deportivos. Ahora necesito complementar lo que la API puede no conocer.</p>
+      <p>Ya revisé los datos deportivos. Ahora puedes introducir la cuota para evaluar el precio; la investigación Gemini es un paso posterior.</p>
       <div className="p2-initial-selection">
         <strong>{fixture.home_team} vs {fixture.away_team}</strong>
         <span>{displaySelection(primary?.selection || director?.selection || director?.market_evaluated?.label)}</span>
@@ -1481,7 +1481,21 @@ function InitialAnalysisResult({ analysis }) {
           <ul>{otherFamilies.map((item) => <li key={item.market_family}>{displaySelection(item.selection)} — {Number.isFinite(item.probability_percent) ? `${item.probability_percent}%` : "No disponible"} {item.probability_classification || ""}</li>)}</ul>
         </section>
       ) : null}
-      <p>Genera la solicitud para Gemini, pega su respuesta y deja que Atlas filtre la evidencia antes de tomar posición.</p>
+      {director?.price_assessment && director.price_assessment.status !== "unavailable" ? (
+        <section className="p2-initial-economic" aria-labelledby="initial-economic-title">
+          <p className="eyebrow">EVALUACIÓN ECONÓMICA</p>
+          <h3 id="initial-economic-title">Precio evaluado</h3>
+          <DefinitionGrid entries={[
+            ["Casa", director.price_assessment.bookmaker],
+            ["Cuota", director.price_assessment.decimal_odds],
+            ["Hora de consulta", director.odds_updated_at ? formatDate(director.odds_updated_at) : null],
+            ["Probabilidad implícita", percentage(director.price_assessment.implied_probability)],
+            ["Diferencia (edge)", Number.isFinite(director.price_assessment.price_gap_percentage_points) ? `${director.price_assessment.price_gap_percentage_points} pp` : null],
+            ["Evaluación de precio", displayStatus(director.price_assessment.status)],
+          ]} />
+        </section>
+      ) : null}
+      <p>Introduce la cuota para evaluar el precio; después genera la solicitud para Gemini y pega su respuesta para que Atlas filtre la evidencia.</p>
     </section>
   );
 }
@@ -1691,8 +1705,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   const selectedFixture = fixtures.find(
     (fixture) => String(fixture.fixtureId) === selectedFixtureId
   ) || null;
-  const resolvedOptionLine = line.trim() || analysis?.director?.line || transferredCandidate?.line || "";
-  const resolvedOptionDirection = selection.trim() || analysis?.director?.sports_verdict?.direction || transferredCandidate?.direction || "";
+  const resolvedOptionLine = line.trim() || analysis?.marketSelection?.primary?.line || transferredCandidate?.line || analysis?.director?.line || "";
+  const resolvedOptionDirection = selection.trim() || analysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || analysis?.director?.sports_verdict?.direction || "";
   const hasPriceInput = Boolean(bookmaker.trim() || odds.trim() || oddsConsultedAt);
   const manualQuoteReady = Boolean(
     bookmaker.trim() &&
@@ -1930,12 +1944,12 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       return;
     }
     const requestedFixtureId = Number(selectedFixtureId);
-    const requestedLine = line.trim() || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);
-    const reportedDirection = selection.trim() || currentAnalysis?.director?.sports_verdict?.direction || transferredCandidate?.direction || "";
+    const requestedLine = line.trim() || currentAnalysis?.marketSelection?.primary?.line || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);
+    const reportedDirection = selection.trim() || currentAnalysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || currentAnalysis?.director?.sports_verdict?.direction || "";
     const reportedSelection = reportedDirection && requestedLine
       ? `${reportedDirection === "under" ? "Menos de" : "Más de"} ${requestedLine}`
       : reportedDirection;
-    const manualMarketFamily = transferredCandidate?.market_family || (analysisMode === "specific" ? marketId : currentAnalysis?.director?.market_evaluated?.family);
+    const manualMarketFamily = currentAnalysis?.marketSelection?.primary?.market_family || transferredCandidate?.market_family || (analysisMode === "specific" ? marketId : currentAnalysis?.director?.market_evaluated?.family);
     const currentLine = currentAnalysis?.director?.line;
     const currentDirection = currentAnalysis?.director?.sports_verdict?.direction;
     const sameCurrentOption = Number(requestedLine) === Number(currentLine) && reportedDirection === currentDirection;
@@ -2269,7 +2283,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           </div>
 
           <ol className="p2-flow-steps" aria-label="Flujo del análisis">
-            <li>Partido</li><li>Opción</li><li>Análisis deportivo</li><li>Investigación Gemini</li><li>Cuota</li><li>Decisión final</li>
+            <li>Partido</li><li>Opción</li><li>Análisis deportivo</li><li>Cuota</li><li>Investigación Gemini</li><li>Decisión final</li>
           </ol>
           {transferredCandidate ? (
             <section className="p2-transferred-candidate" aria-labelledby="transferred-candidate-title">
@@ -2359,10 +2373,9 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           {!analysis?.director ? <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId || !specificOptionReady}>{analysisState.status === "loading" ? "Analizando el partido…" : "Analizar deportivamente"}</button> : null}
           <StatusNotice value={analysisState} />
           {analysisForDisplay?.director ? <AnalysisResult key={`${analysisForDisplay.selectedFixtureId}-${analysisForDisplay.analysisVersion?.analysis_id || "result"}`} analysis={analysisForDisplay} analysisCompleted={analysisCompleted} candidateQuotes={candidateQuotes} onQuoteChange={updateCandidateQuote} onEvaluatePrices={() => runOperationalAnalysis({ reanalysis: true })} showComparison={showActiveComparison} /> : null}
-          {!analysisCompleted ? <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} /> : null}
-          {analysisCompleted ? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry" aria-labelledby="user-quote-form-title">
+          {analysis?.marketSelection?.primary ? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry" aria-labelledby="user-quote-form-title">
             <p className="eyebrow" id="user-quote-form-title">INTRODUCIR CUOTA</p>
-            <p>{staleAnalysisQuote ? "La cuota anterior venció. Introduce un precio actual para volver a decidir." : "La tesis ya está completa. Ahora Atlas evaluará el precio por separado."}</p>
+            <p>{staleAnalysisQuote ? "La cuota anterior venció. Introduce un precio actual para volver a decidir." : analysisCompleted ? "Puedes actualizar la cuota si cambió desde la última consulta." : "Con el análisis deportivo listo, introduce la cuota para evaluar el precio; Gemini es un paso posterior."}</p>
             <label><span>Casa</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
             <label><span>Cuota decimal</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.65" /></label>
             <label><span>Hora de consulta</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
@@ -2370,6 +2383,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
             {incompletePriceInput ? <small>Completa casa, cuota y hora para evaluar el precio.</small> : null}
             <button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>{staleAnalysisQuote ? "Actualizar cuota" : analysis?.selectedOdds ? "Actualizar decisión con esta cuota" : "Evaluar esta cuota"}</button>
           </section> : null}
+          {!analysisCompleted ? <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} /> : null}
           {analysisCompleted ? <details className="p2-source-details p2-new-gemini-research"><summary>Nueva investigación Gemini</summary><GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} /></details> : null}
         </section>
       ) : mainMode === "bets" ? (

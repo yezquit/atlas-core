@@ -240,9 +240,9 @@ test("29. Scout permanece ciego al precio", () => {
   assert.equal(scout.price_inputs_used, false);
 });
 
-test("30. la cuota continúa posterior al análisis completo", async () => {
+test("30. la cuota está disponible desde que existe análisis deportivo, sin esperar a Gemini", async () => {
   const source = await readFile(clientPath, "utf8");
-  assert.match(source, /\{analysisCompleted \? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry"/);
+  assert.match(source, /\{analysis\?\.marketSelection\?\.primary \? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry"/);
   assert.match(source, /evaluatePrice: Boolean\(reanalysis && manualQuoteReady\)/);
 });
 
