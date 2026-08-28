@@ -133,7 +133,7 @@ test("40. ninguna clave Gemini requerida", async () => {
   const [source, envExample] = await Promise.all([readFile(clientPath, "utf8"), readFile(envExamplePath, "utf8")]);
   assert.doesNotMatch(source, /GEMINI_API_KEY|generativelanguage\.googleapis/);
   assert.doesNotMatch(envExample, /GEMINI_API_KEY\s*=/);
-  assert.match(source, /Copiar solicitud para Gemini/);
+  assert.match(source, /Copiar prompt para Gemini Pro \+ Deep Research/);
 });
 
 test("41. presupuesto de reanálisis", async () => {

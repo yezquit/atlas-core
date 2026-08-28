@@ -1060,24 +1060,46 @@ function GeminiWorkflow({ analysis, text, setText, context, selectedIds, toggleI
   const selectedCount = contextItems.filter((item) => item.eligible_for_selection !== false && selectedIds.includes(item.id)).length;
   const unselectedCount = contextItems.filter((item) => item.eligible_for_selection !== false && !selectedIds.includes(item.id)).length;
   const rejectedCount = contextItems.filter((item) => item.eligible_for_selection === false).length;
-  async function copyPrompt() {
+  async function copyResearchPrompt() {
     await navigator.clipboard.writeText(analysis.gemini.prompt);
+  }
+  async function copyCleanupPrompt() {
+    await navigator.clipboard.writeText(analysis.gemini.cleanupPrompt);
   }
   return (
     <section className="p2-gemini-flow" aria-labelledby="gemini-title">
-      <p className="eyebrow">INVESTIGACIÓN COMPLEMENTARIA</p>
+      <p className="eyebrow">INVESTIGACIÓN COMPLEMENTARIA (MANUAL, COPIAR Y PEGAR)</p>
       <h3 id="gemini-title">Completar análisis</h3>
-      <p>Atlas ya revisó los datos deportivos. Copia esta solicitud, consulta Gemini Pro externamente y pega aquí la respuesta para validar lo que la API puede no conocer.</p>
+      <p>Atlas ya revisó los datos deportivos. Este flujo es manual: Atlas no llama a Gemini automáticamente. Sigue los tres pasos en orden.</p>
+      <div className="p2-gemini-steps">
+        <div className="p2-gemini-step">
+          <p className="eyebrow">1 · 🔎 Deep Research</p>
+          <ol>
+            <li>Copia este prompt.</li>
+            <li>Abre Gemini Pro con Deep Research.</li>
+            <li>Ejecuta la investigación.</li>
+            <li>Copia la respuesta COMPLETA que entregue Deep Research.</li>
+          </ol>
+          <button type="button" className="secondary-button" onClick={copyResearchPrompt}>Copiar prompt para Gemini Pro + Deep Research</button>
+          <details className="p2-source-details"><summary>Revisar prompt completo</summary><pre>{analysis.gemini.prompt}</pre></details>
+        </div>
+        <div className="p2-gemini-step">
+          <p className="eyebrow">2 · 🧹 Pro normal</p>
+          <p>Abre un chat aparte de Gemini Pro normal (sin Deep Research). Copia este segundo prompt, pega allí mismo — dentro de Gemini, no en Atlas — la respuesta completa de Deep Research donde el prompt lo indica, y ejecútalo. Este paso solo depura y da formato: no vuelve a investigar, no genera probabilidades ni modifica la probabilidad deportiva ni el sports_score de Atlas. Sigue siendo copiar y pegar: Atlas no llama a Gemini por ti.</p>
+          <button type="button" className="secondary-button" onClick={copyCleanupPrompt}>Copiar prompt para Gemini Pro normal</button>
+          <details className="p2-source-details"><summary>Revisar prompt de depuración completo</summary><pre>{analysis.gemini.cleanupPrompt}</pre></details>
+        </div>
+        <div className="p2-gemini-step">
+          <p className="eyebrow">3 · ✅ Volver a Atlas</p>
+          <p>No pegues aquí el informe largo original de Deep Research. Pega únicamente la respuesta final limpia que te devolvió Gemini Pro normal en el paso 2.</p>
+          <label className="p2-textarea-label">
+            <span>Pegar aquí solo la respuesta limpia de Gemini Pro normal</span>
+            <textarea value={text} onChange={(event) => setText(event.target.value)} rows="12" placeholder="Pega aquí únicamente la respuesta limpia y formateada de Gemini Pro normal…" />
+          </label>
+        </div>
+      </div>
       <div className="p2-inline-actions">
         <button type="button" className="secondary-button" onClick={onNewResearch}>Nueva investigación complementaria</button>
-        <button type="button" className="secondary-button" onClick={copyPrompt}>Copiar solicitud para Gemini</button>
-      </div>
-      <details className="p2-source-details"><summary>Revisar solicitud completa</summary><pre>{analysis.gemini.prompt}</pre></details>
-      <label className="p2-textarea-label">
-        <span>Pegar respuesta de Gemini</span>
-        <textarea value={text} onChange={(event) => setText(event.target.value)} rows="12" placeholder="Pega aquí la respuesta obtenida manualmente…" />
-      </label>
-      <div className="p2-inline-actions">
         <button type="button" className="secondary-button" onClick={onValidate} disabled={!text.trim() || status.status === "loading"}>Validar contexto</button>
         <button type="button" className="primary-button p2-primary" title="Reanalizar con contexto validado" onClick={onReanalyze} disabled={!context?.valid_for_reanalysis || status.status === "loading"}>Incorporar evidencia y completar análisis</button>
       </div>

@@ -181,7 +181,7 @@ test("explicabilidad: A favor sale exclusivamente de contextSummary.favorable, s
   assert.ok(directorResultBlock.includes('<ListBlock title="Balance"'));
 });
 
-test("prompt Gemini incluye búsqueda condicional, ventana de 24h, NO VERIFICADO, fixture/mercado exactos, árbitro confirmado y evidencia de plantilla", () => {
+test("prompt Gemini exige búsqueda obligatoria si está disponible, ventana de 24h, NO VERIFICADO, fixture/mercado exactos, árbitro confirmado y evidencia de plantilla", () => {
   const fixture = {
     fixtureId: 9_400,
     teams: { home: { name: "Local Prompt" }, away: { name: "Visitante Prompt" } },
@@ -196,7 +196,10 @@ test("prompt Gemini incluye búsqueda condicional, ventana de 24h, NO VERIFICADO
     oddsQuote: { decimal_odds: 1.75, selection: "Over 2.5", line: 2.5 },
   });
   assert.match(prompt, /búsqueda o navegación web/i);
-  assert.match(prompt, /No asumas ni afirmes tener acceso a navegación/i);
+  assert.match(prompt, /tienes la OBLIGACIÓN de usarla/i);
+  assert.match(prompt, /genuinamente no dispones de ninguna función de búsqueda o navegación/i);
+  assert.match(prompt, /ESTADO DE BÚSQUEDA WEB: \[USADA o NO DISPONIBLE\]/);
+  assert.match(prompt, /Nunca escribas ambos estados/i);
   assert.match(prompt, /últimas 24 horas/i);
   assert.match(prompt, /NO VERIFICADO/);
   assert.match(prompt, /Fixture ID: 9400/);

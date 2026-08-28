@@ -259,7 +259,7 @@ test("32. el cliente no deja logs de consola", async () => assert.doesNotMatch(a
 test("33. no existe llamada a Gemini API", async () => {
   const source = await readFile(clientPath, "utf8");
   assert.doesNotMatch(source, /GEMINI_API_KEY|generativelanguage\.googleapis/);
-  assert.match(source, /Copiar solicitud para Gemini/);
+  assert.match(source, /Copiar prompt para Gemini Pro \+ Deep Research/);
 });
 
 test("34. el cierre no introduce Supabase ni Vercel", async () => {
