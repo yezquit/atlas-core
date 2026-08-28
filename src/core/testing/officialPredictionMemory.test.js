@@ -296,6 +296,8 @@ function combinationCandidate(fixtureId, officialPredictionId) {
     selection: "Under 2.5",
     official_prediction_id: officialPredictionId,
     sports_score: 80,
+    ranking_eligible: true,
+    estimated_probability: 0.6,
     price_status: "favorable_preliminary",
     price_gap: 0.04,
     parlay_eligibility: "eligible",

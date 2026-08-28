@@ -67,6 +67,8 @@ function engineCandidate(index, overrides = {}) {
     uncertaintyHigh: 0.72,
     sampleSize: 20,
     status: "sports_candidate_pending_price",
+    ranking_eligible: true,
+    estimated_probability: 0.62,
     active_quote: null,
     ...overrides,
   };

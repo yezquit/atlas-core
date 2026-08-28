@@ -115,6 +115,8 @@ function combinationCandidate(index, overrides = {}) {
     status: "sports_candidate_pending_price",
     technicalSupport: overrides.sportsScore ?? 90 - index,
     lineStabilityScore: 75,
+    ranking_eligible: overrides.ranking_eligible ?? true,
+    estimated_probability: overrides.estimated_probability ?? 0.62,
     active_quote: quote,
   };
 }

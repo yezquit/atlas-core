@@ -405,6 +405,7 @@ function toJourneyCandidate({ analysis, candidate, comparison }) {
     estimatedProbability: candidate.estimated_probability,
     probabilityPercent: candidate.probability_percent,
     probabilityClassification: candidate.probability_classification,
+    rankingEligible: candidate.ranking_eligible === true,
     uncertaintyLow: candidate.uncertainty_low,
     uncertaintyHigh: candidate.uncertainty_high,
     confidence: candidate.sports_score,
@@ -496,11 +497,8 @@ export async function recoverJourneyCandidateOdds(candidates, gateway, now) {
 
 export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
   const groups = new Map();
-  const sorted = [...entries].sort((left, right) =>
-    Number(right.candidate.sports_score) - Number(left.candidate.sports_score) ||
-    Number(left.analysis.fixture.fixtureId) - Number(right.analysis.fixture.fixtureId) ||
-    left.candidate.candidate_id.localeCompare(right.candidate.candidate_id)
-  );
+  const eligible = entries.filter((entry) => entry.candidate?.ranking_eligible === true);
+  const sorted = rankJourneyCandidatesByProbability(eligible);
   for (const entry of sorted) {
     const key = Number(entry.analysis.fixture.fixtureId);
     if (!groups.has(key)) groups.set(key, []);

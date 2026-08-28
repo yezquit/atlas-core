@@ -51,6 +51,8 @@ function candidate(index, overrides = {}) {
     generalRank: index,
     familyRank: 1,
     status: "sports_candidate_pending_price",
+    ranking_eligible: overrides.ranking_eligible ?? true,
+    estimated_probability: overrides.estimated_probability ?? 0.6,
     active_quote: overrides.activeQuote === null ? null : quote,
     price_status: overrides.priceStatus ?? "favorable_preliminary",
     price_gap: overrides.priceGap ?? 0.05,
@@ -188,12 +190,12 @@ test("automático evita líneas redundantes del mismo fixture", () => {
 test("Soñadora permite varias familias del mismo fixture", () => {
   const result = buildAtlasCombination({
     candidates: [
-      candidate(1, { fixtureId: 77, marketId: "goals", sportsScore: 95 }),
-      candidate(2, { fixtureId: 77, marketId: "corners", line: 8.5, sportsScore: 94 }),
-      candidate(3, { sportsScore: 90 }),
-      candidate(4, { sportsScore: 89 }),
-      candidate(5, { sportsScore: 88 }),
-      candidate(6, { sportsScore: 87 }),
+      candidate(1, { fixtureId: 77, marketId: "goals", sportsScore: 95, estimated_probability: 0.95 }),
+      candidate(2, { fixtureId: 77, marketId: "corners", line: 8.5, sportsScore: 94, estimated_probability: 0.94 }),
+      candidate(3, { sportsScore: 90, estimated_probability: 0.9 }),
+      candidate(4, { sportsScore: 89, estimated_probability: 0.89 }),
+      candidate(5, { sportsScore: 88, estimated_probability: 0.88 }),
+      candidate(6, { sportsScore: 87, estimated_probability: 0.87 }),
     ],
     product: "dream",
     mode: "automatic",
@@ -284,14 +286,19 @@ test("automático construye sin análisis individual ni official_prediction", ()
   assert.equal(result.price_coverage.status, "unavailable");
 });
 
-test("ranking automático es global y prioriza sports_score aunque el candidato aparezca después", () => {
+test("ranking automático es global y prioriza estimated_probability aunque el sports_score sea inferior", () => {
   const result = buildAtlasCombination({
-    candidates: [candidate(1, { sportsScore: 62 }), candidate(2, { sportsScore: 70 }), candidate(3, { sportsScore: 94 })],
+    candidates: [
+      candidate(1, { sportsScore: 95, estimated_probability: 0.5 }),
+      candidate(2, { sportsScore: 60, estimated_probability: 0.88 }),
+      candidate(3, { sportsScore: 75, estimated_probability: 0.7 }),
+    ],
     product: "parlay",
     mode: "automatic",
     selections: 2,
   });
-  assert.deepEqual(result.selections.map((item) => item.sports_score), [94, 70]);
+  assert.deepEqual(result.selections.map((item) => item.estimated_probability), [0.88, 0.7]);
+  assert.deepEqual(result.selections.map((item) => item.sports_score), [60, 75]);
 });
 
 test("cuotas parciales nunca se presentan como cuota combinada completa", () => {
@@ -308,13 +315,22 @@ test("modo manual conserva selecciones deportivas aunque falte cuota", () => {
   assert.equal(result.price_coverage.status, "partial");
 });
 
-test("insuficiencia deportiva real impide formar una combinación", () => {
-  const weak = candidate(1, { sportsScore: 40, activeQuote: null });
+test("insuficiencia deportiva real (ranking_eligible false) impide formar una combinación", () => {
+  const weak = candidate(1, { ranking_eligible: false, status: "not_viable", activeQuote: null });
   const inspection = inspectCombinationCandidate(weak);
   assert.equal(inspection.sports_eligible, false);
-  assert.ok(inspection.reasons.includes("sports_support_insufficient"));
+  assert.ok(inspection.reasons.includes("sports_status_not_viable"));
   const result = buildAtlasCombination({ candidates: [weak, candidate(2)], product: "parlay", mode: "automatic", selections: 2 });
   assert.equal(result.status, "insufficient_candidates");
+});
+
+test("un candidato sin señal explícita de ranking_eligible no es elegible para combinaciones", () => {
+  const { ranking_eligible, status, ...withoutSignal } = candidate(1, { activeQuote: null });
+  void ranking_eligible;
+  void status;
+  const inspection = inspectCombinationCandidate(withoutSignal);
+  assert.equal(inspection.sports_eligible, false);
+  assert.ok(inspection.reasons.includes("sports_not_ranking_eligible"));
 });
 
 test("Soñadora se construye con soporte deportivo aunque ninguna pata tenga cuota", () => {

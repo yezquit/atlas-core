@@ -19,14 +19,7 @@ export const COMBINATION_LIMITS = Object.freeze({
 
 const CURRENT_QUOTE_STATUSES = new Set(["verified_provider", "user_reported"]);
 const CURRENT_SOURCE_STATUSES = new Set(["verified_current", "user_reported_current"]);
-const MINIMUM_SPORTS_SCORE = 58;
 const COMPARABLE_MARKET_FAMILY_GAP = 4;
-const BLOCKING_SPORTS_STATUSES = new Set([
-  "blocked",
-  "insufficient_data",
-  "insufficient_information",
-  "not_viable",
-]);
 
 function normalizedDirection(value) {
   const candidate = String(value || "").trim().toLowerCase();
@@ -116,6 +109,14 @@ function sportsStatus(candidate) {
     ?? null;
 }
 
+// Elegibilidad V3 para el selector de combinaciones: exige la señal explícita
+// ranking_eligible (o su alias rankingEligible) en true. No hay fallback a
+// sportsStatus, sports_score ni preliminary_probability: un candidato que no
+// declare explícitamente su elegibilidad V3 se trata como no elegible.
+function sportsEligibility(candidate) {
+  return candidate.ranking_eligible === true || candidate.rankingEligible === true;
+}
+
 function economicPriceAssessment(candidate, quote) {
   const compatibility = quoteCompatibility(candidate, quote);
   const decimalOdds = number(quote?.decimal_odds ?? quote?.decimalOdds);
@@ -146,6 +147,11 @@ export function inspectCombinationCandidate(candidate = {}) {
   const quote = candidate.active_quote ?? candidate.activeQuote ?? candidate.current_quote ?? candidate.currentQuote ?? null;
   const scoreValue = sportsScore(candidate);
   const status = sportsStatus(candidate);
+  const rankingEligible = sportsEligibility(candidate);
+  const estimatedProbability = number(candidate.estimated_probability ?? candidate.estimatedProbability);
+  const technicalSupport = number(candidate.technical_support_score ?? candidate.technicalSupport);
+  const probabilityPercent = number(candidate.probability_percent ?? candidate.probabilityPercent);
+  const probabilityClassification = candidate.probability_classification ?? candidate.probabilityClassification ?? null;
   const sampleSize = number(candidate.sample_size_effective ?? candidate.sampleSize ?? candidate.transferredCandidate?.sample_size_effective);
   const uncertaintyLow = number(candidate.uncertainty_low ?? candidate.uncertaintyLow ?? candidate.uncertainty?.low ?? candidate.transferredCandidate?.uncertainty?.low);
   const uncertaintyHigh = number(candidate.uncertainty_high ?? candidate.uncertaintyHigh ?? candidate.uncertainty?.high ?? candidate.transferredCandidate?.uncertainty?.high);
@@ -153,10 +159,7 @@ export function inspectCombinationCandidate(candidate = {}) {
   const reasons = [];
 
   if (!key) reasons.push("invalid_identity");
-  if (scoreValue === null) reasons.push("sports_score_unavailable");
-  else if (scoreValue < MINIMUM_SPORTS_SCORE) reasons.push("sports_support_insufficient");
-  if (BLOCKING_SPORTS_STATUSES.has(status)) reasons.push(`sports_status_${status}`);
-  if (sampleSize !== null && sampleSize <= 0) reasons.push("sports_sample_insufficient");
+  if (!rankingEligible) reasons.push(status ? `sports_status_${status}` : "sports_not_ranking_eligible");
 
   const sportsEligible = reasons.length === 0;
 
@@ -176,6 +179,11 @@ export function inspectCombinationCandidate(candidate = {}) {
       line: number(candidate.line),
       sports_score: scoreValue,
       sports_status: status,
+      ranking_eligible: rankingEligible,
+      estimated_probability: estimatedProbability,
+      probability_percent: probabilityPercent,
+      probability_classification: probabilityClassification,
+      technical_support_score: technicalSupport,
       sample_size_effective: sampleSize,
       uncertainty_low: uncertaintyLow,
       uncertainty_high: uncertaintyHigh,
@@ -243,46 +251,23 @@ export function combinationConservatismProfile(product, targetCount) {
   return Number(targetCount) >= 12 ? "very_conservative" : "conservative";
 }
 
-function stabilityWeight(product, targetCount) {
-  // La Soñadora conserva el ranking normal hasta 7 patas; desde 8 aumenta de
-  // forma explícita el peso de estabilidad y desde 12 usa el perfil más prudente.
-  if (product !== COMBINATION_PRODUCT.DREAM || Number(targetCount) < 8) return 0;
-  if (Number(targetCount) >= 12) return 0.5;
-  return 0.35;
-}
-
-function rank(candidate) {
-  const value = number(candidate.overall_rank ?? candidate.generalRank ?? candidate.rank ?? candidate.transferredCandidate?.overall_rank);
-  return value === null ? Number.POSITIVE_INFINITY : value;
-}
-
-function familyRank(candidate) {
-  const value = number(candidate.family_rank ?? candidate.familyRank ?? candidate.transferredCandidate?.family_rank);
-  return value === null ? Number.POSITIVE_INFINITY : value;
-}
-
+// Orden probability-first del selector V3 de combinaciones: estimated_probability
+// decide primero; sports_score nunca interviene aquí (queda solo como métrica
+// interna de soporte, expuesta para mostrar/auditar, no para ordenar). El
+// desempate final usa la identidad estable de la selección (fixture_id +
+// market_family + direction + line), ya codificada en selection_key.
 function compareSportsCandidates(left, right) {
-  const scoreDifference = Number(right.sports_score) - Number(left.sports_score);
-  if (scoreDifference) return scoreDifference;
+  const leftProbability = Number.isFinite(left.estimated_probability) ? left.estimated_probability : -1;
+  const rightProbability = Number.isFinite(right.estimated_probability) ? right.estimated_probability : -1;
+  if (rightProbability !== leftProbability) return rightProbability - leftProbability;
   const uncertaintyDifference = uncertaintyWidth(left) - uncertaintyWidth(right);
   if (uncertaintyDifference) return uncertaintyDifference;
   const sampleDifference = Number(right.sample_size_effective ?? -1) - Number(left.sample_size_effective ?? -1);
   if (sampleDifference) return sampleDifference;
-  const rankDifference = rank(left) - rank(right);
-  if (rankDifference) return rankDifference;
-  const familyRankDifference = familyRank(left) - familyRank(right);
-  if (familyRankDifference) return familyRankDifference;
+  const leftSupport = Number.isFinite(left.technical_support_score) ? left.technical_support_score : -1;
+  const rightSupport = Number.isFinite(right.technical_support_score) ? right.technical_support_score : -1;
+  if (rightSupport !== leftSupport) return rightSupport - leftSupport;
   return String(left.selection_key).localeCompare(String(right.selection_key));
-}
-
-function compareCombinationCandidates(left, right, product, targetCount) {
-  const weight = stabilityWeight(product, targetCount);
-  if (weight > 0) {
-    const leftRankScore = Number(left.sports_score) * (1 - weight) + Number(left.combination_stability_score) * weight;
-    const rightRankScore = Number(right.sports_score) * (1 - weight) + Number(right.combination_stability_score) * weight;
-    if (rightRankScore !== leftRankScore) return rightRankScore - leftRankScore;
-  }
-  return compareSportsCandidates(left, right);
 }
 
 function uniqueInspections(candidates) {
@@ -437,7 +422,7 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
   const eligible = inspected
     .filter((item) => item.sports_eligible)
     .map((item) => item.candidate)
-    .sort((left, right) => compareCombinationCandidates(left, right, product, validation.count));
+    .sort(compareSportsCandidates);
   const requestedKeys = [...new Set(selectedKeys.filter(Boolean))];
   const fixed = requestedKeys.map((key) => eligible.find((candidate) => candidate.selection_key === key)).filter(Boolean);
   const fixedSelectionsAreCompatible = selectionsAreCompatible(fixed);
