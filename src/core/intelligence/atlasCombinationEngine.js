@@ -1,5 +1,6 @@
 import { combinedDecimalOdds } from "./parlayPolicy.js";
 import { buildDirectorCombinationMessage } from "./directorParlayIntegration.js";
+import { buildDecisionFrontier } from "./decisionFrontier.js";
 
 export const COMBINATION_PRODUCT = Object.freeze({
   PARLAY: "parlay",
@@ -291,6 +292,11 @@ function valueFactor(candidate) {
 }
 
 function compareForCombinationSelection(left, right, product) {
+  const leftDecision = Number(left.selection_quality);
+  const rightDecision = Number(right.selection_quality);
+  if (Number.isFinite(leftDecision) && Number.isFinite(rightDecision) && leftDecision !== rightDecision) {
+    return rightDecision - leftDecision;
+  }
   const leftValue = valueFactor(left);
   const rightValue = valueFactor(right);
   const leftProbability = Number.isFinite(left.estimated_probability) ? left.estimated_probability : -1;
@@ -460,10 +466,15 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
       combination_profile: profile,
     },
   }));
-  const eligible = inspected
+  const sportsEligible = inspected
     .filter((item) => item.sports_eligible)
     .map((item) => item.candidate)
     .sort(compareSportsCandidates);
+  // Parlay and Soñadora share the same sports frontier but use distinct,
+  // explicit profiles. This only orders eligible candidates; it never changes
+  // their probability, sports score, or eligibility contract.
+  const frontier = buildDecisionFrontier(sportsEligible, { product });
+  const eligible = frontier.candidates.sort((left, right) => compareForCombinationSelection(left, right, product));
   const requestedKeys = [...new Set(selectedKeys.filter(Boolean))];
   const fixed = requestedKeys.map((key) => eligible.find((candidate) => candidate.selection_key === key)).filter(Boolean);
   const fixedSelectionsAreCompatible = selectionsAreCompatible(fixed);
@@ -533,6 +544,7 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
     product,
     mode,
     combination_profile: profile,
+    decision_frontier: frontier,
     requested_selections: validation.count,
     selections: chosen,
     combined_decimal_odds: coverage.status === "complete" ? combinedDecimalOdds(chosen) : null,

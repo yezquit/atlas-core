@@ -242,21 +242,14 @@ test("29. Scout permanece ciego al precio", () => {
 
 test("30. la cuota está disponible desde que existe análisis deportivo, sin esperar a Gemini", async () => {
   const source = await readFile(clientPath, "utf8");
-  const branch = source.match(/analysis\?\.marketSelection\?\.exact_requested_line_unavailable \? \(([\s\S]*?)\) : analysis\?\.marketSelection\?\.primary \? \(([\s\S]*?)\) : null\}/);
-  assert.ok(branch, "debe existir la bifurcación exact_requested_line_unavailable vs primary exacto válido");
-  const [, unavailableContent, primaryContent] = branch;
-
-  // Rama exact_requested_line_unavailable: NO pide cuota, solo avisa.
-  assert.match(unavailableContent, /Línea exacta no disponible/);
-  assert.doesNotMatch(unavailableContent, /<span>Casa<\/span>/);
-  assert.doesNotMatch(unavailableContent, /<span>Cuota decimal<\/span>/);
-  assert.doesNotMatch(unavailableContent, /<span>Hora de consulta<\/span>/);
-
-  // Rama con marketSelection.primary exacto válido: sí muestra el formulario económico completo.
-  assert.match(primaryContent, /<span>Casa<\/span>/);
-  assert.match(primaryContent, /<span>Cuota decimal<\/span>/);
-  assert.match(primaryContent, /<span>Hora de consulta<\/span>/);
-  assert.match(primaryContent, /reanalyzeWithManualOdds/);
+  const panel = source.slice(source.indexOf("EVALUAR CUOTA ACTUAL"), source.indexOf("EVIDENCIA COMPLEMENTARIA"));
+  assert.match(panel, /analysis\?\.marketSelection\?\.exact_requested_line_unavailable \? \(/);
+  assert.match(panel, /Línea exacta no disponible/);
+  assert.match(panel, /!quoteTargetReady \? <small>Primero ATLAS debe calcular esta línea\.<\/small> : null/);
+  assert.match(panel, /Casa de apuestas/);
+  assert.match(panel, /Cuota decimal actual/);
+  assert.match(panel, /Hora de consulta \(opcional\)/);
+  assert.match(panel, /reanalyzeWithManualOdds/);
 
   assert.match(source, /evaluatePrice: Boolean\(reanalysis && manualQuoteReady\)/);
 });

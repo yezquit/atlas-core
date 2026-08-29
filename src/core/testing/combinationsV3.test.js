@@ -124,7 +124,7 @@ test("8. menos de 5 candidatos válidos no fabrica Soñadora", () => {
   assert.equal(result.status, "insufficient_candidates");
 });
 
-test("9. estimated_probability superior gana aunque el sports_score sea inferior", () => {
+test("9. la frontera de decisión puede preferir mejor calidad deportiva sin cambiar probabilities", () => {
   const result = buildAtlasCombination({
     candidates: [
       candidate(1, { sportsScore: 95, estimated_probability: 0.5 }),
@@ -135,8 +135,8 @@ test("9. estimated_probability superior gana aunque el sports_score sea inferior
     mode: "automatic",
     selections: 2,
   });
-  assert.deepEqual(result.selections.map((item) => item.estimated_probability), [0.88, 0.75]);
-  assert.deepEqual(result.selections.map((item) => item.sports_score), [55, 70]);
+  assert.deepEqual(result.selections.map((item) => item.estimated_probability), [0.75, 0.88]);
+  assert.deepEqual(result.selections.map((item) => item.sports_score), [70, 55]);
 });
 
 test("10. empate de estimated_probability lo resuelve la incertidumbre más estrecha", () => {
@@ -201,7 +201,7 @@ test("14. dos líneas de la misma familia del mismo fixture no pueden coexistir"
   assert.equal(result.status, "insufficient_candidates");
 });
 
-test("15. la cuota no altera el ranking deportivo", () => {
+test("15. la cuota no altera probability ni sports_score", () => {
   const result = buildAtlasCombination({
     candidates: [
       candidate(1, { fixtureId: 9501, estimated_probability: 0.9, activeQuote: null }),
@@ -211,7 +211,8 @@ test("15. la cuota no altera el ranking deportivo", () => {
     mode: "automatic",
     selections: 2,
   });
-  assert.deepEqual(result.selections.map((item) => item.estimated_probability), [0.9, 0.5]);
+  assert.deepEqual([...result.selections.map((item) => item.estimated_probability)].sort((a, b) => b - a), [0.9, 0.5]);
+  assert.equal(result.selections.find((item) => item.fixture_id === 9501).sports_score, 75);
 });
 
 test("16. la cuota exacta exige coincidencia total de fixture + market_family + direction + line", () => {
@@ -305,13 +306,13 @@ test("22. muchos candidatos elegibles producen Parlay cuando al menos 2 sobreviv
   assert.equal(result.selections.length, 2);
 });
 
-test("23. sports_score no decide el orden del selector V3 de combinaciones", () => {
+test("23. Journey usa frontera de decisión para el orden del selector de combinaciones", () => {
   const entries = [
     journeyEntry(3001, "alto-score-baja-prob", { sports_score: 95, estimated_probability: 0.5 }),
     journeyEntry(3002, "bajo-score-alta-prob", { sports_score: 60, estimated_probability: 0.9 }),
   ];
   const selected = selectCombinationJourneyCandidates(entries, 10);
-  assert.equal(selected[0].candidate.candidate_id, "bajo-score-alta-prob");
+  assert.equal(selected[0].candidate.candidate_id, "alto-score-baja-prob");
 });
 
 test("24. estimated_probability no cambia después de asociar una cuota", () => {

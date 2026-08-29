@@ -5,7 +5,8 @@ import { calculateAnalysisConfidence } from "../intelligence/analysisConfidence.
 import { buildAnalysisVersion, compareAnalysisVersions } from "../intelligence/analysisVersions.js";
 import { buildGeminiCleanupPrompt, buildGeminiResearchPrompt, extractSupplementaryRefereeEvidence, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
-import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
+import { evaluateExactMarketLine } from "../intelligence/candidateLineGenerator.js";
+import { buildRankedMarketSelection, rankMarketCandidates } from "../intelligence/marketCandidateRanker.js";
 import { buildOperationalRanking, buildScoutAtlas } from "../intelligence/scoutAtlas.js";
 import { buildAtlasPreflight, buildRedTeamAtlas } from "../intelligence/redTeamAtlas.js";
 import { assessMarketSuitability } from "../intelligence/marketSuitability.js";
@@ -26,6 +27,31 @@ function ratio(numerator, denominator) {
 
 function probabilityLabel(value) {
   return `${Number((Number(value) * 100).toFixed(1))}%`;
+}
+
+function isDirectMarketEvidence(item, marketFamily, impacts = []) {
+  if (!item || !marketFamily) return false;
+  if (item.affected_markets?.includes(marketFamily)) return true;
+  return impacts.some((impact) => impact.source_item_id === item.id && impact.affected_markets?.includes(marketFamily));
+}
+
+function summarizeMarketEvidence(items, marketFamily, impacts = []) {
+  const direct = items.filter((item) => isDirectMarketEvidence(item, marketFamily, impacts));
+  const general = items.filter((item) => !direct.includes(item));
+  const asText = (itemsForStatus, status) => itemsForStatus
+    .filter((item) => item.impact === status)
+    .map((item) => item.summary || item.text);
+  return {
+    direct,
+    general,
+    summary: {
+      favorable: asText(direct, "favorable"),
+      unfavorable: asText(direct, "unfavorable"),
+      limitations: direct.filter((item) => item.kind === "not_found" || item.impact === "limiting").map((item) => item.summary || item.text),
+      neutral: asText(direct, "neutral"),
+      general_context: general.map((item) => item.summary || item.text),
+    },
+  };
 }
 
 export function buildOperationalCompleteness({ oddsQuote = null, priceEvaluation = null } = {}) {
@@ -182,6 +208,8 @@ export function selectExactRequestedCandidate(marketSelection, { marketFamily, r
       primary: null,
       alternatives: sameFamilyAlternatives.slice(0, 3),
       exact_requested_line_unavailable: true,
+      exact_line_available: false,
+      ready_for_pricing: false,
       requested_line: Number(requestedLine),
       requested_direction: direction,
       explanation: `Atlas no tiene información suficiente para calcular exactamente ${requestedSelection} ${requestedLine}${marketFamily ? ` (${marketFamily})` : ""}. No se sustituye por otra línea.`,
@@ -193,6 +221,78 @@ export function selectExactRequestedCandidate(marketSelection, { marketFamily, r
     alternatives: marketSelection.ranked_candidates.filter((candidate) => candidate.candidate_id !== exactCandidate.candidate_id).slice(0, 3),
     exact_requested_line_unavailable: false,
     explanation: exactLineExplanation(exactCandidate.selection, { lineOrigin }),
+  };
+}
+
+export function resolveManualExactSelection({
+  marketSelection,
+  marketFamily,
+  requestedLine,
+  requestedSelection,
+  lineOrigin,
+  marketAssessments = [],
+  leagueProfile,
+  homeTeamProfile,
+  awayTeamProfile,
+  refereeProfile,
+  contextItems = [],
+  contextImpacts = [],
+  quotes = [],
+  preferredQuote = null,
+} = {}) {
+  if (!marketSelection || requestedLine === null || requestedLine === undefined || !marketFamily || !requestedSelection) {
+    return marketSelection;
+  }
+  const direction = normalizedDirection(requestedSelection);
+  if (!direction) return selectExactRequestedCandidate(marketSelection, { marketFamily, requestedLine, requestedSelection, lineOrigin });
+
+  // A manually requested line is evaluated on demand from the fixture's own
+  // distribution. It is not required to have appeared in Atlas's proactive
+  // catalogue and never inherits a neighbour's probability.
+  const exactEvaluation = evaluateExactMarketLine({
+    marketFamily,
+    direction,
+    line: requestedLine,
+    leagueProfile,
+    homeTeamProfile,
+    awayTeamProfile,
+    refereeProfile,
+    contextItems,
+    contextImpacts,
+  });
+  if (!exactEvaluation.exact_selection_ready) {
+    const unavailable = selectExactRequestedCandidate(marketSelection, { marketFamily, requestedLine, requestedSelection, lineOrigin });
+    return {
+      ...unavailable,
+      unavailable_reason: exactEvaluation.reason,
+      explanation: `Atlas no pudo calcular exactamente ${requestedSelection} ${requestedLine}: ${exactEvaluation.reason}. No se sustituye por otra línea.`,
+    };
+  }
+  const exactCandidate = rankMarketCandidates([exactEvaluation.candidate], {
+    quotes,
+    preferredQuote,
+    marketAssessments,
+    homeTeamProfile,
+    awayTeamProfile,
+  })[0];
+  const primary = {
+    ...exactCandidate,
+    exact_line_available: true,
+    ready_for_pricing: true,
+  };
+  const catalogueWithoutExact = (marketSelection.ranked_candidates || []).filter((candidate) => candidate.candidate_id !== primary.candidate_id);
+  return {
+    ...marketSelection,
+    primary,
+    ranked_candidates: [primary, ...catalogueWithoutExact],
+    catalog_candidates: [primary, ...catalogueWithoutExact],
+    alternatives: catalogueWithoutExact.slice(0, 3),
+    exact_requested_line_unavailable: false,
+    requested_line: Number(requestedLine),
+    requested_direction: direction,
+    exact_line_available: true,
+    ready_for_pricing: true,
+    explanation: exactLineExplanation(primary.selection, { lineOrigin }),
   };
 }
 
@@ -328,7 +428,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const geminiLimitations = selectedGemini.filter((item) => item.kind === "not_found" || item.impact === "limiting").map((item) => item.summary || item.text);
   const favorableGemini = selectedGemini.filter((item) => item.impact === "favorable").map((item) => item.summary || item.text);
   const unfavorableGemini = selectedGemini.filter((item) => item.impact === "unfavorable").map((item) => item.summary || item.text);
-  const contextSummary = {
+  let contextSummary = {
     favorable: favorableGemini,
     unfavorable: unfavorableGemini,
     limitations: geminiLimitations,
@@ -412,16 +512,25 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     refereeProfile: base.refereeProfile,
     contextItems: selectedGemini,
     contextImpacts: geminiImpacts,
-    exactLine: suppressExactLineForCandidateOdds ? null : requestedLine,
     quotes: oddsResult.quotes,
     preferredQuote,
   });
   if (!suppressExactLineForCandidateOdds) {
-    marketSelection = selectExactRequestedCandidate(marketSelection, {
+    marketSelection = resolveManualExactSelection({
+      marketSelection,
       marketFamily: manualMarketFamily,
       requestedLine,
       requestedSelection,
       lineOrigin,
+      marketAssessments: base.marketAssessments,
+      leagueProfile: base.leagueProfile,
+      homeTeamProfile: base.homeTeamProfile,
+      awayTeamProfile: base.awayTeamProfile,
+      refereeProfile: base.refereeProfile,
+      contextItems: selectedGemini,
+      contextImpacts: geminiImpacts,
+      quotes: oddsResult.quotes,
+      preferredQuote,
     });
   }
   const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
@@ -438,6 +547,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     ? operationalCandidate
     : marketSelection.primary;
   const marketAssessment = base.marketAssessments.find((item) => item.market_family === (primaryCandidate?.market_family || manualMarketFamily)) || null;
+  const marketEvidence = summarizeMarketEvidence(selectedGemini, primaryCandidate?.market_family || manualMarketFamily, geminiImpacts);
+  contextSummary = marketEvidence.summary;
   const bestProviderOdds = primaryCandidate ? selectBestComparableOdds(oddsResult.quotes, {
     marketFamily: primaryCandidate.market_family,
     selection: primaryCandidate.selection,
@@ -487,7 +598,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     variable_coverage: ratio(available, requirements),
     source_concordance: contradictions.length
       ? Math.max(0, 1 - contradictions.length * 0.25)
-      : Math.min(0.92, 0.85 + favorableGemini.length * 0.02),
+      : Math.min(0.92, 0.85 + marketEvidence.summary.favorable.length * 0.02),
     contradiction_control: contradictions.length ? 0 : 1,
     contextual_coverage: [context.lineups.status, context.injuries.status, context.standings.status].filter((status) => ["confirmed", "probable", "no_reports", "verified"].includes(status)).length / 3,
     provider_stability: telemetry.budgetExhausted || telemetry.quotaStatus === "preventive_block" ? 0 : 1,
@@ -535,11 +646,11 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   });
   const supportingEvidence = [
     ...(marketAssessment?.available_evidence || []).map((item) => item.requirement),
-    ...favorableGemini,
+    ...marketEvidence.summary.favorable,
   ];
   const opposingEvidence = [
-    ...selectedGemini.filter((item) => ["rumor", "probable"].includes(item.kind) && item.impact !== "favorable").map((item) => item.text),
-    ...unfavorableGemini,
+    ...marketEvidence.direct.filter((item) => ["rumor", "probable"].includes(item.kind) && item.impact !== "favorable").map((item) => item.text),
+    ...marketEvidence.summary.unfavorable,
   ];
   const priorSelection = previousVersion?.director?.sports_verdict?.selection || previousVersion?.director?.selection || null;
   const currentSelection = primaryCandidate?.selection || null;
@@ -559,7 +670,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     ...(context.lineups.warnings || []),
     ...(context.injuries.warnings || []),
     ...(oddsResult.warnings || []),
-    ...unfavorableGemini,
+    ...marketEvidence.summary.unfavorable,
   ];
   const redTeam = buildRedTeamAtlas({
     candidate: primaryCandidate,
@@ -592,7 +703,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     supportingEvidence,
     opposingEvidence,
     contradictions,
-    missingData: [...(marketAssessment?.missing_evidence || []), ...geminiLimitations],
+    missingData: [...(marketAssessment?.missing_evidence || []), ...marketEvidence.summary.limitations],
     risks: directorRisks,
     evidenceRefs: base.evidenceRefs,
     parlayAuthorization: "insufficient_candidates",
@@ -686,6 +797,17 @@ selections: input.dreamSelections || 5,
     risks: director.risks,
     directive_to_bet: false,
   };
+  const exactSelection = primaryCandidate ? {
+    fixture_id: base.fixture.fixtureId,
+    market_family: primaryCandidate.market_family,
+    direction: primaryCandidate.direction,
+    line: primaryCandidate.line,
+    estimated_probability: primaryCandidate.estimated_probability,
+    sports_score: primaryCandidate.sports_score,
+    uncertainty: { low: primaryCandidate.uncertainty_low, high: primaryCandidate.uncertainty_high },
+    support: primaryCandidate.technical_support_score,
+    ready_for_pricing: marketSelection.ready_for_pricing === true,
+  } : null;
   return {
     ...base,
     contract: "AtlasOperationalAnalysis",
@@ -693,6 +815,7 @@ selections: input.dreamSelections || 5,
     message: contextReanalysisMessage || "Análisis operativo finalizado y conservado como una nueva versión inmutable.",
     analysisMode: marketSelection.analysis_mode,
     marketSelection,
+    exactSelection,
     scout,
     operationalRanking,
     redTeam,
@@ -706,7 +829,7 @@ selections: input.dreamSelections || 5,
     historicalQuote,
     lineOrigin,
     preMatchContext: context,
-    gemini: { prompt, cleanupPrompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, supplementary_referee_evidence: supplementaryRefereeEvidence, reanalysis_message: contextReanalysisMessage },
+    gemini: { prompt, cleanupPrompt, context: geminiContext, applied_items: marketEvidence.direct, general_context_items: marketEvidence.general, impacts: geminiImpacts, summary: contextSummary, supplementary_referee_evidence: supplementaryRefereeEvidence, reanalysis_message: contextReanalysisMessage },
     confidence,
     operationalCompleteness,
     preliminaryProbability,

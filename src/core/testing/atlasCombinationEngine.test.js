@@ -286,7 +286,7 @@ test("automático construye sin análisis individual ni official_prediction", ()
   assert.equal(result.price_coverage.status, "unavailable");
 });
 
-test("ranking automático es global y prioriza estimated_probability aunque el sports_score sea inferior", () => {
+test("ranking automático usa la frontera de decisión sin alterar las métricas deportivas", () => {
   const result = buildAtlasCombination({
     candidates: [
       candidate(1, { sportsScore: 95, estimated_probability: 0.5 }),
@@ -297,8 +297,9 @@ test("ranking automático es global y prioriza estimated_probability aunque el s
     mode: "automatic",
     selections: 2,
   });
-  assert.deepEqual(result.selections.map((item) => item.estimated_probability), [0.88, 0.7]);
-  assert.deepEqual(result.selections.map((item) => item.sports_score), [60, 75]);
+  assert.deepEqual(result.selections.map((item) => item.estimated_probability), [0.7, 0.88]);
+  assert.deepEqual(result.selections.map((item) => item.sports_score), [75, 60]);
+  assert.ok(result.selections.every((item) => Number.isFinite(item.selection_quality)));
 });
 
 test("cuotas parciales nunca se presentan como cuota combinada completa", () => {

@@ -10,6 +10,7 @@ import {
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
 import { buildRankedMarketSelection, selectCandidateQuote } from "../intelligence/marketCandidateRanker.js";
+import { buildDecisionFrontier } from "../intelligence/decisionFrontier.js";
 import { normalizeProviderOdds } from "../intelligence/oddsIntelligence.js";
 import { buildCompetitionProfileContext, findCompetitionProfile } from "../intelligence/competitionProfile.js";
 import {
@@ -54,7 +55,7 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
     if (!candidate && generated.reason === "insufficient_distribution_data") reason = "Muestra insuficiente.";
     else if (!candidate && (assessment?.available_evidence?.length || 0) < (assessment?.data_requirements?.length || 0) * 0.7) reason = "Cobertura insuficiente.";
     else if (!candidate && (assessment?.risk_flags || []).some((item) => /crític|critical|depend/i.test(item))) reason = "Dependencia crítica.";
-    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mejor opción del ranking deportivo por elegibilidad y probabilidad estimada.";
+    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mejor opción por frontera de decisión, conservando elegibilidad y evidencia deportiva.";
     return {
       market_family: generated.market_family,
       market_label: assessment?.market_label || generated.market_family,
@@ -70,7 +71,7 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
     families_compared: families.map((item) => item.market_label),
     best_by_family: families,
     why_market_won: winner
-      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por el ranking deportivo V3 (elegibilidad y probabilidad estimada), no por el orden inicial.`
+      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por la frontera de decisión V3, sin alterar probabilidad ni soporte deportivo.`
       : "No hubo un candidato destacado.",
   };
 }
@@ -383,13 +384,20 @@ export async function analyzeSportsFixture(input, gateway) {
   };
 }
 
-function toJourneyCandidate({ analysis, candidate, comparison }) {
+export function toJourneyCandidate({ analysis, candidate, comparison }) {
+  const fixtureId = Number(analysis.fixture.fixtureId);
   const risks = (candidate.limitations || []).filter((item) => !isModelLimitation(item)).slice(0, 3);
+  const fixtureEvidence = {
+    fixture_id: fixtureId,
+    reasons: [...(candidate.simple_sports_reasons || [])],
+    risks: [...risks],
+    explanation: comparison.why_market_won,
+  };
   return {
     competition: analysis.competition.localName,
     competitionKey: analysis.competition.key,
     season: analysis.fixture.competition.season,
-    fixtureId: analysis.fixture.fixtureId,
+    fixtureId,
     fixture: `${analysis.fixture.teams.home.name} vs ${analysis.fixture.teams.away.name}`,
     kickoff: analysis.fixture.date.utc,
     kickoffLocal: analysis.fixture.date.kickoff_local,
@@ -420,6 +428,9 @@ function toJourneyCandidate({ analysis, candidate, comparison }) {
     generalRank: candidate.rank,
     familyRank: candidate.family_rank,
     sportsScore: candidate.sports_score,
+    selectionQuality: candidate.selection_quality ?? null,
+    decisionFrontier: candidate.decision_frontier ?? null,
+    decisionEconomics: candidate.decision_economics ?? null,
     familiesCompared: comparison.families_compared,
     familyComparison: comparison.best_by_family,
     whyMarketWon: comparison.why_market_won,
@@ -445,8 +456,9 @@ function toJourneyCandidate({ analysis, candidate, comparison }) {
       risks,
       methodology_version: candidate.methodology_version,
     },
-    reasons: candidate.simple_sports_reasons,
-    risks,
+    fixtureEvidence,
+    reasons: fixtureEvidence.reasons,
+    risks: fixtureEvidence.risks,
     missingData: ["Cuota actual para la línea exacta"],
     nextAction: "Atlas intentará recuperar una cuota exacta; si no existe, puedes ingresarla manualmente.",
     rankReason: candidate.rank_reason.join(" "),
@@ -498,7 +510,7 @@ export async function recoverJourneyCandidateOdds(candidates, gateway, now) {
 export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
   const groups = new Map();
   const eligible = entries.filter((entry) => entry.candidate?.ranking_eligible === true);
-  const sorted = rankJourneyCandidatesByProbability(eligible);
+  const sorted = rankJourneyCandidatesByDecision(eligible, { product: "parlay" });
   for (const entry of sorted) {
     const key = Number(entry.analysis.fixture.fixtureId);
     if (!groups.has(key)) groups.set(key, []);
@@ -519,6 +531,45 @@ export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
     depth += 1;
   }
   return selected;
+}
+
+// Presentation-only shortlist: the complete Journey catalogue is retained.
+export function buildJourneyRecommendationShortlist(candidates = [], maximum = 10) {
+  return (candidates || []).map((candidate) => {
+    const support = Number(candidate.technicalSupport ?? candidate.sportsScore ?? candidate.confidence);
+    const width = Number(candidate.uncertaintyHigh) - Number(candidate.uncertaintyLow);
+    const frontier = candidate.decisionFrontier || {};
+    const risky = ["RIESGOSA", "MUY RIESGOSA"].includes(candidate.probabilityClassification);
+    const currentPrice = ["verified_current", "user_reported_current"].includes(candidate.priceStatus);
+    const economics = candidate.decisionEconomics;
+    const riskyWithPriceValue = risky && currentPrice && economics?.status === "available"
+      && Number(economics.edge) > 0 && Number(economics.expected_value) > 0;
+    const recommendable = frontier.recommended === true
+      && frontier.status === "eligible"
+      && Number(candidate.selectionQuality) >= 60
+      && support >= 58
+      && Number.isFinite(width)
+      && width <= 0.35
+      && (!risky || riskyWithPriceValue);
+    if (!recommendable) return null;
+    const sportsSignals = (candidate.fixtureEvidence?.reasons || candidate.reasons || []).filter(Boolean).slice(0, 2);
+    const sportsReason = sportsSignals.length
+      ? sportsSignals.join(" ")
+      : "ATLAS no dispone de evidencia descriptiva suficiente para justificar esta recomendación más allá del modelo cuantitativo.";
+    return {
+      ...candidate,
+      atlasRecommendation: {
+        reason: sportsReason,
+        frontier_note: riskyWithPriceValue
+          ? `Frontera Atlas: entra por valor positivo pese a una clasificación de mayor riesgo (edge ${economics.edge}; EV ${economics.expected_value}).`
+          : "Frontera Atlas: mantiene utilidad suficiente frente a líneas alternativas.",
+        support,
+        uncertainty_width: width,
+      },
+    };
+  }).filter(Boolean)
+    .sort((left, right) => Number(right.selectionQuality ?? -Infinity) - Number(left.selectionQuality ?? -Infinity))
+    .slice(0, Math.max(0, maximum));
 }
 
 export async function scanSportsJourney(input, gateway) {
@@ -706,7 +757,7 @@ export async function scanSportsJourney(input, gateway) {
     ? requestedMaximumCandidates
     : Number.POSITIVE_INFINITY;
   const competitionProfiles = Array.isArray(input.competitionProfiles) ? input.competitionProfiles : [];
-  const highlightedSports = rankJourneyCandidatesByProbability(
+  const highlightedSports = rankJourneyCandidatesByDecision(
     analysisCandidates.filter((entry) => entry.candidate?.ranking_eligible === true)
   ).slice(0, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
   const combinationSports = selectCombinationJourneyCandidates(combinationEntries, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
@@ -718,6 +769,7 @@ export async function scanSportsJourney(input, gateway) {
   const pricedByIdentity = new Map(pricedUniverse.map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate]));
   const highlighted = highlightedSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
   const combinationCandidates = combinationSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
+  const recommendedCandidates = buildJourneyRecommendationShortlist(highlighted);
   const fixturesByCompetition = Object.fromEntries(
     [...fixtures.reduce((map, item) => {
       const name = item.competition.localName;
@@ -756,6 +808,7 @@ export async function scanSportsJourney(input, gateway) {
     candidateDiagnosticsByCompetition,
     analysisDiagnostics,
     candidates: highlighted,
+    recommendedCandidates,
     combinationCandidates,
     competitionProfilesApplied: competitionProfiles.length,
     warnings,
@@ -806,6 +859,36 @@ export function rankJourneyCandidatesByProbability(entries = []) {
 
     if (left.analysis.fixture.fixtureId !== right.analysis.fixture.fixtureId) return left.analysis.fixture.fixtureId - right.analysis.fixture.fixtureId;
     return left.candidate.candidate_id.localeCompare(right.candidate.candidate_id);
+  });
+}
+
+// Keeps the probability ranking available for the catalogue and legacy views,
+// while the Journey recommendation uses the same explicit frontier as a single
+// analysis. A fixture id is supplied so distinct fixtures remain independent.
+export function rankJourneyCandidatesByDecision(entries = [], { product = "individual" } = {}) {
+  const candidateIdentity = (candidate = {}) => `${Number(candidate.fixture_id)}:${candidate.candidate_id}`;
+  const candidates = entries.map((entry) => ({
+    ...entry.candidate,
+    fixture_id: entry.candidate?.fixture_id ?? entry.analysis?.fixture?.fixtureId,
+  }));
+  const frontier = buildDecisionFrontier(candidates, { product });
+  const byIdentity = new Map(frontier.candidates.map((candidate) => [candidateIdentity(candidate), candidate]));
+  return entries.map((entry) => {
+    const candidate = {
+      ...entry.candidate,
+      fixture_id: entry.candidate?.fixture_id ?? entry.analysis?.fixture?.fixtureId,
+    };
+    return {
+      ...entry,
+      candidate: byIdentity.get(candidateIdentity(candidate)) || entry.candidate,
+    };
+  }).sort((left, right) => {
+    const leftRecommended = left.candidate?.decision_frontier?.recommended ? 0 : 1;
+    const rightRecommended = right.candidate?.decision_frontier?.recommended ? 0 : 1;
+    if (leftRecommended !== rightRecommended) return leftRecommended - rightRecommended;
+    const score = Number(right.candidate?.selection_quality) - Number(left.candidate?.selection_quality);
+    if (Number.isFinite(score) && score) return score;
+    return rankJourneyCandidatesByProbability([left, right])[0] === left ? -1 : 1;
   });
 }
 

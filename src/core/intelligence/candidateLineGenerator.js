@@ -1,5 +1,7 @@
 import { estimatePreliminaryMarketProbability } from "./preliminaryMarketModel.js";
 import { contextShiftForMarket } from "./geminiImpactMapper.js";
+import { buildCanonicalObservations } from "./canonicalObservations.js";
+import { buildMarketComponents } from "./marketComponentAdapter.js";
 import {
   ESTIMATED_PROBABILITY_REPRESENTS,
   classifyProbability,
@@ -41,7 +43,6 @@ function median(values) {
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
-function deviation(values, mean) { return values.length < 2 ? null : Math.sqrt(values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (values.length - 1)); }
 function percentile(values, ratio) {
   if (!values.length) return null;
   const sorted = [...values].sort((left, right) => left - right);
@@ -52,31 +53,88 @@ function percentile(values, ratio) {
 }
 function round(value, decimals = 2) { return Number(Number(value).toFixed(decimals)); }
 
+function sampleAudit(profile, role, family, measure) {
+  const values = numeric(profile?.[role]?.event_samples?.[family]?.[measure] || []);
+  return {
+    sample_size: values.length,
+    value: values.length ? round(average(values)) : null,
+  };
+}
+
+function buildCountMarketAudit({ input, distribution, probability, line, direction }) {
+  const family = input.marketFamily;
+  const league = distribution.input_sources?.find((source) => source.source === "league") || null;
+  const sourceSizes = probability.inputs_used?.map((source) => ({
+    source: source.source,
+    weight: source.weight,
+    sample_size: source.sample_size,
+  })) || [];
+  const components = buildMarketComponents({ marketFamily: family, homeTeamProfile: input.homeTeamProfile, awayTeamProfile: input.awayTeamProfile });
+  const center_delta = Number.isFinite(components?.component_total) ? distribution.projected_mean - components.component_total : null;
+  const coherence_ratio = Number.isFinite(center_delta) ? Math.abs(center_delta) / Math.max(0.75, distribution.dispersion) : null;
+  return {
+    contract: "CountMarketAudit",
+    version: 1,
+    market_family: family,
+    fixture_id: input.fixtureId ?? input.fixture_id ?? null,
+    requested_line: Number.isFinite(Number(line)) ? Number(line) : null,
+    direction: direction || null,
+    // These are paired signals for each attacking side. They are displayed
+    // separately and are never added as a total-match projection.
+    home_for: sampleAudit(input.homeTeamProfile, "as_home", family, "for"),
+    away_against: sampleAudit(input.awayTeamProfile, "as_away", family, "conceded"),
+    away_for: sampleAudit(input.awayTeamProfile, "as_away", family, "for"),
+    home_against: sampleAudit(input.homeTeamProfile, "as_home", family, "conceded"),
+    league_baseline: league ? { sample_size: league.sample_size, value: league.mean } : null,
+    recent_home_sample_size: probability.inputs_used?.find((source) => source.source === "home_last_10")?.sample_size ?? null,
+    recent_away_sample_size: probability.inputs_used?.find((source) => source.source === "away_last_10")?.sample_size ?? null,
+    effective_sample_size: probability.sample_size_effective,
+    expected_home_component: components?.home_component?.expected ?? null,
+    expected_away_component: components?.away_component?.expected ?? null,
+    expected_total: components?.component_total ?? null,
+    distribution_center: distribution.projected_mean ?? null,
+    center_delta, coherence_ratio, model_coherence_warning: coherence_ratio !== null && coherence_ratio > 1,
+    requested_threshold_probability: probability.point_estimate,
+    source_weights: sourceSizes,
+    source_audit: distribution.canonical_observations?.sources || [],
+    canonical_fixture_ids: distribution.canonical_observations?.fixture_ids || [],
+    components,
+  };
+}
+
 export function buildMarketDistribution(input = {}) {
   const family = input.marketFamily;
-  const sources = SOURCE_DEFINITIONS.map(([name, weight, select]) => ({ name, weight, values: numeric(select(input, family)) })).filter((source) => source.values.length);
-  if (!sources.length) return null;
-  const weightTotal = sources.reduce((sum, source) => sum + source.weight, 0);
-  const projectedMean = sources.reduce((sum, source) => sum + average(source.values) * (source.weight / weightTotal), 0);
-  const pooled = sources.flatMap((source) => source.values);
+  const canonical = input.canonicalObservations || buildCanonicalObservations(input);
+  if (!canonical.observations.length) return null;
+  const projectedMean = canonical.distribution_center;
+  const pooled = canonical.observations.map((item) => item.value);
   const pooledMedian = median(pooled);
-  const pooledDeviation = deviation(pooled, average(pooled));
   const context = contextShiftForMarket(input.contextImpacts || [], family);
-  const dispersion = Math.max(0.75, pooledDeviation || 0.75);
+  const dispersion = Math.max(0.75, canonical.distribution_dispersion || 0.75);
   const contextShift = context.standardized_shift * dispersion;
   return {
     methodology_version: `${CANDIDATE_LINE_GENERATOR_VERSION}:${METHODOLOGIES[family] || "unsupported"}`,
     market_family: family,
     projected_mean: round(projectedMean + contextShift),
-    unadjusted_mean: round(projectedMean),
+    unadjusted_mean: round(projectedMean), canonical_observations: canonical,
     median: round(pooledMedian + contextShift),
     dispersion: round(dispersion),
     percentile_10: round(percentile(pooled, 0.1) + contextShift),
     percentile_90: round(percentile(pooled, 0.9) + contextShift),
     context_adjustment: context,
     context_shift_events: round(contextShift, 3),
-    input_sources: sources.map((source) => ({ source: source.name, sample_size: source.values.length, weight: round(source.weight / weightTotal, 3), mean: round(average(source.values)) })),
-    pooled_sample_size: pooled.length,
+    input_sources: canonical.sources.map((source) => ({
+      source: source.name,
+      sample_size: source.raw_sample_size,
+      weight: round(source.effective_weight, 3),
+      mean: round(source.raw_center),
+      raw_fixture_ids: source.raw_fixture_ids,
+      unique_fixture_count: source.unique_fixture_count,
+      requested_weight: source.requested_weight,
+      effective_weight: source.effective_weight,
+      weighted_contribution: source.weighted_contribution,
+    })),
+    pooled_sample_size: canonical.observations.length,
     limitations: [
       "Distribución empírica preliminar; no representa un modelo deportivo validado.",
       "Las submuestras solapadas se ponderan y no se interpretan como observaciones independientes.",
@@ -107,13 +165,17 @@ function plausibleLines(distribution, marketFamily) {
   return [...catalog].sort((left, right) => Math.abs(left - distribution.projected_mean) - Math.abs(right - distribution.projected_mean)).slice(0, Math.min(5, catalog.length)).sort((left, right) => left - right);
 }
 
-export function isValidCandidateLine(marketFamily, line, distribution = null) {
+export function isValidCandidateLine(marketFamily, line, distribution = null, { manualExact = false } = {}) {
   const numericLine = Number(line);
   if (!Number.isFinite(numericLine) || Math.abs((numericLine % 1) - 0.5) > 1e-9) return false;
-  if (FIXED_LINE_CATALOGS[marketFamily]) return FIXED_LINE_CATALOGS[marketFamily].includes(numericLine);
-  if (!["total_shots", "shots_on_goal"].includes(marketFamily) || !distribution) return false;
-  const limit = Math.max(4, distribution.dispersion * 2.5);
-  return Math.abs(numericLine - distribution.projected_mean) <= limit;
+  if (!manualExact && FIXED_LINE_CATALOGS[marketFamily]) return FIXED_LINE_CATALOGS[marketFamily].includes(numericLine);
+  // The catalogue determines which lines Atlas presents proactively. A manual
+  // half-line is evaluated by the same empirical model, never by a neighbour.
+  if (!METHODOLOGIES[marketFamily] || !distribution) return false;
+  if (manualExact) return numericLine >= 0.5;
+  if (!["total_shots", "shots_on_goal"].includes(marketFamily)) return false;
+  const allowedDistance = Math.max(4, Number(distribution.dispersion || 0) * 2.5);
+  return Math.abs(numericLine - Number(distribution.projected_mean)) <= allowedDistance;
 }
 
 export function generateCandidateLines(input = {}) {
@@ -121,7 +183,7 @@ export function generateCandidateLines(input = {}) {
   if (!distribution) return { market_family: input.marketFamily, distribution: null, candidates: [], reason: "insufficient_distribution_data" };
   const requestedLine = Number(input.exactLine);
   let lines = plausibleLines(distribution, input.marketFamily);
-  if (Number.isFinite(requestedLine) && isValidCandidateLine(input.marketFamily, requestedLine, distribution)) lines = [...new Set([...lines, requestedLine])].sort((left, right) => left - right);
+  if (Number.isFinite(requestedLine) && isValidCandidateLine(input.marketFamily, requestedLine, distribution, { manualExact: true })) lines = [...new Set([...lines, requestedLine])].sort((left, right) => left - right);
   const candidates = [];
   for (const line of lines) {
     for (const direction of ["over", "under"]) {
@@ -135,31 +197,114 @@ export function generateCandidateLines(input = {}) {
         refereeProfile: input.refereeProfile,
         contextItems: input.contextItems || [],
         contextShift: distribution.context_shift_events,
+        canonicalObservations: distribution.canonical_observations,
         allowLimitedReferee: true,
       });
       if (probability.probability_status !== "preliminary") continue;
-      const point = probability.point_estimate;
-      const contextualOnly = point >= 0.88 || point <= 0.12 || Math.abs(line - distribution.projected_mean) > distribution.dispersion * 2.25;
-      candidates.push({
-        contract: "MarketLineCandidate", version: 1, candidate_id: `${input.marketFamily}:${direction}:${line}`,
-        market_family: input.marketFamily, direction, selection: direction === "over" ? `Over ${line}` : `Under ${line}`, line,
-        projected_mean: distribution.projected_mean, median: distribution.median, dispersion: distribution.dispersion,
-        observed_hit_rate: probability.inputs_used?.find((item) => item.source === "league")?.observed_rate ?? null,
-        preliminary_probability: point, probability_status: probability.probability_status,
-        estimated_probability: point,
-        probability_percent: toProbabilityPercent(point),
-        probability_classification: classifyProbability(point),
-        estimated_probability_represents: ESTIMATED_PROBABILITY_REPRESENTS,
-        estimated_probability_is_calibrated: isCalibratedModel(probability.model_validation_status),
-        model_validation_status: probability.model_validation_status,
-        uncertainty_low: probability.uncertainty_low, uncertainty_high: probability.uncertainty_high,
-        sample_size_effective: probability.sample_size_effective, input_sources: probability.inputs_used || distribution.input_sources,
-        limitations: [...new Set([...(distribution.limitations || []), ...(probability.limitations || [])])],
-        methodology_version: distribution.methodology_version, context_adjustment: distribution.context_adjustment,
-        contextual_only: contextualOnly, price_status: "unavailable",
-      });
+      candidates.push(buildMarketLineCandidate({ input, distribution, line, direction, probability }));
     }
   }
   return { market_family: input.marketFamily, distribution, candidates, reason: candidates.length ? null : "insufficient_compatible_samples" };
 }
 
+export function evaluateExactMarketLine({ marketFamily, direction, line, ...context } = {}) {
+  const normalizedDirection = String(direction || "").trim().toLowerCase();
+  const distribution = buildMarketDistribution({ ...context, marketFamily });
+  if (!distribution || !isValidCandidateLine(marketFamily, line, distribution, { manualExact: true })) {
+    const result = { reason: distribution ? "unsupported_exact_line" : "insufficient_distribution_data" };
+    return {
+      contract: "ExactMarketLineEvaluation", version: 1, status: "unavailable", exact_selection_ready: false,
+      candidate: null, reason: exactLineUnavailableReason({ marketFamily, result, ...context }),
+    };
+  }
+  if (!['over', 'under'].includes(normalizedDirection)) {
+    return { contract: "ExactMarketLineEvaluation", version: 1, status: "unavailable", exact_selection_ready: false, candidate: null, reason: "invalid_direction" };
+  }
+  // Exact manual lines deliberately bypass the presentation catalogue. The
+  // estimator compares this requested threshold against raw match totals.
+  const probability = estimatePreliminaryMarketProbability({
+    marketFamily,
+    selection: `${normalizedDirection} ${line}`,
+    line,
+    leagueProfile: context.leagueProfile,
+    homeTeamProfile: context.homeTeamProfile,
+    awayTeamProfile: context.awayTeamProfile,
+    refereeProfile: context.refereeProfile,
+    contextItems: context.contextItems || [],
+    contextShift: distribution.context_shift_events,
+    canonicalObservations: distribution.canonical_observations,
+    allowLimitedReferee: true,
+  });
+  const candidate = probability.probability_status === "preliminary"
+    ? buildMarketLineCandidate({ input: { ...context, marketFamily }, distribution, line: Number(line), direction: normalizedDirection, probability })
+    : null;
+  if (candidate) {
+    const canonical = probability.canonical_threshold_distribution;
+    const difference = Math.abs((canonical?.over_probability ?? 0) - (canonical?.under_probability ?? 0));
+    candidate.side_comparison = {
+      contract: "ThresholdSideComparison",
+      version: 1,
+      market_family: marketFamily,
+      line: Number(line),
+      canonical: true,
+      over_probability: canonical?.over_probability ?? null,
+      under_probability: canonical?.under_probability ?? null,
+      complementary_sum: canonical ? Number((canonical.over_probability + canonical.under_probability).toFixed(4)) : null,
+      preferred_direction: difference < 0.02 ? null : canonical.over_probability > canonical.under_probability ? "over" : "under",
+      sports_preferred_side: difference < 0.02 ? "neutral" : canonical.over_probability > canonical.under_probability ? "over" : "under",
+      message: difference < 0.02 ? "Sin ventaja deportiva clara entre ambos lados." : `Lado deportivo preferido: ${canonical.over_probability > canonical.under_probability ? "Over" : "Under"} ${line}.`,
+      enforce_preference: true,
+    };
+  }
+  const lacksUnderlyingSamples = (probability.limitations || []).some((item) =>
+    String(item).includes("Faltan observaciones subyacentes")
+  );
+  const result = { reason: candidate ? null : lacksUnderlyingSamples ? "insufficient_distribution_data" : "insufficient_underlying_market_data" };
+  return {
+    contract: "ExactMarketLineEvaluation",
+    version: 1,
+    status: candidate ? "ready_for_pricing" : "unavailable",
+    exact_selection_ready: Boolean(candidate),
+    candidate,
+    reason: candidate ? null : exactLineUnavailableReason({ marketFamily, result, ...context }),
+  };
+}
+
+function buildMarketLineCandidate({ input, distribution, line, direction, probability }) {
+  const point = probability.point_estimate;
+  const contextualOnly = point >= 0.88 || point <= 0.12 || Math.abs(line - distribution.projected_mean) > distribution.dispersion * 2.25;
+  const marketModelAudit = buildCountMarketAudit({ input, distribution, probability, line, direction });
+  return {
+    contract: "MarketLineCandidate", version: 1, candidate_id: `${input.marketFamily}:${direction}:${line}`,
+    market_family: input.marketFamily, direction, selection: direction === "over" ? `Over ${line}` : `Under ${line}`, line,
+    projected_mean: distribution.projected_mean, median: distribution.median, dispersion: distribution.dispersion,
+    observed_hit_rate: probability.inputs_used?.find((item) => item.source === "league")?.observed_rate ?? null,
+    preliminary_probability: point, probability_status: probability.probability_status,
+    estimated_probability: point,
+    probability_percent: toProbabilityPercent(point),
+    probability_classification: classifyProbability(point),
+    estimated_probability_represents: ESTIMATED_PROBABILITY_REPRESENTS,
+    estimated_probability_is_calibrated: isCalibratedModel(probability.model_validation_status),
+    model_validation_status: probability.model_validation_status,
+    uncertainty_low: probability.uncertainty_low, uncertainty_high: probability.uncertainty_high,
+    sample_size_effective: probability.sample_size_effective, input_sources: probability.inputs_used || distribution.input_sources,
+    limitations: [...new Set([...(distribution.limitations || []), ...(probability.limitations || [])])],
+    methodology_version: distribution.methodology_version, context_adjustment: distribution.context_adjustment,
+    market_model_audit: marketModelAudit,
+    model_coherence_warning: marketModelAudit.model_coherence_warning,
+    contextual_only: contextualOnly, price_status: "unavailable",
+  };
+}
+
+function profileHasMarketSample(profile, marketFamily) {
+  return ["last_5", "last_10", "as_home", "as_away", "general"]
+    .some((scope) => numeric(profile?.[scope]?.event_samples?.[marketFamily]?.match_totals || []).length > 0);
+}
+
+export function exactLineUnavailableReason({ marketFamily, result, leagueProfile, homeTeamProfile, awayTeamProfile } = {}) {
+  if (result?.reason !== "insufficient_distribution_data") return result?.reason || "insufficient_compatible_samples";
+  if (!profileHasMarketSample(homeTeamProfile, marketFamily)) return `missing_home_${marketFamily}_sample`;
+  if (!profileHasMarketSample(awayTeamProfile, marketFamily)) return `missing_away_${marketFamily}_sample`;
+  if (!numeric(leagueProfile?.event_samples?.[marketFamily]?.match_totals || []).length) return `missing_league_${marketFamily}_sample`;
+  return "distribution_unavailable";
+}

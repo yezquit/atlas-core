@@ -86,6 +86,10 @@ function summarize(content, maximumLength = 180) {
 function affectedMarkets(content) {
   const candidate = normalize(content);
   const markets = new Set();
+  if (/corners?|tiros? de esquina/.test(candidate)) markets.add("corners");
+  if (/goles?|marcador|xg\b/.test(candidate)) markets.add("goals");
+  if (/tiros? al arco|remates? a puerta|shots? on (?:goal|target)/.test(candidate)) markets.add("shots_on_goal");
+  if (/remates? totales|tiros? totales|total shots?/.test(candidate)) markets.add("total_shots");
   if (/delanter|goleador|atacante|alineaci|lesion|sancion|rotacion|fatiga|campo|cesped|lluvia|viento|clima/.test(candidate)) {
     markets.add("goals");
   }

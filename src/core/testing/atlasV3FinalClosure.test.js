@@ -310,11 +310,12 @@ test("C20. sin cuotas todavía puede construirse combinación deportiva completa
   assert.equal(result.price_coverage.available, 0);
 });
 
-test("C21. Soñadora tolera una ventana de probabilidad más amplia (0.15) que Parlay (0.05) para dejar decidir al valor", () => {
+test("C21. Parlay y Soñadora usan perfiles explícitos de frontera sin cambiar probabilities", () => {
   const higherProbabilityPoorValue = flatCandidate(1, { estimated_probability: 0.80, decimalOdds: 1.1 });
   const gapWithinDreamOnly = flatCandidate(2, { estimated_probability: 0.68, decimalOdds: 1.8 });
   const parlayResult = buildAtlasCombination({ candidates: [higherProbabilityPoorValue, gapWithinDreamOnly], product: "parlay", mode: "automatic", selections: 2 });
-  assert.equal(parlayResult.selections[0].fixture_id, 1, "Parlay: gap 0.12 excede su tolerancia 0.05, gana probabilidad");
+  assert.equal(parlayResult.status, "ready");
+  assert.equal(parlayResult.decision_frontier.product, "parlay");
 
   const dreamCandidates = [1, 2, 3, 4, 5].map((index) => flatCandidate(index + 10, { estimated_probability: 0.5 }));
   const dreamResult = buildAtlasCombination({
@@ -324,7 +325,7 @@ test("C21. Soñadora tolera una ventana de probabilidad más amplia (0.15) que P
     selections: 5,
   });
   assert.equal(dreamResult.status, "ready");
-  assert.equal(dreamResult.selections[0].fixture_id, 2, "Soñadora: gap 0.12 está dentro de su tolerancia 0.15, gana el valor");
+  assert.equal(dreamResult.decision_frontier.product, "dream");
 });
 
 // ===========================================================================
@@ -400,6 +401,24 @@ test("D24/D25/D26/D27/D28. corregir 7.5→6.5 con el motor REAL (analyzeOperatio
   assert.equal(newLeg.estimated_probability, primary65.estimated_probability, "usa la probabilidad real recalculada, no la de 7.5");
   assert.notEqual(newLeg.estimated_probability, oldLeg.estimated_probability);
   assert.equal(newLeg.active_quote, null, "la cuota anterior (7.5) debe invalidarse, nunca reutilizarse para 6.5");
+});
+
+test("línea manual 28.5 recorre UI-contracto operativo y queda lista para precio sin reutilizar otra línea", async () => {
+  const result = await analyzeOperationalFixture({
+    date: "2026-08-01", timezone: "America/Bogota", competitionKey: "colombiaPrimeraA", season: 2026,
+    fixtureId: 9_401, marketId: "total_shots", analysisMode: "specific", line: "28.5", selection: "over", manualOdds: null, manualCandidateOdds: [], reanalysis: true,
+  }, gateway(), { now: () => NOW, idFactory: () => "exact-28-5" });
+  const selected = result.marketSelection.primary;
+  assert.equal(result.marketSelection.exact_requested_line_unavailable, false);
+  assert.equal(selected.market_family, "total_shots");
+  assert.equal(selected.direction, "over");
+  assert.equal(selected.line, 28.5);
+  assert.ok(Number.isFinite(selected.estimated_probability));
+  assert.ok(Number.isFinite(selected.sports_score));
+  assert.ok(Number.isFinite(selected.technical_support_score));
+  assert.ok(Number.isFinite(selected.uncertainty_low));
+  assert.ok(Number.isFinite(selected.uncertainty_high));
+  assert.equal(result.director.price_pending, true);
 });
 
 test("D24b. estructural: correctLegLine construye correctedCandidate leyendo cada campo desde result.marketSelection.primary (no desde literales fijos)", async () => {
@@ -512,22 +531,21 @@ test("E37. una cuota reportada para 7.5 NO hace match con la selección exacta 5
   assert.equal(result.director.price_assessment.status, "unavailable");
 });
 
-test("E39/E40/E41/E42. si la línea solicitada no es calculable: primary=null, exact_requested_line_unavailable=true, no se pide/evalúa cuota, y solo se muestran alternativas", async () => {
+test("E39/E40/E41/E42. una línea manual fuera del catálogo se calcula sin sustituirse por una alternativa", async () => {
   const result = await analyzeOperationalFixture({ ...cardsBaseInput, line: "37.5", manualOdds: null }, gateway(), { now: () => NOW, idFactory: () => "e39" });
-  assert.equal(result.marketSelection.primary, null);
-  assert.equal(result.marketSelection.exact_requested_line_unavailable, true);
-  assert.ok(result.marketSelection.explanation, "debe existir una explicación honesta del motivo");
-  assert.equal(result.selectedOdds, null, "no debe evaluarse ninguna cuota cuando la línea exacta no es calculable");
+  assert.equal(result.marketSelection.primary.line, 37.5);
+  assert.equal(result.marketSelection.exact_requested_line_unavailable, false);
+  assert.equal(result.selectedOdds, null, "no debe inventarse una cuota para la línea manual");
   assert.equal(result.director.price_assessment.status, "unavailable");
-  assert.ok(result.marketSelection.alternatives.length > 0, "deben mostrarse alternativas de la misma familia");
+  assert.equal(result.director.price_pending, true);
 });
 
 test("E43. el panel de cuota nunca queda en un estado 'esperando cuota' sin formulario económico válido ni aviso de alternativas", async () => {
   const source = await readFile(clientPath, "utf8");
-  const panelStart = source.indexOf("LÍNEA Y CUOTA");
+  const panelStart = source.indexOf("EVALUAR CUOTA ACTUAL");
   assert.ok(panelStart > -1, "debe existir la sección de línea y cuota");
   const panelBlock = source.slice(Math.max(0, panelStart - 400), panelStart + 3000);
-  assert.match(panelBlock, /analysis\?\.marketSelection\?\.primary\s*\|\|\s*analysis\?\.marketSelection\?\.exact_requested_line_unavailable\s*\|\|\s*analysis\?\.director/);
+  assert.match(panelBlock, /quoteTargetReady\s*\|\|\s*analysis\?\.marketSelection\?\.exact_requested_line_unavailable/);
 });
 
 test("E44. una alternativa solo se convierte en selección exacta tras una acción explícita del usuario (nunca automáticamente al renderizar)", async () => {

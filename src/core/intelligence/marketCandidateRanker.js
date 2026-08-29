@@ -6,6 +6,7 @@ import {
   isValidProbability,
   toProbabilityPercent,
 } from "./probabilityClassification.js";
+import { buildDecisionFrontier } from "./decisionFrontier.js";
 
 export const MARKET_CANDIDATE_RANKER_VERSION = "market-candidate-ranker-v1";
 export const PRICE_STATUS = Object.freeze({ VERIFIED_CURRENT: "verified_current", USER_REPORTED_CURRENT: "user_reported_current", STALE: "stale", UNAVAILABLE: "unavailable", INCOMPATIBLE_LINE: "incompatible_line", INCOMPATIBLE_SELECTION: "incompatible_selection" });
@@ -88,6 +89,8 @@ export function calculateLineStabilityScore(candidate = {}) {
 function overallStatus(candidate, priceStatus, blocked) {
   if (blocked) return OVERALL_STATUS.BLOCKED;
   if (!candidate || candidate.probability_status !== "preliminary") return OVERALL_STATUS.INSUFFICIENT;
+  const sideComparison = candidate.side_comparison;
+  if (sideComparison?.enforce_preference && sideComparison.preferred_direction && sideComparison.preferred_direction !== candidate.direction) return OVERALL_STATUS.NOT_VIABLE;
   if (candidate.sports_score < 45) return OVERALL_STATUS.NOT_VIABLE;
   if ([PRICE_STATUS.UNAVAILABLE, PRICE_STATUS.STALE, PRICE_STATUS.INCOMPATIBLE_LINE, PRICE_STATUS.INCOMPATIBLE_SELECTION].includes(priceStatus)) return candidate.sports_score >= 58 ? OVERALL_STATUS.SPORTS_PENDING_PRICE : OVERALL_STATUS.REVIEW_ONLY;
   if (priceStatus === PRICE_STATUS.USER_REPORTED_CURRENT || candidate.sports_score < 70) return OVERALL_STATUS.CAUTION;
@@ -253,11 +256,17 @@ export function buildRankedMarketSelection(input = {}) {
     homeTeamProfile: input.homeTeamProfile,
     awayTeamProfile: input.awayTeamProfile,
   });
-  const primary = ranked[0] || null;
+  // `ranked_candidates` remains the complete, probability-ordered catalogue.
+  // The frontier is a separate recommendation layer and never rewrites it.
+  const decisionFrontier = buildDecisionFrontier(ranked, { product: input.recommendationProduct || "individual" });
+  const catalog = decisionFrontier.candidates;
+  const primary = decisionFrontier.primary || catalog[0] || null;
   return {
     contract: "RankedMarketSelection", version: 1, analysis_mode: analysisMode,
     requested_market_family: analysisMode === "specific" ? input.requestedMarketId : null,
-    generated, ranked_candidates: ranked, primary, alternatives: selectAlternatives(ranked, primary), line_profiles: lineProfiles(ranked),
-    explanation: primary ? `${primary.selection}: posición general Scout #${primary.overall_rank} y posición dentro de ${primary.market_family} #${primary.family_rank}; la cuota no intervino en el ranking deportivo.` : "No se generaron candidatos compatibles con la muestra disponible.",
+    generated, ranked_candidates: catalog, catalog_candidates: catalog, decision_frontier: decisionFrontier,
+    recommendation_candidate_id: primary?.candidate_id || null,
+    primary, alternatives: selectAlternatives(catalog, primary), line_profiles: { ...lineProfiles(catalog), best_balance: primary },
+    explanation: primary ? `${primary.selection}: recomendación por frontera de decisión con respaldo deportivo comparable. El catálogo conserva todas las líneas válidas y la cuota no modifica probabilidad, soporte ni datos deportivos.` : "No se generaron candidatos compatibles con la muestra disponible.",
   };
 }

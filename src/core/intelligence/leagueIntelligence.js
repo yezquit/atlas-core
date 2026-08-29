@@ -189,18 +189,19 @@ export function buildLeagueIntelligence({
   const eventSamples = {
     goals: {
       match_totals: scores.map(({ home, away }) => home + away),
+      observations: included.map((fixture) => ({ fixture_id: fixture.fixtureId, value: fixture.score.goals.home + fixture.score.goals.away })).filter((item) => Number.isFinite(item.value)),
     },
     total_shots: {
-      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "total_shots")).filter(Number.isFinite),
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "total_shots")).filter(Number.isFinite), observations: included.map((fixture) => ({ fixture_id: fixture.fixtureId, value: fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "total_shots") })).filter((item) => Number.isFinite(item.value)),
     },
     shots_on_goal: {
-      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "shots_on_goal")).filter(Number.isFinite),
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "shots_on_goal")).filter(Number.isFinite), observations: included.map((fixture) => ({ fixture_id: fixture.fixtureId, value: fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "shots_on_goal") })).filter((item) => Number.isFinite(item.value)),
     },
     cards: {
-      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "yellow_cards")).filter(Number.isFinite),
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "yellow_cards")).filter(Number.isFinite), observations: included.map((fixture) => ({ fixture_id: fixture.fixtureId, value: fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "yellow_cards") })).filter((item) => Number.isFinite(item.value)),
     },
     corners: {
-      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "corner_kicks")).filter(Number.isFinite),
+      match_totals: included.map((fixture) => fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "corner_kicks")).filter(Number.isFinite), observations: included.map((fixture) => ({ fixture_id: fixture.fixtureId, value: fixtureStatTotal(statisticsForFixture(statisticsByFixture, fixture.fixtureId), "corner_kicks") })).filter((item) => Number.isFinite(item.value)),
     },
   };
 

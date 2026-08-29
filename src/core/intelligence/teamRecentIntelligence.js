@@ -34,6 +34,7 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     cards: [],
     corners: [],
   };
+  const matchObservations = Object.fromEntries(Object.keys(matchTotals).map((key) => [key, []]));
   const form = [];
 
   for (const fixture of fixtures) {
@@ -44,6 +45,7 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     goalsFor.push(own);
     goalsAgainst.push(opponent);
     matchTotals.goals.push(own + opponent);
+    matchObservations.goals.push({ fixture_id: fixture.fixtureId, value: own + opponent });
     if (own > opponent) {
       wins += 1;
       form.push("W");
@@ -80,10 +82,7 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     const shotsOnGoal = totalFor("shots_on_goal");
     const cards = totalFor("yellow_cards");
     const corners = totalFor("corner_kicks");
-    if (Number.isFinite(shots)) matchTotals.total_shots.push(shots);
-    if (Number.isFinite(shotsOnGoal)) matchTotals.shots_on_goal.push(shotsOnGoal);
-    if (Number.isFinite(cards)) matchTotals.cards.push(cards);
-    if (Number.isFinite(corners)) matchTotals.corners.push(corners);
+    for (const [family, value] of [["total_shots", shots], ["shots_on_goal", shotsOnGoal], ["cards", cards], ["corners", corners]]) if (Number.isFinite(value)) { matchTotals[family].push(value); matchObservations[family].push({ fixture_id: fixture.fixtureId, value }); }
   }
 
   const sampleSize = goalsFor.length;
@@ -130,11 +129,11 @@ function summarize(teamId, fixtures, statisticsByFixture) {
     average_rest_days: round(average(restIntervals), 1),
     streak: form.join(""),
     event_samples: {
-      goals: { match_totals: matchTotals.goals, for: goalsFor, conceded: goalsAgainst },
-      total_shots: { match_totals: matchTotals.total_shots, for: detailed.total_shots, conceded: detailedAgainst.total_shots },
-      shots_on_goal: { match_totals: matchTotals.shots_on_goal, for: detailed.shots_on_goal, conceded: detailedAgainst.shots_on_goal },
-      cards: { match_totals: matchTotals.cards, for: detailed.yellow_cards, conceded: detailedAgainst.yellow_cards },
-      corners: { match_totals: matchTotals.corners, for: detailed.corner_kicks, conceded: detailedAgainst.corner_kicks },
+      goals: { match_totals: matchTotals.goals, observations: matchObservations.goals, for: goalsFor, conceded: goalsAgainst },
+      total_shots: { match_totals: matchTotals.total_shots, observations: matchObservations.total_shots, for: detailed.total_shots, conceded: detailedAgainst.total_shots },
+      shots_on_goal: { match_totals: matchTotals.shots_on_goal, observations: matchObservations.shots_on_goal, for: detailed.shots_on_goal, conceded: detailedAgainst.shots_on_goal },
+      cards: { match_totals: matchTotals.cards, observations: matchObservations.cards, for: detailed.yellow_cards, conceded: detailedAgainst.yellow_cards },
+      corners: { match_totals: matchTotals.corners, observations: matchObservations.corners, for: detailed.corner_kicks, conceded: detailedAgainst.corner_kicks },
     },
   };
 }

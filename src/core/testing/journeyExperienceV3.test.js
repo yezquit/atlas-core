@@ -329,10 +329,10 @@ test("19. scanSportsJourney filtra ranking_eligible antes de rankear y truncar l
     source.indexOf("const highlightedSports ="),
     source.indexOf(";", source.indexOf("const highlightedSports ="))
   );
-  assert.ok(highlightedLine.includes("rankJourneyCandidatesByProbability("));
+  assert.ok(highlightedLine.includes("rankJourneyCandidatesByDecision("));
   assert.ok(highlightedLine.includes("analysisCandidates.filter((entry) => entry.candidate?.ranking_eligible === true)"));
   assert.ok(highlightedLine.includes(").slice(0, maximumCandidates)"));
-  // El filtro de elegibilidad debe ocurrir DENTRO de la llamada a rankJourneyCandidatesByProbability
+  // El filtro de elegibilidad debe ocurrir DENTRO de la llamada a la frontera de decisión
   // (es decir, antes del ranking y del slice), no después.
   assert.ok(
     highlightedLine.indexOf("analysisCandidates.filter(") <

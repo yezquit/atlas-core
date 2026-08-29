@@ -24,14 +24,20 @@ function candidateSignals(candidate, assessment) {
 
 export function buildScoutAtlas({ marketSelection, marketAssessments = [], lineOrigin = "atlas_selected", maximum = 5 } = {}) {
   const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
-  const deduplicated = [...new Map((marketSelection?.ranked_candidates || [])
+  const catalogue = [...new Map((marketSelection?.ranked_candidates || [])
     .filter((candidate) => candidate.probability_status === "preliminary" && candidate.sports_score >= 45)
-    .map((candidate) => [candidate.candidate_id, candidate])).values()]
-    .slice(0, Math.max(3, Math.min(5, maximum)));
+    .map((candidate) => [candidate.candidate_id, candidate])).values()];
+  const recommendationId = marketSelection?.recommendation_candidate_id || marketSelection?.primary?.candidate_id || null;
+  const recommended = catalogue.find((candidate) => candidate.candidate_id === recommendationId) || null;
+  const visible = catalogue.slice(0, Math.max(3, Math.min(5, maximum)));
+  const deduplicated = recommended && !visible.some((candidate) => candidate.candidate_id === recommended.candidate_id)
+    ? [recommended, ...visible.slice(0, -1)]
+    : visible;
   const mostProbable = [...deduplicated].sort((left, right) => right.preliminary_probability - left.preliminary_probability || left.rank - right.rank)[0];
   const candidates = deduplicated.map((candidate, index) => {
     const labels = [];
-    if (index === 0) labels.push("best_sports_support");
+    if (candidate.candidate_id === recommendationId) labels.push("atlas_recommendation");
+    else if (index === 0) labels.push("best_sports_support");
     if (candidate.candidate_id === mostProbable?.candidate_id) labels.push("highest_probability");
     if (!labels.length) labels.push("relevant_alternative");
     const assessment = assessmentByFamily.get(candidate.market_family);
@@ -53,9 +59,11 @@ export function buildScoutAtlas({ marketSelection, marketAssessments = [], lineO
     version: 1,
     price_inputs_used: false,
     candidates,
-    primary_candidate_id: candidates[0]?.candidate_id || null,
+    primary_candidate_id: recommendationId || candidates[0]?.candidate_id || null,
+    catalog: catalogue,
+    catalog_count: catalogue.length,
     explanation: candidates.length
-      ? "Ranking deportivo construido sin cuota, bookmaker, probabilidad implícita ni evaluación de precio."
+      ? "El catálogo conserva todas las líneas deportivas válidas. Atlas destaca una mediante la frontera de decisión, sin que la cuota modifique la probabilidad, el respaldo ni los datos deportivos."
       : "No se encontraron candidatos con respaldo deportivo suficiente.",
   };
 }

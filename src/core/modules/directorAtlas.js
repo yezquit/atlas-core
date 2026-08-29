@@ -563,7 +563,12 @@ export function buildOperationalDirectorVerdict({
     model_notice: "El modelo es preliminar y aún no está suficientemente calibrado para afirmar valor esperado.",
   };
   const priceStatus = priceEvaluation.status;
-  const pricePending = ["unavailable", "stale"].includes(priceStatus);
+  // A price can only be requested for a real, exact candidate. Without one,
+  // the selection is insufficient rather than "pending price".
+  const exactSelectionReadyForPricing = Boolean(
+    marketCandidate && marketSelection?.exact_requested_line_unavailable !== true
+  );
+  const pricePending = exactSelectionReadyForPricing && ["unavailable", "stale"].includes(priceStatus);
   let suitabilityStatus = requestedSuitability;
   if (requestedSuitability !== MARKET_SUITABILITY.BLOCKED) {
     if (!marketCandidate || !probabilityAvailable) suitabilityStatus = MARKET_SUITABILITY.INSUFFICIENT_DATA;
@@ -740,7 +745,7 @@ export function buildOperationalDirectorVerdict({
     "Clima, estado del campo o una nueva cuota",
   ])].slice(0, 3);
   const simpleReasons = [...new Set(marketCandidate?.simple_sports_reasons || [])].slice(0, 3);
-  const operationalPricePending = Boolean(pricePending && marketCandidate && suitabilityStatus === MARKET_SUITABILITY.REVIEW_ONLY);
+  const operationalPricePending = Boolean(pricePending && marketCandidate);
   return {
     contract: "DirectorVerdict",
     version: 3,
@@ -799,6 +804,7 @@ export function buildOperationalDirectorVerdict({
       alternatives: marketSelection.alternatives,
       line_profiles: marketSelection.line_profiles,
     } : null,
+    side_comparison: marketCandidate?.side_comparison || null,
     temporal_status: temporalStatus,
     temporal_message: "Este es el dictamen con la información disponible ahora. Puede cambiar por alineaciones, bajas, árbitro, clima o cuotas.",
     context_reanalysis_message: contextReanalysisMessage,
