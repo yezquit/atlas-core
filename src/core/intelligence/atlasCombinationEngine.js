@@ -270,6 +270,39 @@ function compareSportsCandidates(left, right) {
   return String(left.selection_key).localeCompare(String(right.selection_key));
 }
 
+// Capa económica del optimizador: SOLO decide qué candidato, entre opciones
+// ya deportivamente elegibles, entra primero cuando ambos tienen cuota
+// exacta utilizable. Nunca crea, lee ni modifica estimated_probability ni
+// sports_score fuera de esta comparación de selección. El criterio depende
+// del producto: Parlay solo deja que el valor decida cuando las
+// probabilidades son muy cercanas (equilibrio, no sacrifica probabilidad
+// por cuota); Soñadora tolera una ventana más amplia (perfil más agresivo),
+// sin tocar elegibilidad. Sin cuota utilizable en alguno de los dos, o fuera
+// de la ventana de tolerancia, se conserva el orden deportivo puro.
+const PARLAY_VALUE_PROBABILITY_TOLERANCE = 0.05;
+const DREAM_VALUE_PROBABILITY_TOLERANCE = 0.15;
+
+function valueFactor(candidate) {
+  if (!candidate.price_usable) return null;
+  const odds = Number(candidate.decimal_odds);
+  const probability = Number(candidate.estimated_probability);
+  if (!Number.isFinite(odds) || !Number.isFinite(probability)) return null;
+  return probability * odds;
+}
+
+function compareForCombinationSelection(left, right, product) {
+  const leftValue = valueFactor(left);
+  const rightValue = valueFactor(right);
+  const leftProbability = Number.isFinite(left.estimated_probability) ? left.estimated_probability : -1;
+  const rightProbability = Number.isFinite(right.estimated_probability) ? right.estimated_probability : -1;
+  const probabilityGap = Math.abs(leftProbability - rightProbability);
+  const tolerance = product === COMBINATION_PRODUCT.DREAM ? DREAM_VALUE_PROBABILITY_TOLERANCE : PARLAY_VALUE_PROBABILITY_TOLERANCE;
+  if (leftValue !== null && rightValue !== null && leftValue !== rightValue && probabilityGap <= tolerance) {
+    return rightValue - leftValue;
+  }
+  return compareSportsCandidates(left, right);
+}
+
 function uniqueInspections(candidates) {
   const deduplicated = new Map();
   for (const candidate of candidates || []) {
@@ -385,7 +418,7 @@ export function updateCombinationSelection(combination, candidate) {
   return editedCombinationResult(combination, updated, { editing: combination.editing === true });
 }
 
-function addDiversifiedCandidates(chosen, eligible, target) {
+function addDiversifiedCandidates(chosen, eligible, target, product) {
   while (chosen.length < target) {
     const validCandidates = eligible.filter((candidate) => (
       !chosen.some((item) => item.selection_key === candidate.selection_key)
@@ -393,13 +426,21 @@ function addDiversifiedCandidates(chosen, eligible, target) {
     ));
     if (!validCandidates.length) break;
 
-    const bestCandidate = validCandidates[0];
+    // Cualquier elección entre varios candidatos válidos (el mejor global o
+    // la alternativa de familia no usada) pasa por el mismo comparator
+    // económico product-aware; nunca se mezcla un bestCandidate optimizado
+    // con un fallback elegido por orden de inserción antiguo.
+    const rankedValidCandidates = [...validCandidates].sort((left, right) => compareForCombinationSelection(left, right, product));
+    const bestCandidate = rankedValidCandidates[0];
     const usedFamilies = new Set(chosen.map((candidate) => candidate.market_family));
-    const comparableUnusedFamily = usedFamilies.has(bestCandidate.market_family)
-      ? validCandidates.find((candidate) => (
+    const comparableUnusedFamilyCandidates = usedFamilies.has(bestCandidate.market_family)
+      ? rankedValidCandidates.filter((candidate) => (
         !usedFamilies.has(candidate.market_family)
         && bestCandidate.sports_score - candidate.sports_score <= COMPARABLE_MARKET_FAMILY_GAP
       ))
+      : [];
+    const comparableUnusedFamily = comparableUnusedFamilyCandidates.length
+      ? [...comparableUnusedFamilyCandidates].sort((left, right) => compareForCombinationSelection(left, right, product))[0]
       : null;
 
     chosen.push(comparableUnusedFamily || bestCandidate);
@@ -463,7 +504,7 @@ export function buildAtlasCombination({ candidates = [], product, mode, selectio
 
   const chosen = mode === COMBINATION_MODE.AUTOMATIC ? [] : [...fixed];
   if (mode !== COMBINATION_MODE.MANUAL) {
-    addDiversifiedCandidates(chosen, eligible, validation.count);
+    addDiversifiedCandidates(chosen, eligible, validation.count, product);
   }
 
   if (chosen.length !== validation.count) {

@@ -163,10 +163,10 @@ test("la cuota manual toma familia/dirección/línea de marketSelection.primary 
     "const manualMarketFamily = currentAnalysis?.marketSelection?.primary?.market_family || transferredCandidate?.market_family || (analysisMode === \"specific\" ? marketId : currentAnalysis?.director?.market_evaluated?.family);"
   ));
   assert.ok(source.includes(
-    "const requestedLine = line.trim() || currentAnalysis?.marketSelection?.primary?.line || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);"
+    "const requestedLine = effectiveLine.trim() || currentAnalysis?.marketSelection?.primary?.line || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);"
   ));
   assert.ok(source.includes(
-    "const reportedDirection = selection.trim() || currentAnalysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || currentAnalysis?.director?.sports_verdict?.direction || \"\";"
+    "const reportedDirection = effectiveSelection.trim() || currentAnalysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || currentAnalysis?.director?.sports_verdict?.direction || \"\";"
   ));
 });
 

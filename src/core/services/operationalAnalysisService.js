@@ -396,9 +396,15 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   }
   if (oddsResult.quotes.length) oddsResult.status = "available";
   const hasCandidateOdds = candidateManualQuotes.length > 0 && !manualQuote;
+  // Una solicitud explícita de mercado específico + línea (analysisMode
+  // "specific") es una restricción dura del usuario y nunca debe cederse
+  // solo porque existan cuotas de candidato de otra familia/flujo (Bloque 3).
+  // hasCandidateOdds solo puede suprimir la línea exacta en modo general.
+  const explicitSpecificLineRequest = analysisMode === "specific" && Boolean(requestedLine) && Boolean(manualMarketFamily);
+  const suppressExactLineForCandidateOdds = hasCandidateOdds && !explicitSpecificLineRequest;
   let marketSelection = buildRankedMarketSelection({
-    analysisMode: requestedLine && manualMarketFamily && !hasCandidateOdds ? "specific" : analysisMode,
-    requestedMarketId: requestedLine && manualMarketFamily && !hasCandidateOdds ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
+    analysisMode: requestedLine && manualMarketFamily && !suppressExactLineForCandidateOdds ? "specific" : analysisMode,
+    requestedMarketId: requestedLine && manualMarketFamily && !suppressExactLineForCandidateOdds ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
     marketAssessments: base.marketAssessments,
     leagueProfile: base.leagueProfile,
     homeTeamProfile: base.homeTeamProfile,
@@ -406,11 +412,11 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     refereeProfile: base.refereeProfile,
     contextItems: selectedGemini,
     contextImpacts: geminiImpacts,
-    exactLine: hasCandidateOdds ? null : requestedLine,
+    exactLine: suppressExactLineForCandidateOdds ? null : requestedLine,
     quotes: oddsResult.quotes,
     preferredQuote,
   });
-  if (!hasCandidateOdds) {
+  if (!suppressExactLineForCandidateOdds) {
     marketSelection = selectExactRequestedCandidate(marketSelection, {
       marketFamily: manualMarketFamily,
       requestedLine,

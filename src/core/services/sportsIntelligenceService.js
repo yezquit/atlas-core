@@ -661,20 +661,16 @@ export async function scanSportsJourney(input, gateway) {
       })),
     });
 
-    const bestByFamily = new Map();
-    for (const candidate of selection.ranked_candidates) {
-      if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
-    }
-    combinationEntries.push(...selection.ranked_candidates.map((candidate) => ({
-      analysis,
-      candidate,
-      comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
-    })));
-    return [...bestByFamily.values()].map((candidate) => ({
+    // Jornada debe mostrar el mismo universo exhaustivo que alimenta las
+    // combinaciones (Parlay/Soñadora): todas las líneas/familias legítimamente
+    // calculadas, no solo la mejor por familia por fixture.
+    const entries = selection.ranked_candidates.map((candidate) => ({
       analysis,
       candidate,
       comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
     }));
+    combinationEntries.push(...entries);
+    return entries;
   });
   const candidateDiagnosticsByCompetition = Object.fromEntries(
     [...analysisCandidates.reduce((map, entry) => {
@@ -768,8 +764,28 @@ export async function scanSportsJourney(input, gateway) {
   };
 }
 
+// Agrupación de presentación (alta/media/baja) derivada de la clasificación
+// YA EXISTENTE (probabilityClassification.js), sin inventar una fórmula de
+// seguridad nueva: MUY ALTA/ALTA -> alta, BUENA/MODERADA -> media,
+// RIESGOSA/MUY RIESGOSA -> baja. Las odds nunca intervienen en este orden.
+const SAFETY_TIER_RANK = Object.freeze({
+  "MUY ALTA": 0,
+  ALTA: 0,
+  BUENA: 1,
+  MODERADA: 1,
+  RIESGOSA: 2,
+  "MUY RIESGOSA": 2,
+});
+function safetyTierRank(candidate) {
+  const tier = SAFETY_TIER_RANK[candidate?.probability_classification];
+  return tier === undefined ? 3 : tier;
+}
+
 export function rankJourneyCandidatesByProbability(entries = []) {
   return [...entries].sort((left, right) => {
+    const tierDifference = safetyTierRank(left.candidate) - safetyTierRank(right.candidate);
+    if (tierDifference) return tierDifference;
+
     const leftProbability = Number.isFinite(left.candidate?.estimated_probability) ? left.candidate.estimated_probability : -1;
     const rightProbability = Number.isFinite(right.candidate?.estimated_probability) ? right.candidate.estimated_probability : -1;
     if (rightProbability !== leftProbability) return rightProbability - leftProbability;

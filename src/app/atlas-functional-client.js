@@ -1487,10 +1487,12 @@ function InitialAnalysisResult({ analysis }) {
     <section className="p2-initial-analysis" data-analysis-stage="initial" aria-labelledby="initial-analysis-title">
       <p className="eyebrow">ANÁLISIS INICIAL</p>
       <h2 id="initial-analysis-title">Completar análisis</h2>
-      <p>Ya revisé los datos deportivos. Ahora puedes introducir la cuota para evaluar el precio; la investigación Gemini es un paso posterior.</p>
+      <p>{analysis?.marketSelection?.exact_requested_line_unavailable
+        ? "Atlas no pudo calcular exactamente la línea solicitada. Corrige la línea o elige explícitamente una alternativa antes de evaluar una cuota."
+        : "Ya revisé los datos deportivos. Ahora puedes introducir la cuota para evaluar el precio; la investigación Gemini es un paso posterior."}</p>
       <div className="p2-initial-selection">
         <strong>{fixture.home_team} vs {fixture.away_team}</strong>
-        <span>{displaySelection(primary?.selection || director?.selection || director?.market_evaluated?.label)}</span>
+        <span>{analysis?.marketSelection?.exact_requested_line_unavailable ? "Línea exacta no disponible" : displaySelection(primary?.selection || director?.market_evaluated?.label)}</span>
       </div>
       <p className="p2-initial-probability">
         <small>Probabilidad estimada Atlas</small>
@@ -1954,7 +1956,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     invalidateAnalysis(`Partido seleccionado. Pulsa “Analizar partido” para continuar.`);
   }
 
-  async function runOperationalAnalysis({ reanalysis = false } = {}) {
+  async function runOperationalAnalysis({ reanalysis = false, lineOverride = null, selectionOverride = null } = {}) {
     analysisRequest.current?.abort();
     const currentAnalysis = analysis;
     setAnalysis(null);
@@ -1963,8 +1965,10 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
       return;
     }
     const requestedFixtureId = Number(selectedFixtureId);
-    const requestedLine = line.trim() || currentAnalysis?.marketSelection?.primary?.line || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);
-    const reportedDirection = selection.trim() || currentAnalysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || currentAnalysis?.director?.sports_verdict?.direction || "";
+    const effectiveLine = lineOverride !== null ? String(lineOverride) : line;
+    const effectiveSelection = selectionOverride !== null ? selectionOverride : selection;
+    const requestedLine = effectiveLine.trim() || currentAnalysis?.marketSelection?.primary?.line || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);
+    const reportedDirection = effectiveSelection.trim() || currentAnalysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || currentAnalysis?.director?.sports_verdict?.direction || "";
     const reportedSelection = reportedDirection && requestedLine
       ? `${reportedDirection === "under" ? "Menos de" : "Más de"} ${requestedLine}`
       : reportedDirection;
@@ -2056,6 +2060,13 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   async function correctLineAndReanalyze() {
     if (!line.trim()) return;
     await runOperationalAnalysis({ reanalysis: true });
+  }
+
+  async function chooseAlternativeAsExact(alternative) {
+    if (!alternative) return;
+    setLine(String(alternative.line));
+    setSelection(alternative.direction || "");
+    await runOperationalAnalysis({ reanalysis: true, lineOverride: String(alternative.line), selectionOverride: alternative.direction || "" });
   }
 
   async function validateGeminiContext() {
@@ -2404,21 +2415,43 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           {!analysis?.director ? <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId || !specificOptionReady}>{analysisState.status === "loading" ? "Analizando el partido…" : "Analizar deportivamente"}</button> : null}
           <StatusNotice value={analysisState} />
           {analysisForDisplay?.director ? <AnalysisResult key={`${analysisForDisplay.selectedFixtureId}-${analysisForDisplay.analysisVersion?.analysis_id || "result"}`} analysis={analysisForDisplay} analysisCompleted={analysisCompleted} candidateQuotes={candidateQuotes} onQuoteChange={updateCandidateQuote} onEvaluatePrices={() => runOperationalAnalysis({ reanalysis: true })} showComparison={showActiveComparison} /> : null}
-          {analysis?.marketSelection?.primary ? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry" aria-labelledby="user-quote-form-title">
-            <p className="eyebrow" id="user-quote-form-title">INTRODUCIR CUOTA</p>
+          {analysis?.marketSelection?.primary || analysis?.marketSelection?.exact_requested_line_unavailable || analysis?.director ? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry" aria-labelledby="user-quote-form-title">
+            <p className="eyebrow" id="user-quote-form-title">LÍNEA Y CUOTA</p>
             <label>
               <span>Línea exacta de tu casa</span>
-              <input inputMode="decimal" value={line} onChange={(event) => setLine(event.target.value)} placeholder={String(analysis?.director?.line ?? "")} />
-              <small>Si tu casa ofrece una línea distinta a la analizada ({analysis?.director?.line ?? "sin línea"}), corrígela aquí primero y reanaliza. Esto no requiere casa, cuota ni hora todavía, y no reutiliza la probabilidad de la línea anterior.</small>
+              <input inputMode="decimal" value={line} onChange={(event) => setLine(event.target.value)} placeholder={String(analysis?.director?.line ?? analysis?.marketSelection?.requested_line ?? "")} />
+              <small>Si tu casa ofrece una línea distinta, corrígela aquí primero y reanaliza. Esto no requiere casa, cuota ni hora todavía, y no reutiliza la probabilidad de la línea anterior.</small>
             </label>
-            <button type="button" className="secondary-button" onClick={correctLineAndReanalyze} disabled={!line.trim() || Number(line) === Number(analysis?.director?.line) || analysisState.status === "loading"}>Corregir línea de la casa y reanalizar</button>
-            <p>{staleAnalysisQuote ? "La cuota anterior venció. Introduce un precio actual para volver a decidir." : analysisCompleted ? "Puedes actualizar la cuota si cambió desde la última consulta." : "Con el análisis deportivo listo, introduce la cuota para evaluar el precio; Gemini es un paso posterior."}</p>
-            <label><span>Casa</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
-            <label><span>Cuota decimal</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.65" /></label>
-            <label><span>Hora de consulta</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
-            {manualQuoteWarning ? <small className="p2-quote-warning">{manualQuoteWarning}</small> : null}
-            {incompletePriceInput ? <small>Completa casa, cuota y hora para evaluar el precio.</small> : null}
-            <button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>{staleAnalysisQuote ? "Actualizar cuota" : analysis?.selectedOdds ? "Actualizar decisión con esta cuota" : "Evaluar esta cuota"}</button>
+            <button type="button" className="secondary-button" onClick={correctLineAndReanalyze} disabled={!line.trim() || (analysis?.director?.line != null && Number(line) === Number(analysis?.director?.line)) || analysisState.status === "loading"}>Corregir línea de la casa y reanalizar</button>
+
+            {analysis?.marketSelection?.exact_requested_line_unavailable ? (
+              <div className="p2-quote-warning">
+                <p><strong>Línea exacta no disponible:</strong> {analysis.marketSelection.explanation}</p>
+                <p>No se solicita cuota para una selección que Atlas no pudo calcular. Corrige la línea arriba, o elige explícitamente una alternativa deportiva calculada:</p>
+                {(analysis.marketSelection.alternatives || []).length ? (
+                  <ul>
+                    {analysis.marketSelection.alternatives.map((alt) => (
+                      <li key={alt.candidate_id}>
+                        <button type="button" className="secondary-button" onClick={() => chooseAlternativeAsExact(alt)} disabled={analysisState.status === "loading"}>
+                          Usar {displaySelection(alt.selection)} como selección exacta
+                        </button>
+                        <small> {Number.isFinite(alt.probability_percent) ? `${alt.probability_percent}%` : "No disponible"} {alt.probability_classification || ""} <em>(alternativa, no la línea pedida)</em></small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <small>Atlas no encontró alternativas calculables en esta familia.</small>}
+              </div>
+            ) : analysis?.marketSelection?.primary ? (
+              <>
+                <p>{staleAnalysisQuote ? "La cuota anterior venció. Introduce un precio actual para volver a decidir." : analysisCompleted ? "Puedes actualizar la cuota si cambió desde la última consulta." : "Con el análisis deportivo listo, introduce la cuota para evaluar el precio; Gemini es un paso posterior."}</p>
+                <label><span>Casa</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
+                <label><span>Cuota decimal</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.65" /></label>
+                <label><span>Hora de consulta</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
+                {manualQuoteWarning ? <small className="p2-quote-warning">{manualQuoteWarning}</small> : null}
+                {incompletePriceInput ? <small>Completa casa, cuota y hora para evaluar el precio.</small> : null}
+                <button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!manualQuoteReady || analysisState.status === "loading"}>{staleAnalysisQuote ? "Actualizar cuota" : analysis?.selectedOdds ? "Actualizar decisión con esta cuota" : "Evaluar esta cuota"}</button>
+              </>
+            ) : null}
           </section> : null}
           {!analysisCompleted ? <GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} /> : null}
           {analysisCompleted ? <details className="p2-source-details p2-new-gemini-research"><summary>Nueva investigación Gemini</summary><GeminiWorkflow analysis={analysis} text={geminiText} setText={setGeminiText} context={geminiContext} selectedIds={selectedGeminiIds} toggleItem={toggleGeminiItem} onValidate={validateGeminiContext} onReanalyze={reanalyzeWithContext} onNewResearch={startNewGeminiResearch} status={geminiState} /></details> : null}
