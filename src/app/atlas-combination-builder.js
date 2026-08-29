@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COMBINATION_LIMITS,
   COMBINATION_MODE,
@@ -13,6 +13,7 @@ import {
   removeCombinationSelection,
   updateCombinationSelection,
 } from "@/core/intelligence/atlasCombinationEngine";
+import { todayLocalDateString } from "@/core/intelligence/dateTimeContext";
 import { findFixtureQuoteEntry } from "@/core/intelligence/fixtureQuoteLedger";
 import { createManualOdds } from "@/core/intelligence/oddsIntelligence";
 import {
@@ -211,6 +212,10 @@ function enrichCandidate(candidate, ledger, manualQuote = null) {
     market_family: candidate.marketId,
     sports_score: candidate.sportsScore ?? candidate.technicalSupport,
     preliminary_probability: candidate.probability,
+    ranking_eligible: candidate.rankingEligible === true,
+    estimated_probability: candidate.estimatedProbability,
+    probability_percent: candidate.probabilityPercent,
+    probability_classification: candidate.probabilityClassification,
     uncertainty_low: candidate.uncertaintyLow,
     uncertainty_high: candidate.uncertaintyHigh,
     sample_size_effective: candidate.sampleSize,
@@ -242,7 +247,9 @@ function CandidateCard({ candidate, selected, selectable, onToggle }) {
         <p className="eyebrow">{candidate.competition}</p>
         <h4>{candidate.fixture}</h4>
         <p><strong>{label}</strong> · {displayMarketLabel(candidate.marketId || candidate.market)}</p>
-        <small><strong>Soporte Atlas:</strong> {normalized.sports_score}/100 · Probabilidad preliminar {percent(candidate.probability)}</small>
+        <small><strong>Soporte Atlas:</strong> {normalized.sports_score}/100 <em>(métrica interna, no es probabilidad)</em></small>
+        <small><strong>Probabilidad estimada Atlas:</strong> {Number.isFinite(normalized.probability_percent) ? `${normalized.probability_percent}%` : "No disponible"}{normalized.probability_classification ? ` (${normalized.probability_classification})` : ""}</small>
+        <small>Probabilidad preliminar {percent(candidate.probability)}</small>
         <small><strong>Estado deportivo:</strong> {inspection.sports_eligible ? "Elegible deportivamente" : "Soporte deportivo insuficiente"}</small>
         <small><strong>Información económica:</strong> {priceLabel}{normalized.price_usable ? "" : " · no se utiliza para calcular la cuota combinada"}</small>
       </div>
@@ -259,6 +266,9 @@ function CandidateCard({ candidate, selected, selectable, onToggle }) {
 export default function AtlasCombinationBuilder({ competitionGroups, markets, defaultTimezone }) {
   const competitions = useMemo(() => competitionGroups.flatMap((group) => group.competitions), [competitionGroups]);
   const [dates, setDates] = useState([""]);
+  useEffect(() => {
+    queueMicrotask(() => setDates((current) => (current.length === 1 && !current[0] ? [todayLocalDateString()] : current)));
+  }, []);
   const [competitionKeys, setCompetitionKeys] = useState(competitions[0] ? [competitions[0].key] : []);
   const [marketIds, setMarketIds] = useState(markets.map((market) => market.id));
   const [product, setProduct] = useState(COMBINATION_PRODUCT.PARLAY);
@@ -274,6 +284,10 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
   const [manualQuotes, setManualQuotes] = useState({});
   const [manualDrafts, setManualDrafts] = useState({});
   const [manualErrors, setManualErrors] = useState({});
+  const [legCorrectionDrafts, setLegCorrectionDrafts] = useState({});
+  const [legCorrectionStatus, setLegCorrectionStatus] = useState({});
+  const [legCorrectionErrors, setLegCorrectionErrors] = useState({});
+  const [combinationNotice, setCombinationNotice] = useState(null);
   const requestRef = useRef(null);
 
   const selectionCount = targetCounts[product];
@@ -283,6 +297,95 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
     const enriched = enrichCandidate(candidate, ledgers[String(candidate.fixtureId)], manualQuotes[identity]);
     return { ...enriched, selection_key: combinationSelectionKey(enriched) };
   }), [journey, ledgers, manualQuotes]);
+
+  function clearLegCorrectionState(selectionKey) {
+    setLegCorrectionStatus((current) => { const next = { ...current }; delete next[selectionKey]; return next; });
+    setLegCorrectionErrors((current) => { const next = { ...current }; delete next[selectionKey]; return next; });
+    setLegCorrectionDrafts((current) => { const next = { ...current }; delete next[selectionKey]; return next; });
+  }
+
+  // La corrección de línea vive únicamente sobre las piernas de una
+  // combinación ya generada (no en cada CandidateCard del universo completo).
+  // Reanaliza exactamente fixture+family+direction+newLine. Si la pierna
+  // corregida deja de ser válida para el producto, se remueve explícitamente
+  // (nunca en silencio) y se avisa a nivel de combinación, porque el
+  // selection_key de la pierna vieja deja de existir tras la remoción.
+  async function correctLegLine(leg) {
+    const draft = legCorrectionDrafts[leg.selection_key];
+    const newLine = Number(String(draft || "").replace(",", "."));
+    if (!Number.isFinite(newLine)) {
+      setLegCorrectionErrors((current) => ({ ...current, [leg.selection_key]: "Ingresa una línea numérica válida." }));
+      return;
+    }
+    setLegCorrectionStatus((current) => ({ ...current, [leg.selection_key]: "loading" }));
+    setLegCorrectionErrors((current) => ({ ...current, [leg.selection_key]: null }));
+    try {
+      const response = await fetch("/api/football/operational-analysis", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          date: leg.localCalendarDate || journey?.date || unique(dates)[0],
+          timezone: defaultTimezone,
+          competitionKey: leg.competitionKey,
+          season: leg.season,
+          fixtureId: leg.fixture_id,
+          marketId: leg.market_family,
+          analysisMode: "specific",
+          line: newLine,
+          selection: leg.direction,
+          reanalysis: false,
+        }),
+      });
+      const result = await response.json();
+      const primary = result?.marketSelection?.primary;
+      if (!response.ok || !primary || Number(primary.line) !== newLine) {
+        setLegCorrectionStatus((current) => ({ ...current, [leg.selection_key]: "error" }));
+        setLegCorrectionErrors((current) => ({ ...current, [leg.selection_key]: result?.marketSelection?.explanation || "Atlas no tiene información suficiente para calcular exactamente esa línea." }));
+        return;
+      }
+      const correctedCandidate = {
+        fixture_id: leg.fixture_id,
+        fixture: leg.fixture,
+        competition: leg.competition,
+        competitionKey: leg.competitionKey,
+        season: leg.season,
+        localCalendarDate: leg.localCalendarDate,
+        market_family: leg.market_family,
+        market: leg.market,
+        direction: primary.direction,
+        line: primary.line,
+        selection: primary.selection,
+        sports_score: primary.sports_score,
+        ranking_eligible: primary.ranking_eligible,
+        estimated_probability: primary.estimated_probability,
+        probability_percent: primary.probability_percent,
+        probability_classification: primary.probability_classification,
+        uncertainty_low: primary.uncertainty_low,
+        uncertainty_high: primary.uncertainty_high,
+        sample_size_effective: primary.sample_size_effective,
+        technical_support_score: primary.technical_support_score,
+        active_quote: null,
+      };
+      const withoutOldLeg = removeCombinationSelection(combination, leg.selection_key);
+      const withNewLeg = addCombinationSelection(withoutOldLeg, correctedCandidate);
+      const newKey = combinationSelectionKey(correctedCandidate);
+      const succeeded = withNewLeg.selections.some((item) => item.selection_key === newKey);
+      setCombination(withNewLeg);
+      // El selection_key viejo ya no existe (se removió); el feedback no
+      // puede quedar asociado a una pierna que desapareció.
+      clearLegCorrectionState(leg.selection_key);
+      setCombinationNotice(succeeded ? {
+        status: "success",
+        message: `Línea corregida a ${displaySelectionLabel(primary.selection)}: la pierna se actualizó con la probabilidad recalculada.`,
+      } : {
+        status: "removed",
+        message: `Se corrigió ${displaySelectionLabel(leg.selection)} a ${displaySelectionLabel(primary.selection)}, pero esa línea ya no cumple las reglas de la combinación (elegibilidad o correlación con otra pierna). Fue removida de la combinación; elige o recalcula un reemplazo desde el universo.`,
+      });
+    } catch {
+      setLegCorrectionStatus((current) => ({ ...current, [leg.selection_key]: "error" }));
+      setLegCorrectionErrors((current) => ({ ...current, [leg.selection_key]: "No fue posible conectar con Atlas para reanalizar la línea." }));
+    }
+  }
 
   const eligibleCount = candidates.filter((candidate) => inspectCombinationCandidate(candidate).sports_eligible).length;
   const limits = COMBINATION_LIMITS[product];
@@ -367,8 +470,6 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
           timezone: defaultTimezone,
           competitionKeys,
           marketIds,
-          maximumFixtures: 50,
-          maximumCandidates: 50,
           analysisMode: marketIds.length === 1 ? "specific" : "general",
         }),
       });
@@ -408,6 +509,7 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
   function generateCombination() {
     const target = commitSelectionCount();
     const prepared = buildAtlasCombination({ candidates, product, mode, selections: target, selectedKeys });
+    setCombinationNotice(null);
     setCombination(prepared.status === "ready"
       ? { ...prepared, combination_id: globalThis.crypto.randomUUID() }
       : prepared);
@@ -483,7 +585,23 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
       <section className="p2-combination-filters">
         <div>
           <h3>3 · Competiciones</h3>
-          {competitionGroups.map((group) => <fieldset key={group.id}><legend>{group.label}</legend>{group.competitions.map((competition) => <label key={competition.key}><input type="checkbox" checked={competitionKeys.includes(competition.key)} onChange={() => toggleCompetition(competition.key)} />{competition.localName}</label>)}</fieldset>)}
+          <div className="p2-inline-actions">
+            <button type="button" className="secondary-button" onClick={() => { setCompetitionKeys(competitions.map((competition) => competition.key)); setJourney(null); setCombination(null); }}>Seleccionar todas</button>
+            <button type="button" className="secondary-button" onClick={() => { setCompetitionKeys([]); setJourney(null); setCombination(null); }}>Deseleccionar todas</button>
+          </div>
+          {competitionGroups.map((group) => {
+            const groupKeys = group.competitions.map((competition) => competition.key);
+            return (
+              <fieldset key={group.id}>
+                <legend>{group.label}</legend>
+                <div className="p2-inline-actions">
+                  <button type="button" className="secondary-button" onClick={() => { setCompetitionKeys((current) => [...new Set([...current, ...groupKeys])]); setJourney(null); setCombination(null); }} disabled={groupKeys.every((key) => competitionKeys.includes(key))}>Seleccionar grupo</button>
+                  <button type="button" className="secondary-button" onClick={() => { setCompetitionKeys((current) => current.filter((key) => !groupKeys.includes(key))); setJourney(null); setCombination(null); }} disabled={!competitionKeys.some((key) => groupKeys.includes(key))}>Deseleccionar grupo</button>
+                </div>
+                {group.competitions.map((competition) => <label key={competition.key}><input type="checkbox" checked={competitionKeys.includes(competition.key)} onChange={() => toggleCompetition(competition.key)} />{competition.localName}</label>)}
+              </fieldset>
+            );
+          })}
         </div>
         <fieldset><legend>4 · Mercados</legend>{markets.map((market) => <label key={market.id}><input type="checkbox" checked={marketIds.includes(market.id)} onChange={() => toggleMarket(market.id)} />{market.label}</label>)}</fieldset>
       </section>
@@ -500,7 +618,13 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
 
       {journey ? <section className="p2-combination-universe">
         <div className="p2-combination-summary"><h3>Universo disponible</h3><p>{candidates.length} candidatos deportivos · {eligibleCount} elegibles deportivamente.</p><p>La falta de cuota no elimina una selección con soporte suficiente. Atlas muestra la cobertura económica por separado y nunca inventa precios.</p></div>
-        <div className="p2-combination-candidate-grid">{candidates.map((candidate) => <CandidateCard key={candidate.selection_key} candidate={candidate} selectable={mode !== COMBINATION_MODE.AUTOMATIC || combination?.editing === true} selected={editableSelectionKeys.includes(candidate.selection_key)} onToggle={toggleCandidate} />)}</div>
+        <div className="p2-combination-candidate-grid">{candidates.map((candidate) => <CandidateCard
+          key={candidate.selection_key}
+          candidate={candidate}
+          selectable={mode !== COMBINATION_MODE.AUTOMATIC || combination?.editing === true}
+          selected={editableSelectionKeys.includes(candidate.selection_key)}
+          onToggle={toggleCandidate}
+        />)}</div>
         <button type="button" className="primary-button p2-primary" onClick={generateCombination}>Generar {productName(product)}</button>
       </section> : null}
 
@@ -508,12 +632,13 @@ export default function AtlasCombinationBuilder({ competitionGroups, markets, de
         <p className="eyebrow">DirectorAtlas</p>
         <h3>{combination.status === "ready" ? `${productName(product)} preparada` : combination.status === "editing" ? `${productName(product)} en edición` : "No se pudo construir la combinación"}</h3>
         <p>{combination.director_message || combination.message}</p>
+        {combinationNotice ? <p className={combinationNotice.status === "removed" ? "p2-combination-warning" : "p2-status-success"}>{combinationNotice.message}</p> : null}
         {showsPreparedCombination ? <>
           <div className="p2-combination-metrics"><span><small>Selecciones</small><strong>{combination.selections.length}/{combination.requested_selections}</strong></span><span><small>Cuota combinada</small><strong>{combination.combined_decimal_odds ?? "Completa no disponible"}</strong></span><span><small>Cobertura de precios</small><strong>{combination.price_coverage.available} de {combination.price_coverage.total}</strong></span><span><small>Riesgo</small><strong>{combination.risk.level === "high" ? "Alto" : combination.risk.level === "medium" ? "Medio" : "Bajo"}</strong></span><span><small>Perfil</small><strong>{combination.combination_profile === "very_conservative" ? "Muy conservador" : combination.combination_profile === "conservative" ? "Conservador" : "Equilibrado"}</strong></span><span><small>Modo</small><strong>{modeName(combination.mode)}</strong></span></div>
           {combination.editing && !combination.target_complete ? <p className="p2-combination-warning">Estado actual: {combination.selections.length}/{combination.requested_selections}. {combination.can_confirm ? "La combinación reducida conserva el mínimo del producto." : "Faltan selecciones para alcanzar el mínimo válido del producto."}</p> : null}
           {product === COMBINATION_PRODUCT.DREAM ? <p className="p2-combination-warning">Alto riesgo: el resultado depende de que todas las selecciones se cumplan.</p> : null}
           {combination.price_coverage.status !== "complete" ? <p>Cuota combinada completa no disponible: {combination.price_coverage.available} de {combination.price_coverage.total} selecciones tienen precio compatible y vigente.</p> : null}
-          <ol className="p2-combination-legs">{combination.selections.map((candidate) => <li key={candidate.selection_key}><div><strong>{candidate.fixture}</strong><span>{displaySelectionLabel(candidate.selection)} · {displayMarketLabel(candidate.marketId || candidate.market)} · {candidate.price_usable ? `@${candidate.decimal_odds}` : "Cuota no disponible"}</span><small><strong>Soporte Atlas:</strong> {candidate.sports_score}/100 · Perfil: {candidate.combination_profile === "very_conservative" ? "Muy conservador" : candidate.combination_profile === "conservative" ? "Conservador" : "Equilibrado"} · Muestra efectiva: {candidate.sample_size_effective ?? "No disponible"}</small>{!candidate.price_usable ? <div className="p2-inline-actions"><label><span>Ingresar cuota</span><input inputMode="decimal" placeholder="Ej. 1.43" value={manualDrafts[candidate.selection_key] || ""} onChange={(event) => setManualDrafts((current) => ({ ...current, [candidate.selection_key]: event.target.value }))} /></label><button type="button" className="secondary-button" onClick={() => addManualQuote(candidate)}>Ingresar cuota</button>{manualErrors[candidate.selection_key] ? <small>{manualErrors[candidate.selection_key]}</small> : null}</div> : null}</div><button type="button" className="secondary-button" onClick={() => removePreparedSelection(candidate.selection_key)}>Quitar</button></li>)}</ol>
+          <ol className="p2-combination-legs">{combination.selections.map((candidate) => <li key={candidate.selection_key}><div><strong>{candidate.fixture}</strong><span>{displaySelectionLabel(candidate.selection)} · {displayMarketLabel(candidate.marketId || candidate.market)} · {candidate.price_usable ? `@${candidate.decimal_odds}` : "Cuota no disponible"}</span><small><strong>Probabilidad estimada Atlas:</strong> {Number.isFinite(candidate.probability_percent) ? `${candidate.probability_percent}%` : "No disponible"}{candidate.probability_classification ? ` (${candidate.probability_classification})` : ""}</small><small><strong>Soporte Atlas:</strong> {candidate.sports_score}/100 (métrica interna) · Perfil: {candidate.combination_profile === "very_conservative" ? "Muy conservador" : candidate.combination_profile === "conservative" ? "Conservador" : "Equilibrado"} · Muestra efectiva: {candidate.sample_size_effective ?? "No disponible"}</small><div className="p2-inline-actions"><label><span>Línea de tu casa</span><input inputMode="decimal" placeholder={String(candidate.line)} value={legCorrectionDrafts[candidate.selection_key] || ""} onChange={(event) => setLegCorrectionDrafts((current) => ({ ...current, [candidate.selection_key]: event.target.value }))} /></label><button type="button" className="secondary-button" onClick={() => correctLegLine(candidate)} disabled={legCorrectionStatus[candidate.selection_key] === "loading" || !legCorrectionDrafts[candidate.selection_key] || Number(legCorrectionDrafts[candidate.selection_key]) === Number(candidate.line)}>Corregir línea y reanalizar</button></div>{legCorrectionStatus[candidate.selection_key] === "loading" ? <small>Reanalizando línea exacta…</small> : null}{legCorrectionErrors[candidate.selection_key] ? <small className="p2-quote-warning">{legCorrectionErrors[candidate.selection_key]}</small> : null}{!candidate.price_usable ? <div className="p2-inline-actions"><label><span>Ingresar cuota</span><input inputMode="decimal" placeholder="Ej. 1.43" value={manualDrafts[candidate.selection_key] || ""} onChange={(event) => setManualDrafts((current) => ({ ...current, [candidate.selection_key]: event.target.value }))} /></label><button type="button" className="secondary-button" onClick={() => addManualQuote(candidate)}>Ingresar cuota</button>{manualErrors[candidate.selection_key] ? <small>{manualErrors[candidate.selection_key]}</small> : null}</div> : null}</div><button type="button" className="secondary-button" onClick={() => removePreparedSelection(candidate.selection_key)}>Quitar</button></li>)}</ol>
           {combination.correlation.warnings.length ? <p>Correlación advertida: {combination.correlation.warnings.map(displayCorrelationLabel).join(", ")}.</p> : <p>La propuesta evita repetir selecciones altamente correlacionadas del mismo partido y mercado.</p>}
           {combinationIsTrackable(combination)
             ? <CombinationBetRegistration key={`${combination.combination_id}:${combination.selections.map((item) => item.selection_key).join("|")}:${combination.combined_decimal_odds ?? "unpriced"}`} combination={combination} />

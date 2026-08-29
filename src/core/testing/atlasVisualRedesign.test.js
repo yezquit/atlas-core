@@ -64,8 +64,10 @@ test("UI 8. Home expone acciones principales y secundarias", async () => {
 test("UI 9. DirectorAtlas presenta resumen visual sin recalcular datos", async () => {
   const source = await readFile(path.join(appDirectory, "atlas-functional-client.js"), "utf8");
   assert.match(source, /className="p2-director-metrics"/);
-  assert.match(source, /director\.sports_verdict\?\.sports_score/);
-  assert.doesNotMatch(source, /sports_score\s*[+*/-]=/);
+  assert.ok(
+    source.includes("analysis.marketSelection?.primary?.probability_percent")
+  );
+  assert.doesNotMatch(source, /probability_percent\s*[+\*/-]=/);
 });
 
 test("UI 10. el responsive cubre teléfono, tableta y escritorio", async () => {

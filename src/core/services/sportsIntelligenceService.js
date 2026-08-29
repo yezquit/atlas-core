@@ -54,7 +54,7 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
     if (!candidate && generated.reason === "insufficient_distribution_data") reason = "Muestra insuficiente.";
     else if (!candidate && (assessment?.available_evidence?.length || 0) < (assessment?.data_requirements?.length || 0) * 0.7) reason = "Cobertura insuficiente.";
     else if (!candidate && (assessment?.risk_flags || []).some((item) => /crític|critical|depend/i.test(item))) reason = "Dependencia crítica.";
-    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mayor sports_score del ranking general.";
+    if (candidate?.candidate_id === winner?.candidate_id) reason = "Mejor opción del ranking deportivo por elegibilidad y probabilidad estimada.";
     return {
       market_family: generated.market_family,
       market_label: assessment?.market_label || generated.market_family,
@@ -70,7 +70,7 @@ export function buildJourneyFamilyComparison(selection, marketAssessments = [], 
     families_compared: families.map((item) => item.market_label),
     best_by_family: families,
     why_market_won: winner
-      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por su respaldo deportivo (${winner.sports_score}/100), no por el orden inicial.`
+      ? `${assessmentByFamily.get(winner.market_family)?.market_label || winner.market_family} fue destacada por el ranking deportivo V3 (elegibilidad y probabilidad estimada), no por el orden inicial.`
       : "No hubo un candidato destacado.",
   };
 }
@@ -402,6 +402,10 @@ function toJourneyCandidate({ analysis, candidate, comparison }) {
     direction: candidate.direction,
     line: candidate.line,
     probability: candidate.preliminary_probability,
+    estimatedProbability: candidate.estimated_probability,
+    probabilityPercent: candidate.probability_percent,
+    probabilityClassification: candidate.probability_classification,
+    rankingEligible: candidate.ranking_eligible === true,
     uncertaintyLow: candidate.uncertainty_low,
     uncertaintyHigh: candidate.uncertainty_high,
     confidence: candidate.sports_score,
@@ -493,11 +497,8 @@ export async function recoverJourneyCandidateOdds(candidates, gateway, now) {
 
 export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
   const groups = new Map();
-  const sorted = [...entries].sort((left, right) =>
-    Number(right.candidate.sports_score) - Number(left.candidate.sports_score) ||
-    Number(left.analysis.fixture.fixtureId) - Number(right.analysis.fixture.fixtureId) ||
-    left.candidate.candidate_id.localeCompare(right.candidate.candidate_id)
-  );
+  const eligible = entries.filter((entry) => entry.candidate?.ranking_eligible === true);
+  const sorted = rankJourneyCandidatesByProbability(eligible);
   for (const entry of sorted) {
     const key = Number(entry.analysis.fixture.fixtureId);
     if (!groups.has(key)) groups.set(key, []);
@@ -566,7 +567,6 @@ export async function scanSportsJourney(input, gateway) {
       telemetry: gateway.runtime.snapshot(),
     };
   }
-  const maximumFixtures = Math.max(1, Math.min(50, Number(input.maximumFixtures) || 50));
   const referenceNow = input.now || `${input.date}T00:00:00.000Z`;
   const fixtures = [];
   const warnings = [];
@@ -609,8 +609,11 @@ export async function scanSportsJourney(input, gateway) {
     warnings.push(`${count} partido(s) excluido(s) del flujo prepartido: ${reason}.`);
   }
 
+  // Un escaneo debe analizar TODOS los fixtures elegibles descubiertos; el
+  // único límite legítimo es el presupuesto real de solicitudes (budgetExhausted),
+  // nunca un tope artificial de cantidad de partidos.
   const reviewed = [];
-  for (const item of eligibleFixtures.slice(0, maximumFixtures)) {
+  for (const item of eligibleFixtures) {
     if (gateway.runtime.snapshot().budgetExhausted) break;
     const analysis = await analyzeSportsFixture(
       {
@@ -658,20 +661,16 @@ export async function scanSportsJourney(input, gateway) {
       })),
     });
 
-    const bestByFamily = new Map();
-    for (const candidate of selection.ranked_candidates) {
-      if (!bestByFamily.has(candidate.market_family)) bestByFamily.set(candidate.market_family, candidate);
-    }
-    combinationEntries.push(...selection.ranked_candidates.map((candidate) => ({
-      analysis,
-      candidate,
-      comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
-    })));
-    return [...bestByFamily.values()].map((candidate) => ({
+    // Jornada debe mostrar el mismo universo exhaustivo que alimenta las
+    // combinaciones (Parlay/Soñadora): todas las líneas/familias legítimamente
+    // calculadas, no solo la mejor por familia por fixture.
+    const entries = selection.ranked_candidates.map((candidate) => ({
       analysis,
       candidate,
       comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
     }));
+    combinationEntries.push(...entries);
+    return entries;
   });
   const candidateDiagnosticsByCompetition = Object.fromEntries(
     [...analysisCandidates.reduce((map, entry) => {
@@ -699,9 +698,17 @@ export async function scanSportsJourney(input, gateway) {
     }, new Map())]
   );
 
-  const maximumCandidates = Math.max(1, Math.min(50, Number(input.maximumCandidates) || 50));
+  // Sin tope artificial: si el llamador pide explícitamente un número, se
+  // respeta; si no, no se recorta la lista (no se descarta ningún candidato
+  // ya analizado solo por un límite de presentación inventado).
+  const requestedMaximumCandidates = Number(input.maximumCandidates);
+  const maximumCandidates = Number.isInteger(requestedMaximumCandidates) && requestedMaximumCandidates > 0
+    ? requestedMaximumCandidates
+    : Number.POSITIVE_INFINITY;
   const competitionProfiles = Array.isArray(input.competitionProfiles) ? input.competitionProfiles : [];
-  const highlightedSports = selectDiverseJourneyCandidates(analysisCandidates, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
+  const highlightedSports = rankJourneyCandidatesByProbability(
+    analysisCandidates.filter((entry) => entry.candidate?.ranking_eligible === true)
+  ).slice(0, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
   const combinationSports = selectCombinationJourneyCandidates(combinationEntries, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
   const pricedUniverse = await recoverJourneyCandidateOdds(
     [...new Map([...highlightedSports, ...combinationSports].map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate])).values()],
@@ -755,6 +762,51 @@ export async function scanSportsJourney(input, gateway) {
     executionTimeMs: Date.now() - startedAt,
     telemetry,
   };
+}
+
+// Agrupación de presentación (alta/media/baja) derivada de la clasificación
+// YA EXISTENTE (probabilityClassification.js), sin inventar una fórmula de
+// seguridad nueva: MUY ALTA/ALTA -> alta, BUENA/MODERADA -> media,
+// RIESGOSA/MUY RIESGOSA -> baja. Las odds nunca intervienen en este orden.
+const SAFETY_TIER_RANK = Object.freeze({
+  "MUY ALTA": 0,
+  ALTA: 0,
+  BUENA: 1,
+  MODERADA: 1,
+  RIESGOSA: 2,
+  "MUY RIESGOSA": 2,
+});
+function safetyTierRank(candidate) {
+  const tier = SAFETY_TIER_RANK[candidate?.probability_classification];
+  return tier === undefined ? 3 : tier;
+}
+
+export function rankJourneyCandidatesByProbability(entries = []) {
+  return [...entries].sort((left, right) => {
+    const tierDifference = safetyTierRank(left.candidate) - safetyTierRank(right.candidate);
+    if (tierDifference) return tierDifference;
+
+    const leftProbability = Number.isFinite(left.candidate?.estimated_probability) ? left.candidate.estimated_probability : -1;
+    const rightProbability = Number.isFinite(right.candidate?.estimated_probability) ? right.candidate.estimated_probability : -1;
+    if (rightProbability !== leftProbability) return rightProbability - leftProbability;
+
+    const leftWidth = Number.isFinite(left.candidate?.uncertainty_high) && Number.isFinite(left.candidate?.uncertainty_low)
+      ? left.candidate.uncertainty_high - left.candidate.uncertainty_low : Infinity;
+    const rightWidth = Number.isFinite(right.candidate?.uncertainty_high) && Number.isFinite(right.candidate?.uncertainty_low)
+      ? right.candidate.uncertainty_high - right.candidate.uncertainty_low : Infinity;
+    if (leftWidth !== rightWidth) return leftWidth - rightWidth;
+
+    const leftSample = Number.isFinite(left.candidate?.sample_size_effective) ? left.candidate.sample_size_effective : -1;
+    const rightSample = Number.isFinite(right.candidate?.sample_size_effective) ? right.candidate.sample_size_effective : -1;
+    if (rightSample !== leftSample) return rightSample - leftSample;
+
+    const leftSupport = Number.isFinite(left.candidate?.technical_support_score) ? left.candidate.technical_support_score : -1;
+    const rightSupport = Number.isFinite(right.candidate?.technical_support_score) ? right.candidate.technical_support_score : -1;
+    if (rightSupport !== leftSupport) return rightSupport - leftSupport;
+
+    if (left.analysis.fixture.fixtureId !== right.analysis.fixture.fixtureId) return left.analysis.fixture.fixtureId - right.analysis.fixture.fixtureId;
+    return left.candidate.candidate_id.localeCompare(right.candidate.candidate_id);
+  });
 }
 
 export function selectDiverseJourneyCandidates(entries = [], maximum = 5, comparableGap = 4) {

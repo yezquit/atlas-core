@@ -34,6 +34,8 @@ function candidate(index, overrides = {}) {
     lineStabilityScore: overrides.lineStabilityScore ?? 75,
     limitations: overrides.limitations || [], generalRank: index, familyRank: 1,
     status: "sports_candidate_pending_price", active_quote: quote,
+    ranking_eligible: overrides.ranking_eligible ?? true,
+    estimated_probability: overrides.estimated_probability ?? 0.68,
   };
 }
 

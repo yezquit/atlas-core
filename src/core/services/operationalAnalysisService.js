@@ -3,7 +3,7 @@ import { DATA_LOAD_STATUS } from "../contracts/atlasContracts.js";
 import { LINE_ORIGIN, OPERATIONAL_ENGINE_VERSION, phaseForKickoff } from "../contracts/operationalContracts.js";
 import { calculateAnalysisConfidence } from "../intelligence/analysisConfidence.js";
 import { buildAnalysisVersion, compareAnalysisVersions } from "../intelligence/analysisVersions.js";
-import { buildGeminiResearchPrompt, extractSupplementaryRefereeEvidence, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
+import { buildGeminiCleanupPrompt, buildGeminiResearchPrompt, extractSupplementaryRefereeEvidence, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
 import { buildRankedMarketSelection } from "../intelligence/marketCandidateRanker.js";
 import { buildOperationalRanking, buildScoutAtlas } from "../intelligence/scoutAtlas.js";
@@ -170,11 +170,28 @@ export function selectExactRequestedCandidate(marketSelection, { marketFamily, r
     Number(candidate.line) === Number(requestedLine) &&
     (!direction || candidate.direction === direction)
   );
-  if (!exactCandidate) return marketSelection;
+  // La línea escrita por el usuario es una restricción dura: si Atlas no
+  // puede calcular exactamente esa línea, lo declara explícitamente en vez
+  // de sustituirla en silencio por otra línea del mismo mercado. El mejor
+  // candidato general queda disponible solo como alternativa, nunca como
+  // respuesta al pedido exacto.
+  if (!exactCandidate) {
+    const sameFamilyAlternatives = (marketSelection.ranked_candidates || []).filter((candidate) => candidate.market_family === marketFamily);
+    return {
+      ...marketSelection,
+      primary: null,
+      alternatives: sameFamilyAlternatives.slice(0, 3),
+      exact_requested_line_unavailable: true,
+      requested_line: Number(requestedLine),
+      requested_direction: direction,
+      explanation: `Atlas no tiene información suficiente para calcular exactamente ${requestedSelection} ${requestedLine}${marketFamily ? ` (${marketFamily})` : ""}. No se sustituye por otra línea.`,
+    };
+  }
   return {
     ...marketSelection,
     primary: exactCandidate,
     alternatives: marketSelection.ranked_candidates.filter((candidate) => candidate.candidate_id !== exactCandidate.candidate_id).slice(0, 3),
+    exact_requested_line_unavailable: false,
     explanation: exactLineExplanation(exactCandidate.selection, { lineOrigin }),
   };
 }
@@ -379,9 +396,15 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   }
   if (oddsResult.quotes.length) oddsResult.status = "available";
   const hasCandidateOdds = candidateManualQuotes.length > 0 && !manualQuote;
+  // Una solicitud explícita de mercado específico + línea (analysisMode
+  // "specific") es una restricción dura del usuario y nunca debe cederse
+  // solo porque existan cuotas de candidato de otra familia/flujo (Bloque 3).
+  // hasCandidateOdds solo puede suprimir la línea exacta en modo general.
+  const explicitSpecificLineRequest = analysisMode === "specific" && Boolean(requestedLine) && Boolean(manualMarketFamily);
+  const suppressExactLineForCandidateOdds = hasCandidateOdds && !explicitSpecificLineRequest;
   let marketSelection = buildRankedMarketSelection({
-    analysisMode: requestedLine && manualMarketFamily && !hasCandidateOdds ? "specific" : analysisMode,
-    requestedMarketId: requestedLine && manualMarketFamily && !hasCandidateOdds ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
+    analysisMode: requestedLine && manualMarketFamily && !suppressExactLineForCandidateOdds ? "specific" : analysisMode,
+    requestedMarketId: requestedLine && manualMarketFamily && !suppressExactLineForCandidateOdds ? manualMarketFamily : analysisMode === "specific" ? input.marketId : null,
     marketAssessments: base.marketAssessments,
     leagueProfile: base.leagueProfile,
     homeTeamProfile: base.homeTeamProfile,
@@ -389,11 +412,11 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     refereeProfile: base.refereeProfile,
     contextItems: selectedGemini,
     contextImpacts: geminiImpacts,
-    exactLine: hasCandidateOdds ? null : requestedLine,
+    exactLine: suppressExactLineForCandidateOdds ? null : requestedLine,
     quotes: oddsResult.quotes,
     preferredQuote,
   });
-  if (!hasCandidateOdds) {
+  if (!suppressExactLineForCandidateOdds) {
     marketSelection = selectExactRequestedCandidate(marketSelection, {
       marketFamily: manualMarketFamily,
       requestedLine,
@@ -414,7 +437,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const primaryCandidate = shouldUseOperationalCandidate && operationalCandidate
     ? operationalCandidate
     : marketSelection.primary;
-  const marketAssessment = base.marketAssessments.find((item) => item.market_family === primaryCandidate?.market_family) || null;
+  const marketAssessment = base.marketAssessments.find((item) => item.market_family === (primaryCandidate?.market_family || manualMarketFamily)) || null;
   const bestProviderOdds = primaryCandidate ? selectBestComparableOdds(oddsResult.quotes, {
     marketFamily: primaryCandidate.market_family,
     selection: primaryCandidate.selection,
@@ -501,6 +524,13 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     verifiedData: [`Fixture ${base.fixture.fixtureId} verificado por API-FOOTBALL.`, `${available} de ${requirements} requisitos de mercado disponibles.`],
     missingData: marketAssessment?.missing_evidence || [],
     risks: [...(marketAssessment?.risk_flags || []), ...(context.lineups.warnings || []), ...(context.injuries.warnings || [])],
+    analyzedAt,
+  });
+  const cleanupPrompt = buildGeminiCleanupPrompt({
+    fixture: base.fixture,
+    competition: base.competition,
+    market: marketAssessment,
+    selection: primaryCandidate,
     analyzedAt,
   });
   const supportingEvidence = [
@@ -676,7 +706,7 @@ selections: input.dreamSelections || 5,
     historicalQuote,
     lineOrigin,
     preMatchContext: context,
-    gemini: { prompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, supplementary_referee_evidence: supplementaryRefereeEvidence, reanalysis_message: contextReanalysisMessage },
+    gemini: { prompt, cleanupPrompt, context: geminiContext, applied_items: selectedGemini, impacts: geminiImpacts, summary: contextSummary, supplementary_referee_evidence: supplementaryRefereeEvidence, reanalysis_message: contextReanalysisMessage },
     confidence,
     operationalCompleteness,
     preliminaryProbability,

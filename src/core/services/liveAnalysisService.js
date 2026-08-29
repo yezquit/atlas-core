@@ -1,6 +1,15 @@
 import { API_FOOTBALL_COMPETITIONS, getApiFootballCompetitionByKey } from "../data/apiFootballLeagues.js";
 import { assessLiveFixture, analyzeLiveMatch } from "../intelligence/liveMatchAnalysisEngine.js";
 
+export function selectLatestPrematchAnalysis(analyses = []) {
+  const genuinelyPrematch = analyses.filter((item) =>
+    item?.phase !== "pre_match_closed" &&
+    Number.isFinite(Number(item?.kickoff_distance_minutes)) &&
+    Number(item.kickoff_distance_minutes) > 0
+  );
+  return genuinelyPrematch.sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0] || null;
+}
+
 function validFixtureId(value) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -17,7 +26,7 @@ export async function listLiveFixtures(gateway, { competitions = API_FOOTBALL_CO
   return { contract: "LiveFixtureCatalog", version: 1, status: fixtures.length ? "success" : "empty", mode: "live", fixtures, timezone: result.timezone || timezone, updated_at: result.requestMeta?.fetchedAt || null, message: fixtures.length ? `${fixtures.length} partido(s) LIVE activo(s).` : "No hay partidos en vivo ahora mismo en las competiciones configuradas." };
 }
 
-export async function analyzeLiveFixture(input, gateway, { idFactory, now = () => new Date().toISOString() } = {}) {
+export async function analyzeLiveFixture(input, gateway, { idFactory, now = () => new Date().toISOString(), prematchContext = null } = {}) {
   const fixtureId = validFixtureId(input?.fixtureId);
   const competition = getApiFootballCompetitionByKey(input?.competitionKey);
   if (!fixtureId) return { contract: "LiveAnalysisResult", version: 1, status: "unavailable", mode: "live", errorCode: "invalid_fixture_id", message: "El fixture ID debe ser un entero positivo." };
@@ -41,6 +50,7 @@ export async function analyzeLiveFixture(input, gateway, { idFactory, now = () =
     statisticsFetchedAt: statisticsResult?.status === "success" ? statisticsResult.requestMeta?.fetchedAt || analyzedAt : null,
     oddsFetchedAt: oddsResult?.status === "success" ? oddsResult.requestMeta?.fetchedAt || analyzedAt : null,
     analyzedAt,
+    prematchContext,
   });
   return { ...result, provider_status: { fixture: fixtureResult.status, statistics: statisticsResult?.status || "unavailable", live_odds: oddsResult?.status || "unavailable" } };
 }
