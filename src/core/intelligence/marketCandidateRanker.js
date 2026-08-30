@@ -107,8 +107,11 @@ function rankReason(candidate) {
 
 function observedRoleReason(candidate, source, teamName, roleLabel) {
   const input = candidate.input_sources?.find((item) => item.source === source);
-  if (!input || !Number.isFinite(Number(input.hits)) || !Number.isFinite(Number(input.sample_size)) || Number(input.sample_size) <= 0) return null;
-  return `En la muestra de ${teamName} ${roleLabel}, ${candidate.selection.replace(/^Under\b/i, "Menos de").replace(/^Over\b/i, "Más de")} se dio en ${input.hits} de ${input.sample_size} partidos (${round(Number(input.observed_rate) * 100)}%).`;
+  if (!input ||
+    typeof input.hits !== "number" || !Number.isFinite(input.hits) ||
+    typeof input.sample_size !== "number" || !Number.isFinite(input.sample_size) || input.sample_size <= 0 ||
+    typeof input.observed_rate !== "number" || !Number.isFinite(input.observed_rate)) return null;
+  return `En la muestra de ${teamName} ${roleLabel}, ${candidate.selection.replace(/^Under\b/i, "Menos de").replace(/^Over\b/i, "Más de")} se dio en ${input.hits} de ${input.sample_size} partidos (${round(input.observed_rate * 100)}%).`;
 }
 
 function productionReason(candidate, homeTeamProfile, awayTeamProfile) {

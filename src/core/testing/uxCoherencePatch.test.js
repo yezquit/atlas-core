@@ -236,6 +236,20 @@ test("9. razones sencillas priorizan evidencia deportiva del partido", () => {
   assert.doesNotMatch(reasons.join(" "), /equilibrio deportivo|modelo preliminar/i);
 });
 
+test("9a. una fuente canónica sin contador ni frecuencia no inventa ocurrencias", () => {
+  const reasons = buildSimpleSportsReasons(candidate({ input_sources: [
+    { source: "home_role", hits: null, sample_size: 5, observed_rate: null },
+  ] }), { homeTeamProfile: { team_name: "Águilas Doradas", as_home: { sample_size: 5 } } });
+  assert.doesNotMatch(reasons.join(" "), /null de|0%|se dio en/i);
+});
+
+test("9b. cero real conserva la afirmación de ocurrencias", () => {
+  const reasons = buildSimpleSportsReasons(candidate({ input_sources: [
+    { source: "home_role", hits: 0, sample_size: 5, observed_rate: 0 },
+  ] }), { homeTeamProfile: { team_name: "Águilas Doradas", as_home: { sample_size: 5 } } });
+  assert.match(reasons.join(" "), /0 de 5 partidos \(0%\)/);
+});
+
 test("10. limitaciones metodológicas no aparecen como Red Team del partido", () => {
   const redTeam = buildRedTeamAtlas({ candidate: candidate({ limitations: ["Distribución empírica preliminar; no representa un modelo deportivo validado."] }) });
   assert.equal(redTeam.items.length, 0);

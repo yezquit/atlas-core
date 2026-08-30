@@ -273,7 +273,23 @@ function estimateCanonical({ canonical, marketFamily, parsedLine, contextShift, 
   const over = Math.min(0.9, Math.max(0.1, shrunkOver));
   const point = parsedLine.direction === "over" ? over : 1 - over;
   const [low, high] = wilsonInterval(point, canonical.effective_sample_size);
-  const inputs = canonical.sources.map((source) => ({ source: source.name, weight: rounded(source.effective_weight), sample_size: source.unique_fixture_count, hits: null, observed_rate: null, raw_fixture_ids: source.raw_fixture_ids }));
+  const inputs = canonical.sources.map((source) => {
+    // `canonical.observations` contains one physical record per fixture. Keep
+    // every matching record here: equal event values from different fixtures
+    // are separate pieces of descriptive evidence.
+    const sourceValues = canonical.observations
+      .filter((item) => item.memberships.some((membership) => membership.source_name === source.name))
+      .map((item) => item.value);
+    const sourceObservation = observation(sourceValues, parsedLine);
+    return {
+      source: source.name,
+      weight: rounded(source.effective_weight),
+      sample_size: sourceObservation?.sample_size ?? source.unique_fixture_count,
+      hits: sourceObservation?.hits ?? null,
+      observed_rate: sourceObservation ? rounded(sourceObservation.observed_rate) : null,
+      raw_fixture_ids: source.raw_fixture_ids,
+    };
+  });
   return {
     contract: "PreliminaryMarketProbability", version: 1, methodology_version: PRELIMINARY_MODEL_VERSION,
     probability_status: "preliminary", point_estimate: rounded(point), uncertainty_low: rounded(low), uncertainty_high: rounded(high),
