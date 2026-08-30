@@ -13,9 +13,12 @@ const historyStore = createFileOperationalHistory();
 
 export async function analyzeOperationalFixtureOnServer(input, { reanalysis = false } = {}) {
   const repository = createPersistencePort(await historyStore.repository());
-  const previousVersion = input?.fixtureId
-    ? await repository.latestForFixture(input.fixtureId)
-    : null;
+  const sourceAnalysisId = input?.sourceAnalysisId || input?.manualOdds?.analysisVersion || null;
+  const previousVersion = sourceAnalysisId && input?.fixtureId
+    ? (await repository.list({ fixtureId: input.fixtureId })).find((version) => version.analysis_id === sourceAnalysisId) || null
+    : input?.fixtureId
+      ? await repository.latestForFixture(input.fixtureId)
+      : null;
   const result = await analyzeOperationalFixture(
     input,
     createServerSportsGateway(reanalysis ? "reanalysis" : "individual"),

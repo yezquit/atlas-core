@@ -2164,6 +2164,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
             timezone: defaultTimezone,
             analysisVersion: currentAnalysis?.analysisVersion?.analysis_id || "initial",
           } : null,
+          sourceAnalysisId: reanalysis && manualQuoteReady ? currentAnalysis?.analysisVersion?.analysis_id || null : null,
           manualCandidateOdds,
           transferredCandidate,
           intendedUse,

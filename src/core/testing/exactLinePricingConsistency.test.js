@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
-import { selectExactRequestedCandidate } from "../services/operationalAnalysisService.js";
+import { analyzeOperationalFixture, isCompatiblePriceSnapshot, selectExactRequestedCandidate } from "../services/operationalAnalysisService.js";
 
 const fixture = { fixtureId: 7, date: { utc: "2026-09-01T20:00:00Z" }, teams: { home: { name: "A" }, away: { name: "B" } } };
 const candidate = {
@@ -40,4 +40,64 @@ test("reanálisis exacto reemplaza la selección previa y no deja estado unavail
   assert.equal(result.exact_requested_line_unavailable, false);
   assert.equal(result.primary.line, 28.5);
   assert.equal(result.primary.direction, "over");
+});
+
+function sourceVersion() {
+  return {
+    analysis_id: "sports-source-29-5",
+    fixture_id: 77,
+    phase: "hours_before",
+    line_origin: "user_selected",
+    preliminary_probability: { probability_status: "preliminary", point_estimate: 0.62, uncertainty_low: 0.5, uncertainty_high: 0.7, sample_size_effective: 12, methodology_version: "preliminary-market-v1" },
+    analysis_confidence: { analysis_confidence_score: 70, confidence_label: "alta" },
+    director: {
+      fixture: { fixture_id: 77, home_team: "Real Madrid", away_team: "Malaga", kickoff: "2026-09-01T20:00:00.000Z", kickoff_utc: "2026-09-01T20:00:00.000Z", competition: "Liga", season: 2026, timezone: "America/Bogota" },
+      market_evaluated: { family: "total_shots", label: "Remates totales" },
+      selection: "Over 29.5", line: 29.5, technical_support: 70,
+      sports_verdict: { status: "sports_candidate", selection: "Over 29.5", direction: "over", line: 29.5, sports_score: 70 },
+      reasons: ["Snapshot deportivo válido."], risks: [], missing_data: [], context_summary: {},
+    },
+    evidence: [], odds: [], gemini_context: { valid_for_reanalysis: true, selected_items: [] },
+  };
+}
+
+function priceInput(overrides = {}) {
+  return {
+    fixtureId: 77,
+    marketId: "total_shots",
+    analysisMode: "specific",
+    line: "29.5",
+    selection: "Más de 29.5",
+    sourceAnalysisId: "sports-source-29-5",
+    evaluatePrice: true,
+    intendedUse: "individual",
+    manualOdds: { bookmaker: "Betano", marketFamily: "total_shots", direction: "over", selection: "Más de 29.5", line: "29.5", decimalOdds: "1.83", consultedAt: "2026-08-30T12:00:00.000Z", timezone: "America/Bogota", analysisVersion: "sports-source-29-5" },
+    ...overrides,
+  };
+}
+
+test("evaluar cuota reutiliza el snapshot exacto sin reconstruir deporte", async () => {
+  const noSportsGateway = new Proxy({}, { get() { throw new Error("sports_reconstruction_must_not_run"); } });
+  const result = await analyzeOperationalFixture(priceInput(), noSportsGateway, { previousVersion: sourceVersion(), now: () => "2026-08-30T12:00:00.000Z", idFactory: () => "priced-version" });
+  assert.equal(result.status, "success");
+  assert.equal(result.exactSelection.market_family, "total_shots");
+  assert.equal(result.exactSelection.direction, "over");
+  assert.equal(result.exactSelection.line, 29.5);
+  assert.equal(result.exactSelection.estimated_probability, 0.62);
+  assert.equal(result.exactSelection.sports_score, 70);
+  assert.equal(result.selectedOdds.decimal_odds, 1.83);
+  assert.ok(Number.isFinite(result.director.implied_probability));
+  assert.notEqual(result.director.price_assessment.status, "unavailable");
+});
+
+test("snapshot económico exige identidad exacta y no reutiliza otra línea", () => {
+  const source = sourceVersion();
+  assert.equal(isCompatiblePriceSnapshot(priceInput(), source), true);
+  assert.equal(isCompatiblePriceSnapshot(priceInput({ sourceAnalysisId: null }), source), false);
+  for (const changed of [
+    { fixtureId: 78 },
+    { manualOdds: { ...priceInput().manualOdds, marketFamily: "corners" } },
+    { selection: "Menos de 29.5", manualOdds: { ...priceInput().manualOdds, direction: "under", selection: "Menos de 29.5" } },
+    { line: "30.5", selection: "Más de 30.5", manualOdds: { ...priceInput().manualOdds, line: "30.5", selection: "Más de 30.5" } },
+  ]) assert.equal(isCompatiblePriceSnapshot(priceInput(changed), source), false);
 });

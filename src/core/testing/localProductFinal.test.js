@@ -126,10 +126,12 @@ test("8. la evidencia aceptada llega al reanálisis", () => {
   assert.ok(mapGeminiImpacts(selected.selected_items).length > 0);
 });
 
-test("9. Gemini se procesa antes de construir Director", async () => {
+test("9. Director recibe contexto Gemini en la ruta normal y el snapshot económico lo conserva", async () => {
   const source = await readFile(servicePath, "utf8");
-  assert.ok(source.indexOf("const selectedGemini") < source.indexOf("const director = buildOperationalDirectorVerdict"));
-  assert.ok(source.indexOf("const redTeam = buildRedTeamAtlas") < source.indexOf("const director = buildOperationalDirectorVerdict"));
+  assert.match(source, /const selectedGemini = geminiContext\?\.valid_for_reanalysis/);
+  assert.match(source, /manualContext: geminiContext/);
+  assert.match(source, /const redTeam = buildRedTeamAtlas\(/);
+  assert.match(source, /geminiContext: previousVersion\.gemini_context/);
 });
 
 test("10. Gemini puede modificar los argumentos sencillos", async () => {

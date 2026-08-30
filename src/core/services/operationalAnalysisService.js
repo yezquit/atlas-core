@@ -161,6 +161,163 @@ function selectActiveOddsQuote({ fixtureId, candidate, manualQuote = null, fallb
   ) || null;
 }
 
+function snapshotCandidate(previousVersion) {
+  const director = previousVersion?.director;
+  const sports = director?.sports_verdict;
+  const probability = previousVersion?.preliminary_probability;
+  const direction = normalizedDirection(sports?.direction || director?.selection);
+  const line = Number(director?.line ?? sports?.line);
+  const family = director?.market_evaluated?.family;
+  if (!family || !direction || !Number.isFinite(line) || probability?.probability_status !== "preliminary" || !Number.isFinite(Number(probability.point_estimate))) return null;
+  return {
+    candidate_id: `snapshot:${previousVersion.analysis_id}`,
+    market_family: family,
+    direction,
+    selection: sports?.selection || director?.selection,
+    line,
+    preliminary_probability: probability.point_estimate,
+    estimated_probability: probability.point_estimate,
+    probability_status: probability.probability_status,
+    uncertainty_low: probability.uncertainty_low,
+    uncertainty_high: probability.uncertainty_high,
+    sample_size_effective: probability.sample_size_effective,
+    sports_score: sports?.sports_score,
+    technical_support_score: director?.technical_support,
+    limitations: probability.limitations || director?.probability_limitations || [],
+  };
+}
+
+function snapshotFixture(previousVersion) {
+  const fixture = previousVersion?.director?.fixture;
+  if (!fixture?.fixture_id) return null;
+  return {
+    fixtureId: fixture.fixture_id,
+    teams: { home: { name: fixture.home_team }, away: { name: fixture.away_team } },
+    date: { utc: fixture.kickoff_utc || fixture.kickoff, timezone: fixture.timezone || null },
+    competition: { name: fixture.competition, season: fixture.season },
+  };
+}
+
+export function isCompatiblePriceSnapshot(input, previousVersion) {
+  const candidate = snapshotCandidate(previousVersion);
+  const quote = input.manualOdds;
+  if (!input.evaluatePrice || !input.sourceAnalysisId || !candidate || !quote) return false;
+  return Number(input.fixtureId) === Number(previousVersion.fixture_id) &&
+    quote.marketFamily === candidate.market_family &&
+    normalizedDirection(quote.direction || quote.selection) === candidate.direction &&
+    Number(quote.line) === Number(candidate.line) &&
+    Number(input.line) === Number(candidate.line) &&
+    normalizedDirection(input.selection) === candidate.direction;
+}
+
+function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
+  if (!isCompatiblePriceSnapshot(input, previousVersion)) return null;
+  const candidate = snapshotCandidate(previousVersion);
+  const fixture = snapshotFixture(previousVersion);
+  if (!fixture) return null;
+  const analyzedAt = now();
+  const quote = createManualOdds({
+    fixtureId: fixture.fixtureId,
+    bookmaker: input.manualOdds.bookmaker,
+    marketFamily: candidate.market_family,
+    marketName: previousVersion.director.market_evaluated?.label,
+    selection: candidate.selection,
+    direction: candidate.direction,
+    line: candidate.line,
+    decimalOdds: input.manualOdds.decimalOdds,
+    receivedAt: input.manualOdds.consultedAt,
+    analyzedAt,
+    kickoff: fixture.date.utc,
+    timezone: input.manualOdds.timezone || input.timezone,
+    analysisVersion: previousVersion.analysis_id,
+  });
+  if (!quote) return null;
+  const confidence = previousVersion.analysis_confidence || {
+    analysis_confidence_score: previousVersion.director?.analysis_confidence_score || 0,
+    confidence_label: previousVersion.director?.confidence_label || "baja",
+  };
+  const suitability = assessMarketSuitability({
+    fixtureVerified: true,
+    marketCandidate: Number(candidate.sports_score) >= 45,
+    sampleSufficient: Number(candidate.sample_size_effective) >= 5,
+    requiredEvidenceAvailable: true,
+    line: candidate.line,
+    oddsQuote: quote,
+    confidenceScore: confidence.analysis_confidence_score,
+    preliminaryProbability: previousVersion.preliminary_probability,
+    sampleSize: candidate.sample_size_effective,
+    phase: previousVersion.phase,
+  });
+  const marketAssessment = {
+    market_family: candidate.market_family,
+    market_label: previousVersion.director.market_evaluated?.label || candidate.market_family,
+    available_evidence: ["snapshot_sports_analysis"],
+    data_requirements: ["snapshot_sports_analysis"],
+    missing_evidence: previousVersion.director.missing_data || [],
+    risk_flags: previousVersion.director.risks || [],
+  };
+  const marketSelection = {
+    analysis_mode: "specific",
+    primary: candidate,
+    ranked_candidates: [candidate],
+    catalog_candidates: [candidate],
+    alternatives: [],
+    exact_requested_line_unavailable: false,
+    exact_line_available: true,
+    ready_for_pricing: true,
+  };
+  const director = buildOperationalDirectorVerdict({
+    fixture,
+    competition: { localName: fixture.competition.name },
+    analyzedAt,
+    phase: previousVersion.phase,
+    marketAssessment,
+    marketCandidate: candidate,
+    marketSelection,
+    oddsQuote: quote,
+    confidence,
+    suitability,
+    supportingEvidence: previousVersion.director.reasons || [],
+    opposingEvidence: previousVersion.director.risks || [],
+    missingData: previousVersion.director.missing_data || [],
+    risks: previousVersion.director.risks || [],
+    evidenceRefs: previousVersion.evidence?.map((item) => item.source_ref || item.id).filter(Boolean) || [],
+    preliminaryProbability: previousVersion.preliminary_probability,
+    intendedUse: input.intendedUse || "individual",
+  });
+  attachLineOriginToDirector(director, previousVersion.line_origin || LINE_ORIGIN.USER_SELECTED, previousVersion.director.context_summary || {});
+  const version = buildAnalysisVersion({
+    fixture,
+    phase: previousVersion.phase,
+    inputs: { ...input, sourceAnalysisId: previousVersion.analysis_id, price_only_snapshot: true },
+    evidence: previousVersion.evidence || [],
+    odds: [...(previousVersion.odds || []), quote],
+    activeQuote: quote,
+    lineOrigin: previousVersion.line_origin,
+    geminiContext: previousVersion.gemini_context,
+    analysisConfidence: confidence,
+    preliminaryProbability: previousVersion.preliminary_probability,
+    director,
+    engineVersion: OPERATIONAL_ENGINE_VERSION,
+  }, { idFactory, now: () => analyzedAt });
+  return {
+    status: DATA_LOAD_STATUS.SUCCESS,
+    selectedFixtureId: fixture.fixtureId,
+    fixture,
+    analysisMode: "specific",
+    message: "Cuota actual evaluada sobre el análisis deportivo existente.",
+    marketSelection,
+    exactSelection: { fixture_id: fixture.fixtureId, market_family: candidate.market_family, direction: candidate.direction, line: candidate.line, estimated_probability: candidate.estimated_probability, sports_score: candidate.sports_score, uncertainty: { low: candidate.uncertainty_low, high: candidate.uncertainty_high }, support: candidate.technical_support_score, ready_for_pricing: true },
+    preliminaryProbability: previousVersion.preliminary_probability,
+    selectedOdds: quote,
+    activeQuote: quote,
+    director,
+    gemini: { context: previousVersion.gemini_context, applied_items: previousVersion.gemini_context?.selected_items || [] },
+    analysisVersion: version,
+    changesSincePrevious: compareAnalysisVersions(previousVersion, version),
+  };
+}
+
 export function resolveLineOrigin(input = {}, previousVersion = null, { requestedLine = null, requestedSelection = null } = {}) {
   const validOrigins = new Set(Object.values(LINE_ORIGIN));
   const previousOrigin = previousVersion?.line_origin;
@@ -382,6 +539,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       };
     }
   }
+  const snapshotPriceResult = priceOnlySnapshotResult(input, previousVersion, { now, idFactory });
+  if (snapshotPriceResult) return snapshotPriceResult;
   const base = await analyzeSportsFixture({
     ...input,
     odds: null,

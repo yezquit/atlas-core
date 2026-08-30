@@ -230,9 +230,12 @@ test("27. la evidencia rechazada continúa sin influir", () => {
   assert.equal(mapGeminiImpacts(selected.selected_items).length, 0);
 });
 
-test("28. Gemini continúa procesándose antes del Director", async () => {
+test("28. Gemini se aplica al análisis normal y se conserva al evaluar solo precio", async () => {
   const source = await readFile(servicePath, "utf8");
-  assert.ok(source.indexOf("const selectedGemini") < source.indexOf("const director = buildOperationalDirectorVerdict"));
+  assert.match(source, /const selectedGemini = geminiContext\?\.valid_for_reanalysis/);
+  assert.match(source, /contextItems: selectedGemini/);
+  assert.match(source, /manualContext: geminiContext/);
+  assert.match(source, /geminiContext: previousVersion\.gemini_context/);
 });
 
 test("29. Scout permanece ciego al precio", () => {
