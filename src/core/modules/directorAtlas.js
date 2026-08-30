@@ -561,6 +561,26 @@ function buildOppositeMarketAssessment({ marketCandidate, sideComparison, opposi
   };
 }
 
+// Clasifica un price_assessment ya calculado (sin tocar evaluateMarketPrice
+// ni sus umbrales) en tres cubetas presentacionales:
+// - "favorable": status favorable_preliminary (gap, ancho y confianza ya
+//   pasaron todos los umbrales existentes).
+// - "marginal_positive": status marginal CON price_gap > 0 — hay edge
+//   positivo, pero uncertaintyWidth<=0.25 y/o confidenceScore>=75+sampleSize>=5
+//   no se cumplieron. Nunca se reporta como "sin valor".
+// - "no_value": unfavorable, o marginal sin edge positivo real.
+function priceValueCategory(assessment) {
+  if (!assessment) return null;
+  if (assessment.status === PRICE_EVALUATION_STATUS.FAVORABLE_PRELIMINARY) return "favorable";
+  if (assessment.status === PRICE_EVALUATION_STATUS.MARGINAL && Number(assessment.price_gap) > 0) return "marginal_positive";
+  return "no_value";
+}
+
+function formatSignedPoints(value) {
+  if (!Number.isFinite(value)) return null;
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
 // Separa siempre (A) preferencia deportiva — de side_comparison, ajeno a
 // precio — de (B) valoración económica — de price_assessment por lado. No
 // inventa ninguna probabilidad ni cuota; solo redacta la conclusión a partir
@@ -568,9 +588,10 @@ function buildOppositeMarketAssessment({ marketCandidate, sideComparison, opposi
 function buildSportsPriceConclusion({ marketCandidate, sideComparison, priceAssessment, oppositeMarket }) {
   if (!marketCandidate || !sideComparison?.canonical) return null;
   const selectedLabel = marketCandidate.selection;
+  const selectedTag = Number.isFinite(priceAssessment?.decimal_odds) ? ` @${priceAssessment.decimal_odds}` : "";
   const oppositeLabel = oppositeMarket?.selection || null;
+  const oppositeTag = Number.isFinite(oppositeMarket?.decimal_odds) ? ` @${oppositeMarket.decimal_odds}` : "";
   const preferredSide = sideComparison.sports_preferred_side;
-  const selectedFavorable = priceAssessment?.status === PRICE_EVALUATION_STATUS.FAVORABLE_PRELIMINARY;
 
   if (!oppositeMarket?.has_quote) {
     // Solo existe (o no existe ninguna) cuota del lado seleccionado.
@@ -578,22 +599,32 @@ function buildSportsPriceConclusion({ marketCandidate, sideComparison, priceAsse
     return `El modelo deportivo favorece el lado contrario, ${oppositeLabel}, con una probabilidad estimada de ${oppositeMarket.probability_percent}%, pero no puede evaluar su precio porque no se introdujo una cuota.`;
   }
 
-  // Ambas cuotas disponibles: comparar los dos edges por separado de la
-  // preferencia deportiva.
-  const oppositeFavorable = oppositeMarket.price_assessment?.status === PRICE_EVALUATION_STATUS.FAVORABLE_PRELIMINARY;
-  if (preferredSide === "neutral") {
-    if (selectedFavorable) return `Sin ventaja deportiva clara entre ambos lados, pero ${selectedLabel} ofrece mejor relación probabilidad/precio.`;
-    if (oppositeFavorable) return `Sin ventaja deportiva clara entre ambos lados, pero ${oppositeLabel} ofrece mejor relación probabilidad/precio.`;
-    return "Sin ventaja deportiva clara entre ambos lados y ninguna de las dos cuotas ofrece valor suficiente.";
+  // Ambas cuotas disponibles: la conclusión distingue (A) edge negativo,
+  // (B) edge positivo con evidencia insuficiente y (C) favorable — nunca
+  // reduce (B) a "ninguna cuota ofrece valor suficiente".
+  const selectedCategory = priceValueCategory(priceAssessment);
+  const oppositeCategory = priceValueCategory(oppositeMarket.price_assessment);
+  const selectedGap = formatSignedPoints(priceAssessment?.price_gap_percentage_points);
+  const oppositeGap = formatSignedPoints(oppositeMarket.price_assessment?.price_gap_percentage_points);
+
+  if (selectedCategory === "favorable") {
+    return `Atlas prefiere ${selectedLabel}${selectedTag} tanto deportivamente como por relación probabilidad/precio.`;
   }
-  if (preferredSide === marketCandidate.direction) {
-    return selectedFavorable
-      ? `Atlas prefiere ${selectedLabel} tanto deportivamente como por relación probabilidad/precio.`
-      : `Aunque el modelo deportivo favorece ${selectedLabel}, la cuota disponible no ofrece suficiente valor.`;
+  if (oppositeCategory === "favorable") {
+    return `Atlas prefiere ${oppositeLabel}${oppositeTag} tanto deportivamente como por relación probabilidad/precio.`;
   }
-  return oppositeFavorable
-    ? `Atlas prefiere ${oppositeLabel} tanto deportivamente como por relación probabilidad/precio.`
-    : `Atlas favorece deportivamente ${oppositeLabel}, pero ninguna de las dos cuotas ofrece valor suficiente.`;
+  if (selectedCategory === "no_value" && oppositeCategory === "no_value") {
+    return "Ninguna de las dos cuotas ofrece valor suficiente.";
+  }
+  if (selectedCategory === "no_value" && oppositeCategory === "marginal_positive") {
+    return `NO recomiendo ${selectedLabel}${selectedTag}. ${oppositeLabel}${oppositeTag} es la alternativa con mejor valor matemático (edge ${oppositeGap} pp), pero ATLAS mantiene ESPERAR porque la evidencia todavía no alcanza el nivel de confianza requerido para una recomendación firme.`;
+  }
+  if (selectedCategory === "marginal_positive" && oppositeCategory === "no_value") {
+    return `Hay valor matemático aparente en ${selectedLabel}${selectedTag} (edge ${selectedGap} pp), pero la evidencia no es suficientemente sólida para recomendar apostar. ATLAS mantiene ESPERAR.`;
+  }
+  // Ambos lados muestran edge positivo pero ninguno alcanza el umbral de
+  // confianza/ancho: hay valor aparente en ambos, no ausencia de valor.
+  return "Hay valor matemático aparente en ambos lados, pero la evidencia no es suficientemente sólida para recomendar apostar en ninguno. ATLAS mantiene ESPERAR.";
 }
 
 export function buildOperationalDirectorVerdict({
