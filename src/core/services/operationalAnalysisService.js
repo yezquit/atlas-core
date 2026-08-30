@@ -15,6 +15,7 @@ import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
 import { buildDreamParlays } from "../intelligence/dreamParlayEngine.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
+import { buildMarketOpportunityRadar, attachRadarContext } from "../intelligence/marketOpportunityRadar.js";
 import { analyzeSportsFixture } from "./sportsIntelligenceService.js";
 
 function coverageFlag(coverage, path) {
@@ -33,6 +34,17 @@ function isDirectMarketEvidence(item, marketFamily, impacts = []) {
   if (!item || !marketFamily) return false;
   if (item.affected_markets?.includes(marketFamily)) return true;
   return impacts.some((impact) => impact.source_item_id === item.id && impact.affected_markets?.includes(marketFamily));
+}
+
+// Fase 3B: adjunta el radar_context de la familia de CADA candidato al
+// propio candidato, sin tocar ningún otro campo. Reutiliza attachRadarContext
+// tal cual (Fase 3A) en vez de reimplementar su lógica de anotación; solo
+// resuelve el caso de un catálogo con varias familias mezcladas (modo
+// "general"), donde cada candidato necesita el resultado de SU familia, no
+// el de otra.
+function attachRadarContextByFamily(candidates, radarResults) {
+  const radarByFamily = new Map(radarResults.map((radar) => [radar.market_family, radar]));
+  return candidates.map((candidate) => attachRadarContext([candidate], radarByFamily.get(candidate.market_family) || null)[0]);
 }
 
 function summarizeMarketEvidence(items, marketFamily, impacts = []) {
@@ -533,6 +545,40 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       preferredQuote,
     });
   }
+  // Fase 3B: MarketOpportunityRadar corre por familia de mercado, consumiendo
+  // exactamente marketSelection.generated (ya calculado por
+  // buildRankedMarketSelection: distribución + líneas generadas + auditoría
+  // por candidato) — no se recalcula distribución, componentes ni
+  // observaciones canónicas. El Radar NO elige línea exacta ni usa cuotas,
+  // y no se le pasa nada relacionado con oddsResult. contextItems/
+  // contextImpacts van SIN filtrar por familia: cada llamada al Radar aplica
+  // internamente su propio gating por affected_markets, así una evidencia de
+  // shots_on_goal nunca contamina una tesis de corners. El resultado se
+  // adjunta como radar_context (anotación) sobre los candidatos que
+  // DecisionFrontier ya eligió dentro de buildRankedMarketSelection; nunca
+  // sustituye esa selección ni toca estimated_probability/sports_score.
+  const marketOpportunityRadar = (marketSelection.generated || []).map((generatedLinesForFamily) =>
+    buildMarketOpportunityRadar({ generatedLines: generatedLinesForFamily, contextItems: selectedGemini, contextImpacts: geminiImpacts })
+  );
+  // ranked_candidates y catalog_candidates se enriquecen POR SEPARADO, cada
+  // uno desde su propio campo original — nunca uno derivado del otro — para
+  // no reducir ni alterar el catálogo si en algún momento dejan de ser la
+  // misma referencia.
+  const enrichedRankedCandidates = attachRadarContextByFamily(marketSelection.ranked_candidates || [], marketOpportunityRadar);
+  const enrichedCatalogCandidates = attachRadarContextByFamily(marketSelection.catalog_candidates || [], marketOpportunityRadar);
+  const enrichedRankedById = new Map(enrichedRankedCandidates.map((candidate) => [candidate.candidate_id, candidate]));
+  marketSelection = {
+    ...marketSelection,
+    ranked_candidates: enrichedRankedCandidates,
+    catalog_candidates: enrichedCatalogCandidates,
+    // primary/alternatives se resuelven contra enrichedRankedCandidates por
+    // candidate_id: el candidato que DecisionFrontier ya eligió sigue siendo
+    // el mismo (mismo candidate_id, misma estimated_probability/sports_score/
+    // probability_classification/línea/orden); solo gana radar_context.
+    primary: marketSelection.primary ? (enrichedRankedById.get(marketSelection.primary.candidate_id) || marketSelection.primary) : null,
+    alternatives: (marketSelection.alternatives || []).map((candidate) => enrichedRankedById.get(candidate.candidate_id) || candidate),
+  };
+
   const phaseInfo = phaseForKickoff(base.fixture.date.utc, analyzedAt);
   const operationalRanking = buildOperationalRanking({
     scout,
@@ -808,6 +854,13 @@ selections: input.dreamSelections || 5,
     support: primaryCandidate.technical_support_score,
     ready_for_pricing: marketSelection.ready_for_pricing === true,
   } : null;
+  // Contexto explicable en español para la familia actualmente seleccionada
+  // (Fase 3B, punto 5): dirección, señales, resultado adversarial y
+  // coherencia del modelo, tal cual los produce el Radar — sin reconstruir
+  // ni parafrasear su cálculo.
+  const primaryMarketOpportunityRadar = marketOpportunityRadar.find(
+    (radar) => radar.market_family === (primaryCandidate?.market_family || manualMarketFamily)
+  ) || null;
   return {
     ...base,
     contract: "AtlasOperationalAnalysis",
@@ -816,6 +869,8 @@ selections: input.dreamSelections || 5,
     analysisMode: marketSelection.analysis_mode,
     marketSelection,
     exactSelection,
+    marketOpportunityRadar,
+    primaryMarketOpportunityRadar,
     scout,
     operationalRanking,
     redTeam,
