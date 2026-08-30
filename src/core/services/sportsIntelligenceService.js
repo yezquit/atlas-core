@@ -569,12 +569,15 @@ export function buildJourneyRecommendationShortlist(candidates = [], maximum = 1
     const economics = candidate.decisionEconomics;
     const riskyWithPriceValue = risky && currentPrice && economics?.status === "available"
       && Number(economics.edge) > 0 && Number(economics.expected_value) > 0;
-    const recommendable = frontier.recommended === true
-      && frontier.status === "eligible"
+    // decision_frontier.recommended (un único "ganador" por fixture+family+
+    // direction) y el tope absoluto de ancho de incertidumbre ya NO son veto:
+    // ambos podían excluir una familia entera aunque tuviera candidatos
+    // elegibles con mayor estimated_probability que otros ya visibles. La
+    // incertidumbre (width) se conserva y se sigue reportando en
+    // atlasRecommendation.uncertainty_width; solo deja de decidir QUÉ entra.
+    const recommendable = frontier.status === "eligible"
       && Number(candidate.selectionQuality) >= 60
       && support >= 58
-      && Number.isFinite(width)
-      && width <= 0.35
       && (!risky || riskyWithPriceValue);
     if (!recommendable) return null;
     const sportsSignals = (candidate.fixtureEvidence?.reasons || candidate.reasons || []).filter(Boolean).slice(0, 2);
