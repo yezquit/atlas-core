@@ -408,6 +408,7 @@ export function resolveManualExactSelection({
   contextImpacts = [],
   quotes = [],
   preferredQuote = null,
+  allowSpecificLimitedSample = false,
 } = {}) {
   if (!marketSelection || requestedLine === null || requestedLine === undefined || !marketFamily || !requestedSelection) {
     return marketSelection;
@@ -428,6 +429,7 @@ export function resolveManualExactSelection({
     refereeProfile,
     contextItems,
     contextImpacts,
+    allowSpecificLimitedSample,
   });
   if (!exactEvaluation.exact_selection_ready) {
     const unavailable = selectExactRequestedCandidate(marketSelection, { marketFamily, requestedLine, requestedSelection, lineOrigin });
@@ -702,6 +704,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       contextImpacts: geminiImpacts,
       quotes: oddsResult.quotes,
       preferredQuote,
+      allowSpecificLimitedSample: analysisMode === "specific",
     });
   }
   // Fase 3B: MarketOpportunityRadar corre por familia de mercado, consumiendo

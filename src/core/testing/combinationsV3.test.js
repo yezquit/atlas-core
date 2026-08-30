@@ -306,13 +306,13 @@ test("22. muchos candidatos elegibles producen Parlay cuando al menos 2 sobreviv
   assert.equal(result.selections.length, 2);
 });
 
-test("23. Journey usa frontera de decisión para el orden del selector de combinaciones", () => {
+test("23. Journey ordena el selector de combinaciones por estimated_probability DESC", () => {
   const entries = [
     journeyEntry(3001, "alto-score-baja-prob", { sports_score: 95, estimated_probability: 0.5 }),
     journeyEntry(3002, "bajo-score-alta-prob", { sports_score: 60, estimated_probability: 0.9 }),
   ];
   const selected = selectCombinationJourneyCandidates(entries, 10);
-  assert.equal(selected[0].candidate.candidate_id, "alto-score-baja-prob");
+  assert.equal(selected[0].candidate.candidate_id, "bajo-score-alta-prob");
 });
 
 test("24. estimated_probability no cambia después de asociar una cuota", () => {

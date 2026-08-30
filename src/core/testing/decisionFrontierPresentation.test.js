@@ -19,12 +19,15 @@ test("la cuota exacta queda disponible después de Director y no requiere hora m
 
 test("Jornada mantiene catálogo completo y separa recomendaciones de Decision Frontier", async () => {
   const catalogue = [
-    { fixtureId: 1, decisionFrontier: { recommended: true, status: "eligible", reason: "Línea útil." }, selectionQuality: 71, technicalSupport: 70, uncertaintyLow: 0.5, uncertaintyHigh: 0.7 },
-    { fixtureId: 2, decisionFrontier: { recommended: false, status: "eligible" }, selectionQuality: 99, technicalSupport: 90, uncertaintyLow: 0.5, uncertaintyHigh: 0.6 },
-    { fixtureId: 3, decisionFrontier: { recommended: true, status: "eligible", reason: "Línea útil." }, selectionQuality: 82, technicalSupport: 75, uncertaintyLow: 0.5, uncertaintyHigh: 0.7 },
-    { fixtureId: 4, decisionFrontier: { recommended: true, status: "eligible" }, selectionQuality: 99, technicalSupport: 40, uncertaintyLow: 0.5, uncertaintyHigh: 0.6 },
+    { fixtureId: 1, estimatedProbability: 0.71, decisionFrontier: { recommended: true, status: "eligible", reason: "Línea útil." }, selectionQuality: 71, technicalSupport: 70, uncertaintyLow: 0.5, uncertaintyHigh: 0.7 },
+    { fixtureId: 2, estimatedProbability: 0.99, decisionFrontier: { recommended: false, status: "eligible" }, selectionQuality: 99, technicalSupport: 90, uncertaintyLow: 0.5, uncertaintyHigh: 0.6 },
+    { fixtureId: 3, estimatedProbability: 0.82, decisionFrontier: { recommended: true, status: "eligible", reason: "Línea útil." }, selectionQuality: 82, technicalSupport: 75, uncertaintyLow: 0.5, uncertaintyHigh: 0.7 },
+    { fixtureId: 4, estimatedProbability: 0.99, decisionFrontier: { recommended: true, status: "eligible" }, selectionQuality: 99, technicalSupport: 40, uncertaintyLow: 0.5, uncertaintyHigh: 0.6 },
   ];
   const shortlist = buildJourneyRecommendationShortlist(catalogue);
+  // Orden por estimated_probability descendente entre los que SÍ califican
+  // (fixture 2 queda fuera por decisionFrontier.recommended=false; fixture 4
+  // por technicalSupport<58): 3 (0.82) antes que 1 (0.71).
   assert.deepEqual(shortlist.map((candidate) => candidate.fixtureId), [3, 1]);
   assert.equal(catalogue.length, 4);
   assert.equal(buildJourneyRecommendationShortlist([{ fixtureId: 9, decisionFrontier: { recommended: true, status: "eligible" }, selectionQuality: 40, technicalSupport: 40, uncertaintyLow: 0.2, uncertaintyHigh: 0.7 }]).length, 0);

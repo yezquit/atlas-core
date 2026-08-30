@@ -209,7 +209,16 @@ export function generateCandidateLines(input = {}) {
 
 export function evaluateExactMarketLine({ marketFamily, direction, line, ...context } = {}) {
   const normalizedDirection = String(direction || "").trim().toLowerCase();
-  const distribution = buildMarketDistribution({ ...context, marketFamily });
+  const standardCanonical = buildCanonicalObservations({ ...context, marketFamily });
+  const standardSources = new Set(standardCanonical.sources.map((source) => source.name));
+  const standardCoverageComplete = standardSources.has("league") &&
+    [...standardSources].some((name) => name.startsWith("home_")) &&
+    [...standardSources].some((name) => name.startsWith("away_"));
+  const useSpecificLimitedSample = Boolean(context.allowSpecificLimitedSample && !standardCoverageComplete);
+  const canonicalObservations = useSpecificLimitedSample
+    ? buildCanonicalObservations({ ...context, marketFamily }, { allowSubthresholdSources: true })
+    : standardCanonical;
+  const distribution = buildMarketDistribution({ ...context, marketFamily, canonicalObservations });
   if (!distribution || !isValidCandidateLine(marketFamily, line, distribution, { manualExact: true })) {
     const result = { reason: distribution ? "unsupported_exact_line" : "insufficient_distribution_data" };
     return {
@@ -234,6 +243,7 @@ export function evaluateExactMarketLine({ marketFamily, direction, line, ...cont
     contextShift: distribution.context_shift_events,
     canonicalObservations: distribution.canonical_observations,
     allowLimitedReferee: true,
+    allowSpecificLimitedSample: useSpecificLimitedSample,
   });
   const candidate = probability.probability_status === "preliminary"
     ? buildMarketLineCandidate({ input: { ...context, marketFamily }, distribution, line: Number(line), direction: normalizedDirection, probability })

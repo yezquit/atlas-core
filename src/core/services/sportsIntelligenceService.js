@@ -593,7 +593,14 @@ export function buildJourneyRecommendationShortlist(candidates = [], maximum = 1
       },
     };
   }).filter(Boolean)
-    .sort((left, right) => Number(right.selectionQuality ?? -Infinity) - Number(left.selectionQuality ?? -Infinity))
+    // Mismo criterio de orden que el universo completo: estimated_probability
+    // descendente, sin prioridad de familia. selectionQuality sigue decidiendo
+    // QUÉ entra al shortlist (arriba), no en qué orden se muestra.
+    .sort((left, right) => {
+      const leftProbability = Number.isFinite(left.estimatedProbability) ? left.estimatedProbability : -Infinity;
+      const rightProbability = Number.isFinite(right.estimatedProbability) ? right.estimatedProbability : -Infinity;
+      return rightProbability - leftProbability;
+    })
     .slice(0, Math.max(0, maximum));
 }
 
@@ -919,12 +926,19 @@ export function rankJourneyCandidatesByDecision(entries = [], { product = "indiv
       candidate: byIdentity.get(candidateIdentity(candidate)) || entry.candidate,
     };
   }).sort((left, right) => {
-    const leftRecommended = left.candidate?.decision_frontier?.recommended ? 0 : 1;
-    const rightRecommended = right.candidate?.decision_frontier?.recommended ? 0 : 1;
-    if (leftRecommended !== rightRecommended) return leftRecommended - rightRecommended;
-    const score = Number(right.candidate?.selection_quality) - Number(left.candidate?.selection_quality);
-    if (Number.isFinite(score) && score) return score;
-    return rankJourneyCandidatesByProbability([left, right])[0] === left ? -1 : 1;
+    // No hay prioridad fija por market_family (goals/total_shots/etc.): el
+    // universo visible (Jornada y el que alimenta Parlay/Soñadora) se ordena
+    // exclusivamente por estimated_probability descendente. Empates conservan
+    // el orden estable de entrada (Array#sort es estable en Node >=20); un
+    // candidato sin probabilidad finita nunca adelanta a uno con probabilidad
+    // válida y queda al final.
+    const leftProbability = Number.isFinite(left.candidate?.estimated_probability)
+      ? left.candidate.estimated_probability
+      : -Infinity;
+    const rightProbability = Number.isFinite(right.candidate?.estimated_probability)
+      ? right.candidate.estimated_probability
+      : -Infinity;
+    return rightProbability - leftProbability;
   });
 }
 

@@ -101,11 +101,15 @@ export function estimatePreliminaryMarketProbability({
   contextShift = 0,
   allowLimitedReferee = false,
   canonicalObservations = null,
+  allowSpecificLimitedSample = false,
 } = {}) {
   const supported = new Set(["goals", "total_shots", "shots_on_goal", "cards", "corners"]);
   if (!supported.has(marketFamily)) return unavailable("La familia de mercado no tiene metodología documentada.");
-  const compatibleTeamCoverage = (profile) => ["verified", "partial"].includes(profile?.quality_status);
-  if (!["verified", "partial"].includes(leagueProfile?.quality_status) || !compatibleTeamCoverage(homeTeamProfile) || !compatibleTeamCoverage(awayTeamProfile)) {
+  const compatibleStatuses = allowSpecificLimitedSample
+    ? ["verified", "partial", "insufficient_sample"]
+    : ["verified", "partial"];
+  const compatibleTeamCoverage = (profile) => compatibleStatuses.includes(profile?.quality_status);
+  if (!compatibleStatuses.includes(leagueProfile?.quality_status) || !compatibleTeamCoverage(homeTeamProfile) || !compatibleTeamCoverage(awayTeamProfile)) {
     return unavailable("Las coberturas de liga y equipos no son compatibles para una estimación preliminar.");
   }
   const parsedLine = parsePreliminaryMarketLine({ selection, line });
@@ -113,6 +117,24 @@ export function estimatePreliminaryMarketProbability({
   const criticalContradictions = contextItems.filter((item) => item.kind === "contradiction");
   if (criticalContradictions.length) return unavailable("Existen contradicciones críticas sin resolver.", criticalContradictions.map((item) => item.text));
   const canonical = canonicalObservations || buildCanonicalObservations({ marketFamily, leagueProfile, homeTeamProfile, awayTeamProfile });
+
+  if (allowSpecificLimitedSample && canonical.observations.length) {
+    const hasLeagueEvidence = canonical.observations.some((item) =>
+      item.memberships.some((membership) => membership.source_name === "league")
+    );
+    if (!hasLeagueEvidence) {
+      return unavailable("Falta una referencia histórica de liga para estimar la línea específica.");
+    }
+    return estimateCanonical({
+      canonical,
+      marketFamily,
+      parsedLine,
+      contextShift,
+      contextItems,
+      refereeLimited: marketFamily === "cards" && refereeProfile?.quality_status !== "verified",
+      omittedCoverage: ["specific_mode_limited_sample"],
+    });
+  }
 
   const definitions = [
     ["league", BASE_WEIGHTS.league, leagueProfile?.event_samples?.[marketFamily]?.match_totals || [], 8],

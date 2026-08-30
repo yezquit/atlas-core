@@ -10,12 +10,13 @@ const SOURCES = Object.freeze([
 const minimum = (name) => name === "league" ? 8 : name.endsWith("last_5") ? 3 : name.endsWith("last_10") ? 5 : 2;
 const numeric = (v) => Number.isFinite(Number(v)) ? Number(v) : null;
 const mean = (xs) => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
-export function buildCanonicalObservations(input = {}) {
+export function buildCanonicalObservations(input = {}, { allowSubthresholdSources = false } = {}) {
   const family = input.marketFamily; const byFixture = new Map(); const sources = [];
   for (const [name, requested_weight, pick] of SOURCES) {
-    const sample = pick(input)?.[family] || {}; const observations = (sample.observations || sample.match_totals?.map((value, index) => ({ fixture_id: `${name}:legacy:${index}`, value })) || [])
+    const sample = pick(input)?.[family] || {}; const rawObservations = (sample.observations || sample.match_totals?.map((value, index) => ({ fixture_id: `${name}:legacy:${index}`, value })) || [])
       .map((o) => ({ fixture_id: o.fixture_id ?? o.fixtureId, value: numeric(o.value) })).filter((o) => o.fixture_id !== null && o.fixture_id !== undefined && o.value !== null);
-    if (observations.length < minimum(name)) continue;
+    const observations = [...new Map(rawObservations.map((observation) => [String(observation.fixture_id), observation])).values()];
+    if (!observations.length || (!allowSubthresholdSources && observations.length < minimum(name))) continue;
     sources.push({ name, requested_weight, raw_fixture_ids: observations.map((o) => o.fixture_id), raw_sample_size: observations.length, raw_center: mean(observations.map((o) => o.value)) });
     for (const observation of observations) {
       const current = byFixture.get(String(observation.fixture_id)) || { fixture_id: observation.fixture_id, value: observation.value, memberships: [] };

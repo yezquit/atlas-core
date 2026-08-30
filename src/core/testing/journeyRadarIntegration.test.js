@@ -123,8 +123,6 @@ test("2. convergencia LOW real se refleja en radarContext dentro de Jornada", as
 test("3. el cableado del Radar no altera la identidad (family+direction+line), estimated_probability, sports_score, ni el universo de candidatos elegibles de goals", async () => {
   const gateway = buildJourneyRadarGateway({ scheduled: [scheduledFixture(TARGET_FIXTURE_ID)], leaguePairs: LOW_20, homePairs: HIGH_10, awayPairs: HIGH_10 });
   const result = await scanSportsJourney({ ...journeyBase }, gateway);
-  const goalsCandidate = result.candidates.find((candidate) => candidate.marketId === "goals");
-  assert.ok(goalsCandidate);
 
   // Referencia REAL sin Radar: se reconstruyen los mismos datos deportivos
   // subyacentes (analyzeSportsFixture, el mismo flujo inferior que
@@ -157,6 +155,18 @@ test("3. el cableado del Radar no altera la identidad (family+direction+line), e
   });
   const referenceCandidate = reference.primary;
   assert.ok(referenceCandidate, "la referencia sin Radar debe producir un candidato primario");
+
+  // Identidad inequívoca (family+direction+line), nunca posición: puede haber
+  // más de una línea elegible de goals a la vez (el universo exhaustivo de
+  // Jornada), y el orden de Jornada (estimated_probability DESC) no tiene por
+  // qué coincidir con la línea que buildRankedMarketSelection elige como
+  // .primary (que usa su propia frontera de calidad, no solo probabilidad).
+  const goalsCandidate = result.candidates.find((candidate) =>
+    candidate.marketId === "goals"
+    && candidate.direction === referenceCandidate.direction
+    && candidate.line === referenceCandidate.line
+  );
+  assert.ok(goalsCandidate, "debe existir en Jornada la misma línea de goals que la referencia sin Radar");
 
   assert.equal(goalsCandidate.marketId, referenceCandidate.market_family);
   assert.equal(goalsCandidate.direction, referenceCandidate.direction);
