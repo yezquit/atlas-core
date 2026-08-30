@@ -214,6 +214,48 @@ function percentage(value) {
   return Number.isFinite(value) ? `${(value * 100).toFixed(1).replace(".0", "")}%` : "No disponible";
 }
 
+const RADAR_DIRECTION_LABELS = { high: "ALTA", low: "BAJA", neutral: "NEUTRAL" };
+function radarDirectionLabel(direction) {
+  return RADAR_DIRECTION_LABELS[direction] || "SIN DATO";
+}
+
+function radarOpportunityState(radar) {
+  if (!radar) return null;
+  if (radar.radar_direction !== "neutral" && radar.adversarial_passed === false) {
+    return { key: "blocked", label: "BLOQUEADA POR CONTRAEVIDENCIA" };
+  }
+  if (radar.opportunity_detected === true) {
+    return { key: "opportunity", label: "OPORTUNIDAD ATLAS" };
+  }
+  if (radar.radar_direction === "neutral") {
+    return { key: "observation", label: "EN OBSERVACIÓN" };
+  }
+  return { key: "unclassified", label: "SIN CLASIFICAR" };
+}
+
+function adversarialStatusLabel(adversarialPassed) {
+  if (adversarialPassed === true) return "Superada";
+  if (adversarialPassed === false) return "No superada";
+  return "No disponible";
+}
+
+function coherenceLabel(coherent) {
+  if (coherent === true) return "Coherencia correcta";
+  if (coherent === false) return "Coherencia problemática";
+  return "Coherencia desconocida";
+}
+
+function pointsDifference(estimated, implied) {
+  if (!Number.isFinite(estimated) || !Number.isFinite(implied)) return null;
+  const rounded = Math.round((estimated - implied) * 1000) / 10;
+  return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1)} pp`;
+}
+
+const DIRECTOR_DECISION_ICONS = { yes: "✅", wait: "⏳", no: "⛔" };
+function directorDecisionIcon(decision) {
+  return DIRECTOR_DECISION_ICONS[decision?.status] ?? null;
+}
+
 function bestCandidatePerFamily(rankedCandidates = []) {
   const seen = new Set();
   const result = [];
@@ -610,6 +652,59 @@ function OperationalRankingResult({ ranking }) {
   );
 }
 
+function RadarBadge({ radar }) {
+  if (!radar) {
+    return (
+      <section className="p2-radar-summary p2-radar-unavailable" aria-label="Estado del Radar">
+        <p className="eyebrow">RADAR</p>
+        <p>Sin contexto de convergencia disponible para esta familia.</p>
+      </section>
+    );
+  }
+  const state = radarOpportunityState(radar);
+  return (
+    <section className={`p2-radar-summary p2-radar-${state.key}`} aria-label="Estado del Radar">
+      <p className="eyebrow">RADAR</p>
+      <p className="p2-radar-state"><strong>{state.label}</strong></p>
+      <DefinitionGrid entries={[
+        ["Dirección", radarDirectionLabel(radar.radar_direction)],
+        ["Convergencia Radar", Number.isFinite(radar.radar_score) ? `${radar.radar_score}/100` : "No disponible"],
+        ["Contraevidencia", adversarialStatusLabel(radar.adversarial_passed)],
+        ["Coherencia del modelo", coherenceLabel(radar.model_coherence?.coherent)],
+      ]} />
+      <small>Convergencia Radar resume la calidad y convergencia de las señales deportivas; no es una probabilidad.</small>
+      <details className="p2-source-details">
+        <summary>Ver métricas auditables del Radar</summary>
+        <DefinitionGrid entries={[
+          ["Fixtures únicos considerados", radar.unique_fixture_count],
+          ["Grupos de señal disponibles", radar.signal_group_count],
+          ["Conteo técnico de señales", radar.independent_signal_count],
+          ["Calidad de muestra", Number.isFinite(radar.sample_quality) ? `${radar.sample_quality}/100` : null],
+          ["Contradicciones fuertes", radar.opposing_strength],
+        ]} />
+      </details>
+    </section>
+  );
+}
+
+function EconomicsPanel({ decimalOdds, bookmaker, impliedProbability, estimatedProbability }) {
+  const hasExactQuote = Number.isFinite(decimalOdds) && Number.isFinite(impliedProbability);
+  return (
+    <section className="p2-economics-panel" aria-label="Información económica">
+      <p className="eyebrow">ECONOMÍA</p>
+      <DefinitionGrid entries={[
+        ["Cuota", hasExactQuote
+          ? `${decimalOdds}${bookmaker ? ` · ${bookmaker}` : ""}`
+          : "Cuota no disponible"],
+        ["Probabilidad implícita", hasExactQuote ? percentage(impliedProbability) : "No disponible"],
+        ["Probabilidad estimada Atlas", Number.isFinite(estimatedProbability) ? percentage(estimatedProbability) : "No disponible"],
+        ["Diferencia vs cuota", hasExactQuote ? (pointsDifference(estimatedProbability, impliedProbability) ?? "No disponible") : "No disponible"],
+      ]} />
+      <small>Compara la estimación deportiva de Atlas con la probabilidad implícita de la cuota. No representa una garantía de rentabilidad.</small>
+    </section>
+  );
+}
+
 function RedTeamResult({ redTeam }) {
   if (!redTeam) return null;
   return (
@@ -674,14 +769,25 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         <strong>{displaySelection(director.selection || director.market_evaluated?.label)}</strong>
       </header>
       <section className={`p2-simple-decision p2-simple-decision-${analysisDecision.status}`} aria-label="Resultado de Atlas">
-        <span aria-hidden="true">{analysisDecision.icon}</span>
+        <span className="p2-decision-status-icon" aria-hidden="true">{directorDecisionIcon(analysisDecision)}</span>
         <div><small>RESULTADO DE ATLAS</small><h3>{analysisDecision.label}</h3><p>{analysisDecision.explanation}</p></div>
       </section>
+      <p className="p2-solidez-atlas"><small>SOLIDEZ ATLAS</small> <strong>{Number.isFinite(analysis.marketSelection?.primary?.sports_score) ? `${analysis.marketSelection.primary.sports_score}/100` : "No disponible"}</strong></p>
       <div className="p2-director-metrics" aria-label="Resumen del dictamen">
         <span><small>Probabilidad estimada Atlas</small><strong>{Number.isFinite(analysis.marketSelection?.primary?.probability_percent) ? `${analysis.marketSelection.primary.probability_percent}%` : "No disponible"}</strong>{analysis.marketSelection?.primary?.probability_classification ? <small>{analysis.marketSelection.primary.probability_classification}</small> : null}</span>
         <span><small>Precio</small><strong>{presentation.has_current_price ? `${price.bookmaker} @${price.decimal_odds}` : "Pendiente"}</strong></span>
         <span><small>Riesgo</small><strong>{simpleRisks.length ? "Con alertas" : "Sin alerta específica"}</strong></span>
       </div>
+      <section aria-label="Radar de oportunidad">
+        <RadarBadge radar={analysis.primaryMarketOpportunityRadar} />
+        <p><small>El Radar aporta evidencia deportiva adicional y posible contraevidencia; no sustituye la decisión final de Atlas.</small></p>
+      </section>
+      <EconomicsPanel
+        decimalOdds={presentation.has_current_price ? price.decimal_odds : undefined}
+        bookmaker={presentation.has_current_price ? price.bookmaker : undefined}
+        impliedProbability={presentation.has_current_price ? price.implied_probability : undefined}
+        estimatedProbability={analysis.marketSelection?.primary?.estimated_probability}
+      />
       {sideComparison ? <section className="p2-simple-sports-reading" aria-label="Lectura deportiva por lado">
         <p className="eyebrow">LECTURA DEPORTIVA</p>
         <p><strong>Over {director.line}: {percentage(sideComparison.over_probability)}</strong> · <strong>Under {director.line}: {percentage(sideComparison.under_probability)}</strong></p>
@@ -722,7 +828,7 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         <h3 id="simple-price-title">{presentation.has_current_price ? `${price.bookmaker} @${price.decimal_odds}` : presentation.stale_quote ? `${presentation.stale_quote.bookmaker_name} @${presentation.stale_quote.decimal_odds}` : "Todavía no informada"}</h3>
         <p>{simplePriceMessage}</p>
       </section>
-      {priceDecision ? <section className={`p2-simple-final p2-simple-decision-${priceDecision.status}`} aria-label="Decisión final"><small>DECISIÓN FINAL</small><h3><span aria-hidden="true">{priceDecision.icon}</span> {priceDecision.label}</h3><p>{simplePriceMessage}</p></section> : null}
+      {priceDecision ? <section className={`p2-simple-final p2-simple-decision-${priceDecision.status}`} aria-label="Decisión final"><small>DECISIÓN FINAL</small><h3><span className="p2-decision-status-icon" aria-hidden="true">{directorDecisionIcon(priceDecision)}</span> {priceDecision.label}</h3><p>{simplePriceMessage}</p></section> : null}
       {priceDecision?.status === "yes" ? (
         <BetRegistrationButton analysisId={analysis?.analysisVersion?.analysis_id} />
       ) : null}
@@ -1588,9 +1694,11 @@ function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteC
   );
 }
 
-function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone }) {
+function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone, quoteLedgers }) {
   const fixtureEvidence = candidate.fixtureEvidence?.fixture_id === candidate.fixtureId ? candidate.fixtureEvidence : null;
   const reason = fixtureEvidence?.reasons?.[0] || candidate.whyMarketWon?.replaceAll("sports_score", "análisis deportivo") || "Atlas encontró señales deportivas relevantes para revisar esta opción.";
+  const operation = findFixtureQuoteEntry(quoteLedgers?.[String(candidate.fixtureId)], candidate);
+  const exactQuote = operation?.quote_state === "current" ? operation.active_quote : null;
   return (
     <article className="p2-candidate-card p2-simple-candidate-card">
       <p className="eyebrow">{candidate.competition}</p>
@@ -1598,9 +1706,22 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone }) 
       {primary ? <span className="p2-chip p2-chip-candidate">Mejor opción inicial</span> : null}
       <h3>{candidate.fixture}</h3>
       <p className="p2-simple-selection"><strong>{displaySelection(candidate.selection)}</strong><span>{displayMarket(candidate.marketId || candidate.market)} · línea {candidate.line}</span></p>
-      <p className="p2-simple-probability">{Number.isFinite(candidate.probabilityPercent) ? <><strong>{candidate.probabilityPercent}%</strong><span>{candidate.probabilityClassification}</span></> : <small>Probabilidad no disponible</small>}</p>
+      <p className="p2-solidez-atlas"><small>SOLIDEZ ATLAS</small> <strong>{Number.isFinite(candidate.sportsScore) ? `${candidate.sportsScore}/100` : "No disponible"}</strong></p>
+      <p className="p2-simple-probability">
+        <small>PROBABILIDAD ESTIMADA</small>
+        {Number.isFinite(candidate.probabilityPercent) ? (
+          <>
+            <strong>{candidate.probabilityPercent}%</strong>
+            <span>{candidate.probabilityClassification}</span>
+          </>
+        ) : (
+          <span>Probabilidad no disponible</span>
+        )}
+      </p>
+      <RadarBadge radar={candidate.radarAnalysis} />
       {candidate.atlasRecommendation ? <p><strong>Motivo deportivo de inclusión:</strong> {candidate.atlasRecommendation.reason}<br /><small>{candidate.atlasRecommendation.frontier_note}</small><br /><small>Soporte {candidate.atlasRecommendation.support}/100 · incertidumbre {Number((candidate.atlasRecommendation.uncertainty_width * 100).toFixed(1))}%</small></p> : null}
       <p>{reason}</p>
+      <EconomicsPanel decimalOdds={exactQuote?.decimal_odds} bookmaker={exactQuote?.bookmaker_name} impliedProbability={exactQuote?.implied_probability} estimatedProbability={candidate.estimatedProbability} />
       <small>{formatDate(candidate.kickoff, candidate.timezone || timezone)}</small>
       <button type="button" className="primary-button" onClick={() => onOpen(candidate)}>Analizar esta opción</button>
     </article>
@@ -2326,9 +2447,9 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               <h3 id="journey-summary-title">RECOMENDADAS POR ATLAS</h3>
               <p>{journey.recommendedCandidates?.length ? `${journey.recommendedCandidates.length} selecciones destacadas por Atlas. El catálogo completo sigue disponible abajo.` : "ATLAS no encontró selecciones con suficiente respaldo para destacar en esta jornada."}</p>
               <div className="p2-candidate-grid">
-                {(journey.recommendedCandidates || []).map((candidate, index) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} primary={index === 0} onOpen={openCandidate} timezone={defaultTimezone} />)}
+                {(journey.recommendedCandidates || []).map((candidate, index) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} primary={index === 0} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}
               </div>
-              <details className="p2-source-details"><summary>OTRAS OPCIONES ANALIZADAS — {Math.max(0, (journey.candidates || []).length - (journey.recommendedCandidates || []).length)}</summary><div className="p2-candidate-grid">{(journey.candidates || []).filter((candidate) => !(journey.recommendedCandidates || []).some((recommended) => recommended.fixtureId === candidate.fixtureId && recommended.marketId === candidate.marketId && recommended.direction === candidate.direction && recommended.line === candidate.line)).map((candidate) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} onOpen={openCandidate} timezone={defaultTimezone} />)}</div></details>
+              <details className="p2-source-details"><summary>OTRAS OPCIONES ANALIZADAS — {Math.max(0, (journey.candidates || []).length - (journey.recommendedCandidates || []).length)}</summary><div className="p2-candidate-grid">{(journey.candidates || []).filter((candidate) => !(journey.recommendedCandidates || []).some((recommended) => recommended.fixtureId === candidate.fixtureId && recommended.marketId === candidate.marketId && recommended.direction === candidate.direction && recommended.line === candidate.line)).map((candidate) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}</div></details>
              <JourneyMatchesReviewed journey={journey} />
              <JourneyTechnicalDetails journey={journey} quoteLedgers={fixtureQuoteLedgers} operationalRanking={journeyOperationalRanking} quoteCoverage={journeyQuoteCoverage} technicalLabel="Respaldo deportivo" />
             </section>

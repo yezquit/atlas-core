@@ -10,6 +10,7 @@ import {
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
 import { buildRankedMarketSelection, selectCandidateQuote } from "../intelligence/marketCandidateRanker.js";
+import { buildMarketOpportunityRadar, attachRadarContext } from "../intelligence/marketOpportunityRadar.js";
 import { buildDecisionFrontier } from "../intelligence/decisionFrontier.js";
 import { normalizeProviderOdds } from "../intelligence/oddsIntelligence.js";
 import { buildCompetitionProfileContext, findCompetitionProfile } from "../intelligence/competitionProfile.js";
@@ -30,6 +31,28 @@ const PROFILE_WINDOW_DAYS = 120;
 const PROFILE_FIXTURE_LIMIT = 10;
 const REFEREE_FIXTURE_LIMIT = 10;
 const SUPPORTED_MARKET_IDS = new Set(SPORTS_MARKETS.map((market) => market.id));
+
+// Idéntico a attachRadarContextByFamily en operationalAnalysisService.js
+// (Fase 3B): cada candidato recibe el radar_context de SU PROPIA familia,
+// nunca el de otra.
+function attachRadarContextByFamily(candidates, radarResults) {
+  const radarByFamily = new Map(radarResults.map((radar) => [radar.market_family, radar]));
+  return candidates.map((candidate) => attachRadarContext([candidate], radarByFamily.get(candidate.market_family) || null)[0]);
+}
+
+// Adjunta el resultado COMPLETO de MarketOpportunityRadar (no solo el
+// contexto reducido de attachRadarContext) por market_family, para lectura
+// presentacional en Jornada/Recomendadas: model_coherence, señales,
+// opposing_strength y demás métricas auditables que el Radar ya calcula.
+// No modifica marketOpportunityRadar.js ni attachRadarContext; no altera
+// candidate_id, línea, probabilidad, sports_score, ranking ni universo.
+function attachRadarAnalysisByFamily(candidates, radarResults) {
+  const radarByFamily = new Map(radarResults.map((radar) => [radar.market_family, radar]));
+  return candidates.map((candidate) => ({
+    ...candidate,
+    radar_analysis: radarByFamily.get(candidate.market_family) || null,
+  }));
+}
 
 function lowerFamilyReason(candidate, winner) {
   if (!candidate) return "Sin candidatos válidos.";
@@ -428,6 +451,8 @@ export function toJourneyCandidate({ analysis, candidate, comparison }) {
     generalRank: candidate.rank,
     familyRank: candidate.family_rank,
     sportsScore: candidate.sports_score,
+    radarContext: candidate.radar_context ?? null,
+    radarAnalysis: candidate.radar_analysis ?? null,
     selectionQuality: candidate.selection_quality ?? null,
     decisionFrontier: candidate.decision_frontier ?? null,
     decisionEconomics: candidate.decision_economics ?? null,
@@ -696,6 +721,17 @@ export async function scanSportsJourney(input, gateway) {
       refereeProfile: analysis.refereeProfile,
     });
 
+    // Radar por familia (Fase 4), mismo patrón que Fase 3B: consume
+    // selection.generated ya calculado, sin cuotas, sin contextItems/
+    // contextImpacts (Jornada no tiene Gemini por fixture). El resultado
+    // se adjunta como radar_context — nunca reemplaza ranked_candidates
+    // ni cambia estimated_probability/sports_score/orden.
+    const marketOpportunityRadar = (selection.generated || []).map((generatedLinesForFamily) =>
+      buildMarketOpportunityRadar({ generatedLines: generatedLinesForFamily, contextItems: [], contextImpacts: [] })
+    );
+    const radarContextEnrichedCandidates = attachRadarContextByFamily(selection.ranked_candidates || [], marketOpportunityRadar);
+    const radarEnrichedCandidates = attachRadarAnalysisByFamily(radarContextEnrichedCandidates, marketOpportunityRadar);
+
     analysisDiagnostics.push({
       competition: analysis?.competition?.localName || "Desconocida",
       fixtureId: analysis?.fixture?.fixtureId || null,
@@ -715,7 +751,7 @@ export async function scanSportsJourney(input, gateway) {
     // Jornada debe mostrar el mismo universo exhaustivo que alimenta las
     // combinaciones (Parlay/Soñadora): todas las líneas/familias legítimamente
     // calculadas, no solo la mejor por familia por fixture.
-    const entries = selection.ranked_candidates.map((candidate) => ({
+    const entries = radarEnrichedCandidates.map((candidate) => ({
       analysis,
       candidate,
       comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
