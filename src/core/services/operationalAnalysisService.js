@@ -15,6 +15,7 @@ import { buildConservativeParlays } from "../intelligence/parlayPolicy.js";
 import { buildDreamParlays } from "../intelligence/dreamParlayEngine.js";
 import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } from "../intelligence/preMatchContext.js";
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
+import { classifyProbability, toProbabilityPercent } from "../intelligence/probabilityClassification.js";
 import { buildMarketOpportunityRadar, attachRadarContext } from "../intelligence/marketOpportunityRadar.js";
 import { analyzeSportsFixture } from "./sportsIntelligenceService.js";
 
@@ -169,6 +170,12 @@ function snapshotCandidate(previousVersion) {
   const line = Number(director?.line ?? sports?.line);
   const family = director?.market_evaluated?.family;
   if (!family || !direction || !Number.isFinite(line) || probability?.probability_status !== "preliminary" || !Number.isFinite(Number(probability.point_estimate))) return null;
+  // El atajo de "solo precio" reutiliza el snapshot deportivo ya calculado:
+  // NUNCA recalcula estimated_probability ni sports_score (siguen viniendo
+  // de previousVersion). probability_percent/probability_classification son
+  // presentación derivada del mismo valor (idénticas funciones que usa
+  // rankMarketCandidates para el candidato completo) — omitirlas dejaba a la
+  // UI mostrando "No disponible" pese a que la probabilidad sí existía.
   return {
     candidate_id: `snapshot:${previousVersion.analysis_id}`,
     market_family: family,
@@ -177,12 +184,15 @@ function snapshotCandidate(previousVersion) {
     line,
     preliminary_probability: probability.point_estimate,
     estimated_probability: probability.point_estimate,
+    probability_percent: toProbabilityPercent(probability.point_estimate),
+    probability_classification: classifyProbability(probability.point_estimate),
     probability_status: probability.probability_status,
     uncertainty_low: probability.uncertainty_low,
     uncertainty_high: probability.uncertainty_high,
     sample_size_effective: probability.sample_size_effective,
     sports_score: sports?.sports_score,
-    technical_support_score: director?.technical_support,
+    technical_support_score: sports?.technical_support_score,
+    side_comparison: director?.side_comparison || null,
     limitations: probability.limitations || director?.probability_limitations || [],
   };
 }
@@ -232,6 +242,23 @@ function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
     analysisVersion: previousVersion.analysis_id,
   });
   if (!quote) return null;
+  const oppositeOddsQuote = input.manualOppositeOdds && Number(String(input.manualOppositeOdds.decimalOdds || "").replace(",", ".")) > 1
+    ? createManualOdds({
+      fixtureId: fixture.fixtureId,
+      bookmaker: input.manualOppositeOdds.bookmaker,
+      marketFamily: candidate.market_family,
+      marketName: previousVersion.director.market_evaluated?.label,
+      selection: `${candidate.direction === "over" ? "Menos de" : "Más de"} ${candidate.line}`,
+      direction: candidate.direction === "over" ? "under" : "over",
+      line: candidate.line,
+      decimalOdds: input.manualOppositeOdds.decimalOdds,
+      receivedAt: input.manualOppositeOdds.consultedAt,
+      analyzedAt,
+      kickoff: fixture.date.utc,
+      timezone: input.manualOppositeOdds.timezone || input.timezone,
+      analysisVersion: previousVersion.analysis_id,
+    })
+    : null;
   const confidence = previousVersion.analysis_confidence || {
     analysis_confidence_score: previousVersion.director?.analysis_confidence_score || 0,
     confidence_label: previousVersion.director?.confidence_label || "baja",
@@ -275,6 +302,7 @@ function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
     marketCandidate: candidate,
     marketSelection,
     oddsQuote: quote,
+    oppositeOddsQuote,
     confidence,
     suitability,
     supportingEvidence: previousVersion.director.reasons || [],
@@ -755,6 +783,27 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     ? operationalCandidate
     : marketSelection.primary;
   const marketAssessment = base.marketAssessments.find((item) => item.market_family === (primaryCandidate?.market_family || manualMarketFamily)) || null;
+  // Cuota del lado contrario de una línea binaria Over/Under X.5: opcional,
+  // nunca inventada. Solo se construye si el usuario la introdujo; el lado
+  // (over/under) es siempre el complemento exacto del candidato seleccionado,
+  // nunca una familia/línea distinta.
+  const oppositeOddsQuote = input.manualOppositeOdds && primaryCandidate?.direction && Number(String(input.manualOppositeOdds.decimalOdds || "").replace(",", ".")) > 1
+    ? createManualOdds({
+      fixtureId: base.fixture.fixtureId,
+      bookmaker: input.manualOppositeOdds.bookmaker,
+      marketFamily: primaryCandidate.market_family,
+      marketName: marketAssessment?.market_label,
+      selection: `${primaryCandidate.direction === "over" ? "Menos de" : "Más de"} ${primaryCandidate.line}`,
+      direction: primaryCandidate.direction === "over" ? "under" : "over",
+      line: primaryCandidate.line,
+      decimalOdds: input.manualOppositeOdds.decimalOdds,
+      receivedAt: input.manualOppositeOdds.consultedAt,
+      analyzedAt,
+      kickoff: base.fixture.date?.utc,
+      timezone: input.manualOppositeOdds.timezone || input.timezone,
+      analysisVersion: input.manualOppositeOdds.analysisVersion || previousVersion?.analysis_id || "initial",
+    })
+    : null;
   const marketEvidence = summarizeMarketEvidence(selectedGemini, primaryCandidate?.market_family || manualMarketFamily, geminiImpacts);
   contextSummary = marketEvidence.summary;
   const bestProviderOdds = primaryCandidate ? selectBestComparableOdds(oddsResult.quotes, {
@@ -906,6 +955,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     marketCandidate: primaryCandidate,
     marketSelection,
     oddsQuote: selectedOdds,
+    oppositeOddsQuote,
     confidence,
     suitability,
     supportingEvidence,

@@ -6,7 +6,8 @@ import {
   PROBABILITY_STATUS,
   createDirectorVerdict,
 } from "../contracts/atlasContracts.js";
-import { MARKET_SUITABILITY } from "../contracts/operationalContracts.js";
+import { MARKET_SUITABILITY, PRICE_EVALUATION_STATUS } from "../contracts/operationalContracts.js";
+import { evaluateMarketPrice } from "../intelligence/marketSuitability.js";
 
 function normalizeText(value = "") {
   return value
@@ -515,6 +516,86 @@ export function buildPhaseTwoDirectorVerdict({
   };
 }
 
+function round(value, decimals = 4) {
+  return Number(Number(value).toFixed(decimals));
+}
+
+// Lado contrario de una línea binaria Over/Under X.5: reutiliza exactamente
+// la misma fórmula de precio que el lado seleccionado (evaluateMarketPrice),
+// nunca inventa una cuota, y solo evalúa económicamente si el usuario
+// introdujo una cuota contraria real. La probabilidad contraria y su
+// intervalo ya existen (side_comparison es complementario: 1 - lado
+// seleccionado); no se recalcula estimated_probability ni sports_score.
+function buildOppositeMarketAssessment({ marketCandidate, sideComparison, oppositeOddsQuote, confidenceScore, sampleSize, phase }) {
+  if (!marketCandidate || !sideComparison?.canonical) return null;
+  const oppositeDirection = marketCandidate.direction === "over" ? "under" : "over";
+  const oppositeProbability = oppositeDirection === "over" ? sideComparison.over_probability : sideComparison.under_probability;
+  if (!Number.isFinite(oppositeProbability)) return null;
+  const oppositeSelection = `${oppositeDirection === "over" ? "Más de" : "Menos de"} ${sideComparison.line}`;
+  const uncertaintyLow = Number.isFinite(marketCandidate.uncertainty_high) ? round(1 - marketCandidate.uncertainty_high) : null;
+  const uncertaintyHigh = Number.isFinite(marketCandidate.uncertainty_low) ? round(1 - marketCandidate.uncertainty_low) : null;
+  const priceAssessment = oppositeOddsQuote ? evaluateMarketPrice({
+    oddsQuote: oppositeOddsQuote,
+    preliminaryProbability: {
+      point_estimate: oppositeProbability,
+      uncertainty_low: uncertaintyLow,
+      uncertainty_high: uncertaintyHigh,
+      probability_status: "preliminary",
+      sample_size_effective: sampleSize,
+    },
+    confidenceScore,
+    sampleSize,
+    phase,
+  }) : null;
+  return {
+    market_family: marketCandidate.market_family,
+    direction: oppositeDirection,
+    line: sideComparison.line,
+    selection: oppositeSelection,
+    estimated_probability: oppositeProbability,
+    probability_percent: round(oppositeProbability * 100, 1),
+    has_quote: Boolean(oppositeOddsQuote),
+    bookmaker: oppositeOddsQuote?.bookmaker_name || null,
+    decimal_odds: oppositeOddsQuote?.decimal_odds || null,
+    price_assessment: priceAssessment,
+  };
+}
+
+// Separa siempre (A) preferencia deportiva — de side_comparison, ajeno a
+// precio — de (B) valoración económica — de price_assessment por lado. No
+// inventa ninguna probabilidad ni cuota; solo redacta la conclusión a partir
+// de valores ya calculados.
+function buildSportsPriceConclusion({ marketCandidate, sideComparison, priceAssessment, oppositeMarket }) {
+  if (!marketCandidate || !sideComparison?.canonical) return null;
+  const selectedLabel = marketCandidate.selection;
+  const oppositeLabel = oppositeMarket?.selection || null;
+  const preferredSide = sideComparison.sports_preferred_side;
+  const selectedFavorable = priceAssessment?.status === PRICE_EVALUATION_STATUS.FAVORABLE_PRELIMINARY;
+
+  if (!oppositeMarket?.has_quote) {
+    // Solo existe (o no existe ninguna) cuota del lado seleccionado.
+    if (preferredSide === "neutral" || preferredSide === marketCandidate.direction || !oppositeLabel) return null;
+    return `El modelo deportivo favorece el lado contrario, ${oppositeLabel}, con una probabilidad estimada de ${oppositeMarket.probability_percent}%, pero no puede evaluar su precio porque no se introdujo una cuota.`;
+  }
+
+  // Ambas cuotas disponibles: comparar los dos edges por separado de la
+  // preferencia deportiva.
+  const oppositeFavorable = oppositeMarket.price_assessment?.status === PRICE_EVALUATION_STATUS.FAVORABLE_PRELIMINARY;
+  if (preferredSide === "neutral") {
+    if (selectedFavorable) return `Sin ventaja deportiva clara entre ambos lados, pero ${selectedLabel} ofrece mejor relación probabilidad/precio.`;
+    if (oppositeFavorable) return `Sin ventaja deportiva clara entre ambos lados, pero ${oppositeLabel} ofrece mejor relación probabilidad/precio.`;
+    return "Sin ventaja deportiva clara entre ambos lados y ninguna de las dos cuotas ofrece valor suficiente.";
+  }
+  if (preferredSide === marketCandidate.direction) {
+    return selectedFavorable
+      ? `Atlas prefiere ${selectedLabel} tanto deportivamente como por relación probabilidad/precio.`
+      : `Aunque el modelo deportivo favorece ${selectedLabel}, la cuota disponible no ofrece suficiente valor.`;
+  }
+  return oppositeFavorable
+    ? `Atlas prefiere ${oppositeLabel} tanto deportivamente como por relación probabilidad/precio.`
+    : `Atlas favorece deportivamente ${oppositeLabel}, pero ninguna de las dos cuotas ofrece valor suficiente.`;
+}
+
 export function buildOperationalDirectorVerdict({
   fixture,
   competition,
@@ -524,6 +605,7 @@ export function buildOperationalDirectorVerdict({
   marketCandidate = null,
   marketSelection = null,
   oddsQuote,
+  oppositeOddsQuote = null,
   confidence,
   suitability,
   supportingEvidence = [],
@@ -746,6 +828,16 @@ export function buildOperationalDirectorVerdict({
   ])].slice(0, 3);
   const simpleReasons = [...new Set(marketCandidate?.simple_sports_reasons || [])].slice(0, 3);
   const operationalPricePending = Boolean(pricePending && marketCandidate);
+  const sideComparison = marketCandidate?.side_comparison || null;
+  const oppositeMarket = buildOppositeMarketAssessment({
+    marketCandidate,
+    sideComparison,
+    oppositeOddsQuote,
+    confidenceScore: confidence?.analysis_confidence_score || 0,
+    sampleSize: marketCandidate?.sample_size_effective || 0,
+    phase,
+  });
+  const sportsPriceConclusion = buildSportsPriceConclusion({ marketCandidate, sideComparison, priceAssessment, oppositeMarket });
   return {
     contract: "DirectorVerdict",
     version: 3,
@@ -804,7 +896,9 @@ export function buildOperationalDirectorVerdict({
       alternatives: marketSelection.alternatives,
       line_profiles: marketSelection.line_profiles,
     } : null,
-    side_comparison: marketCandidate?.side_comparison || null,
+    side_comparison: sideComparison,
+    opposite_market: oppositeMarket,
+    sports_price_conclusion: sportsPriceConclusion,
     temporal_status: temporalStatus,
     temporal_message: "Este es el dictamen con la información disponible ahora. Puede cambiar por alineaciones, bajas, árbitro, clima o cuotas.",
     context_reanalysis_message: contextReanalysisMessage,

@@ -733,6 +733,29 @@ function EconomicsPanel({ decimalOdds, bookmaker, impliedProbability, estimatedP
   );
 }
 
+function SideComparisonReading({ sideComparison, oppositeMarket, conclusion }) {
+  if (!sideComparison?.canonical) return null;
+  return (
+    <section className="p2-stage-card p2-line-reading" aria-label="Lectura de la línea">
+      <p className="eyebrow">LECTURA DE LA LÍNEA</p>
+      <DefinitionGrid entries={[
+        [`Menos de ${sideComparison.line}`, percentage(sideComparison.under_probability)],
+        [`Más de ${sideComparison.line}`, percentage(sideComparison.over_probability)],
+      ]} />
+      <p>{sideComparison.message}</p>
+      {oppositeMarket?.has_quote ? (
+        <DefinitionGrid entries={[
+          ["Cuota contraria", `${oppositeMarket.bookmaker} @${oppositeMarket.decimal_odds}`],
+          ["Probabilidad implícita contraria", Number.isFinite(oppositeMarket.price_assessment?.implied_probability) ? percentage(oppositeMarket.price_assessment.implied_probability) : "No disponible"],
+          ["Diferencia contraria (edge)", Number.isFinite(oppositeMarket.price_assessment?.price_gap_percentage_points) ? `${oppositeMarket.price_assessment.price_gap_percentage_points} pp` : "No disponible"],
+          ["Evaluación de precio contraria", displayStatus(oppositeMarket.price_assessment?.status)],
+        ]} />
+      ) : null}
+      {conclusion ? <p><strong>{conclusion}</strong></p> : null}
+    </section>
+  );
+}
+
 function RedTeamResult({ redTeam }) {
   if (!redTeam) return null;
   return (
@@ -816,10 +839,8 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         impliedProbability={presentation.has_current_price ? price.implied_probability : undefined}
         estimatedProbability={analysis.marketSelection?.primary?.estimated_probability}
       />
+      <SideComparisonReading sideComparison={sideComparison} oppositeMarket={director.opposite_market} conclusion={director.sports_price_conclusion} />
       {sideComparison ? <section className="p2-simple-sports-reading" aria-label="Lectura deportiva por lado">
-        <p className="eyebrow">LECTURA DEPORTIVA</p>
-        <p><strong>Over {director.line}: {percentage(sideComparison.over_probability)}</strong> · <strong>Under {director.line}: {percentage(sideComparison.under_probability)}</strong></p>
-        <p>{sideComparison.message || "Sin ventaja deportiva clara entre ambos lados."}</p>
         {Number.isFinite(marketAudit?.distribution_center) ? <p>La distribución observada se centra alrededor de {marketAudit.distribution_center} {director.market_evaluated?.label?.toLowerCase() || "eventos"}. Esta referencia no suma producción y concesión como si fueran equipos distintos.</p> : null}
         {Number.isFinite(marketAudit?.expected_total) ? <div className="p2-component-summary" aria-label="Componentes del mercado">
           <p><strong>EXPECTATIVA DEL LOCAL</strong><br />Producción propia: {marketAudit.home_for?.value ?? "No disponible"} · Rival concede: {marketAudit.away_against?.value ?? "No disponible"} · Componente Atlas: {marketAudit.expected_home_component}</p>
@@ -1649,6 +1670,8 @@ function InitialAnalysisResult({ analysis }) {
         <strong>{Number.isFinite(primary?.probability_percent) ? `${primary.probability_percent}%` : "No disponible"}</strong>
         {primary?.probability_classification ? <span>{primary.probability_classification}</span> : null}
       </p>
+      <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(primary?.sports_score) ? `${primary.sports_score}/100` : "No disponible"}</strong></p>
+      <SideComparisonReading sideComparison={director?.side_comparison} oppositeMarket={director?.opposite_market} conclusion={director?.sports_price_conclusion} />
       {otherFamilies.length ? (
         <section aria-labelledby="initial-other-families-title">
           <h3 id="initial-other-families-title">Otras familias que Atlas comparó</h3>
@@ -1874,6 +1897,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   const [bookmaker, setBookmaker] = useState("");
   const [selection, setSelection] = useState("");
   const [oddsConsultedAt, setOddsConsultedAt] = useState("");
+  const [oppositeBookmaker, setOppositeBookmaker] = useState("");
+  const [oppositeOdds, setOppositeOdds] = useState("");
   const intendedUse = "individual";
   const [analysisState, setAnalysisState] = useState(state("Selecciona un partido; Atlas nunca ejecuta el análisis automáticamente."));
   const [analysis, setAnalysis] = useState(null);
@@ -1905,6 +1930,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     Number(odds.replace(",", ".")) > 1 &&
     resolvedOptionDirection
   );
+  const oppositeQuoteReady = Boolean(oppositeBookmaker.trim() && oppositeOdds.trim() && Number(oppositeOdds.replace(",", ".")) > 1);
   const hasDirection = Boolean(resolvedOptionDirection);
   const hasLine = Boolean(resolvedOptionLine);
   const exactRefinementComplete = (!hasDirection && !hasLine) || (hasDirection && hasLine);
@@ -2193,6 +2219,13 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
             analysisVersion: currentAnalysis?.analysisVersion?.analysis_id || "initial",
           } : null,
           sourceAnalysisId: reanalysis && manualQuoteReady ? currentAnalysis?.analysisVersion?.analysis_id || null : null,
+          manualOppositeOdds: reanalysis && manualQuoteReady && oppositeQuoteReady ? {
+            bookmaker: oppositeBookmaker.trim(),
+            decimalOdds: oppositeOdds.trim(),
+            consultedAt,
+            timezone: defaultTimezone,
+            analysisVersion: currentAnalysis?.analysisVersion?.analysis_id || "initial",
+          } : null,
           manualCandidateOdds,
           transferredCandidate,
           intendedUse,
@@ -2623,6 +2656,12 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                 <label><span>Cuota decimal actual</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.95" /></label>
                 <label><span>Hora de consulta (opcional)</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>
                 {manualQuoteWarning ? <small className="p2-quote-warning">{manualQuoteWarning}</small> : null}
+                <details className="p2-source-details p2-opposite-quote">
+                  <summary>Cuota del lado contrario (opcional)</summary>
+                  <small>Solo evalúa el lado contrario si introduces su cuota. Atlas nunca inventa una cuota contraria.</small>
+                  <label><span>Casa de apuestas (contraria)</span><input value={oppositeBookmaker} onChange={(event) => setOppositeBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
+                  <label><span>Cuota decimal (contraria)</span><input inputMode="decimal" value={oppositeOdds} onChange={(event) => setOppositeOdds(event.target.value)} placeholder="Ej. 1.93" /></label>
+                </details>
                 {incompletePriceInput ? <small>Completa casa y cuota para evaluar el precio.</small> : null}
                 {!quoteTargetReady ? <small>Primero ATLAS debe calcular esta línea.</small> : null}
                 <button type="button" className="primary-button p2-primary" onClick={reanalyzeWithManualOdds} disabled={!quoteTargetReady || !manualQuoteReady || analysisState.status === "loading"}>{staleAnalysisQuote ? "Actualizar cuota" : analysis?.selectedOdds ? "Actualizar decisión con esta cuota" : "EVALUAR CUOTA"}</button>
