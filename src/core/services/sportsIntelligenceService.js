@@ -399,7 +399,7 @@ export async function analyzeSportsFixture(input, gateway) {
     refereeProfile,
     venueWeatherContext,
     competitiveContext,
-    marketAssessments,
+    marketAssessments: eligibleAssessments,
     selectedMarket,
     evidenceRefs: [...new Set(evidenceRefs)],
     director,

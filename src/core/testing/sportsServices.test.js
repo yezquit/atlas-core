@@ -199,3 +199,97 @@ test("respuesta integrada no contiene API key ni datos de cuenta", async () => {
 
   assert.doesNotMatch(serialized, /API_FOOTBALL_KEY|x-apisports-key|account/i);
 });
+
+const allMarketIds = ["goals", "total_shots", "shots_on_goal", "corners", "cards"];
+
+function journeyInput(marketIds) {
+  return {
+    date: "2026-08-01",
+    competitionKeys: ["colombiaPrimeraA"],
+    ...(marketIds === undefined ? {} : { marketIds }),
+  };
+}
+
+function candidateSignatures(result) {
+  return new Map((result.candidates || []).map((candidate) => [
+    `${candidate.marketId}:${candidate.direction}:${candidate.line}`,
+    candidate,
+  ]));
+}
+
+test("familia única total_shots no admite fallback a goals", async () => {
+  const result = await scanSportsJourney(
+    journeyInput(["total_shots"]),
+    gateway({ fixturesForDate: [targetFixture(7_100)] })
+  );
+
+  assert.ok(result.candidates.every((candidate) => candidate.marketId === "total_shots"));
+  assert.ok(result.combinationCandidates.every((candidate) => candidate.marketId === "total_shots"));
+});
+
+test("subconjunto total_shots y corners excluye las otras familias", async () => {
+  const allowed = new Set(["total_shots", "corners"]);
+  const result = await scanSportsJourney(
+    journeyInput([...allowed]),
+    gateway({ fixturesForDate: [targetFixture(7_101)] })
+  );
+
+  assert.ok(result.candidates.every((candidate) => allowed.has(candidate.marketId)));
+  assert.ok(result.combinationCandidates.every((candidate) => allowed.has(candidate.marketId)));
+  assert.equal(result.candidates.some((candidate) => ["goals", "shots_on_goal", "cards"].includes(candidate.marketId)), false);
+});
+
+test("todas las familias explícitas y ausencia de marketIds conservan el universo histórico", async () => {
+  const explicit = await scanSportsJourney(
+    journeyInput(allMarketIds),
+    gateway({ fixturesForDate: [targetFixture(7_102)] })
+  );
+  const implicit = await scanSportsJourney(
+    journeyInput(undefined),
+    gateway({ fixturesForDate: [targetFixture(7_102)] })
+  );
+
+  assert.deepEqual([...new Set(explicit.candidates.map((candidate) => candidate.marketId))].sort(), [...allMarketIds].sort());
+  assert.deepEqual([...candidateSignatures(implicit).keys()].sort(), [...candidateSignatures(explicit).keys()].sort());
+});
+
+test("una familia solicitada sin datos devuelve ausencia y nunca goals", async () => {
+  const noShotsGateway = gateway({ fixturesForDate: [targetFixture(7_103)] });
+  noShotsGateway.loadFixtureStatistics = async (fixtureId) => ({
+    status: DATA_LOAD_STATUS.SUCCESS,
+    fixtureId,
+    statistics: { teams: [] },
+  });
+  const result = await scanSportsJourney(journeyInput(["total_shots"]), noShotsGateway);
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.combinationCandidates, []);
+});
+
+test("partido específico total_shots conserva la familia solicitada", async () => {
+  const result = await analyzeSportsFixture({
+    ...analysisInput,
+    marketId: "total_shots",
+    analysisMode: "specific",
+  }, gateway());
+
+  assert.equal(result.selectedMarket?.market_family, "total_shots");
+  assert.equal(result.marketAssessments.some((assessment) => assessment.market_family === "goals"), true);
+});
+
+test("filtrar familias no altera identidad ni métricas de candidatos permitidos", async () => {
+  const fixture = targetFixture(7_104);
+  const all = await scanSportsJourney(journeyInput(allMarketIds), gateway({ fixturesForDate: [fixture] }));
+  const filtered = await scanSportsJourney(journeyInput(["total_shots", "corners"]), gateway({ fixturesForDate: [fixture] }));
+  const allBySignature = candidateSignatures(all);
+
+  for (const candidate of filtered.candidates) {
+    const baseline = allBySignature.get(`${candidate.marketId}:${candidate.direction}:${candidate.line}`);
+    assert.ok(baseline);
+    assert.equal(candidate.direction, baseline.direction);
+    assert.equal(candidate.line, baseline.line);
+    assert.equal(candidate.estimatedProbability, baseline.estimatedProbability);
+    assert.equal(candidate.sportsScore, baseline.sportsScore);
+    assert.equal(candidate.transferredCandidate.market_family, baseline.transferredCandidate.market_family);
+  }
+});
