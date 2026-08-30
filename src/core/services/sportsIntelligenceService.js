@@ -569,13 +569,17 @@ export function buildJourneyRecommendationShortlist(candidates = [], maximum = 1
     const economics = candidate.decisionEconomics;
     const riskyWithPriceValue = risky && currentPrice && economics?.status === "available"
       && Number(economics.edge) > 0 && Number(economics.expected_value) > 0;
-    // decision_frontier.recommended (un único "ganador" por fixture+family+
-    // direction) y el tope absoluto de ancho de incertidumbre ya NO son veto:
-    // ambos podían excluir una familia entera aunque tuviera candidatos
-    // elegibles con mayor estimated_probability que otros ya visibles. La
-    // incertidumbre (width) se conserva y se sigue reportando en
+    // decision_frontier.recommended sigue eligiendo, DENTRO de cada grupo
+    // fixture_id+market_family+direction, la línea técnicamente razonable
+    // (no la más extrema solo por tener probabilidad altísima, p.ej. Under
+    // 5.5 goles): eso evita competir con líneas triviales. El tope absoluto
+    // de ancho de incertidumbre SIGUE fuera del veto: ya demostró que podía
+    // hacer desaparecer una familia entera aunque su línea recommended
+    // tuviera mayor estimated_probability que otras ya visibles. El ancho
+    // (width) se conserva y se sigue reportando en
     // atlasRecommendation.uncertainty_width; solo deja de decidir QUÉ entra.
-    const recommendable = frontier.status === "eligible"
+    const recommendable = frontier.recommended === true
+      && frontier.status === "eligible"
       && Number(candidate.selectionQuality) >= 60
       && support >= 58
       && (!risky || riskyWithPriceValue);
