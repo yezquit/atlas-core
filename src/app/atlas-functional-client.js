@@ -756,6 +756,35 @@ function SideComparisonReading({ sideComparison, oppositeMarket, conclusion }) {
   );
 }
 
+// Reutiliza EXCLUSIVAMENTE evidencia deportiva ya calculada por el motor
+// (simple_sports_reasons: hit-rate de la línea exacta por rol + producción/
+// concesión; market_model_audit.distribution_center: centro de la
+// distribución ya estimado). Nunca inventa texto genérico ni suma
+// producción+concesión como si fuera un total: cada frase describe UN
+// componente ya calculado, y el centro de distribución se reporta tal cual
+// lo entrega marketAudit, sin recalcularlo aquí.
+function buildAtlasReasoningBullets(candidate, marketLabel) {
+  if (!candidate) return [];
+  const bullets = [...new Set((candidate.simple_sports_reasons || candidate.reasons || []).filter(Boolean))];
+  const distributionCenter = candidate.market_model_audit?.distribution_center;
+  if (Number.isFinite(distributionCenter)) {
+    bullets.push(`La distribución estimada se centra alrededor de ${distributionCenter} ${(marketLabel || "").toLowerCase() || "eventos"}.`);
+  }
+  return bullets;
+}
+
+function WhyAtlasReasoning({ candidate, marketLabel }) {
+  const bullets = buildAtlasReasoningBullets(candidate, marketLabel);
+  if (!bullets.length) return null;
+  return (
+    <section className="p2-stage-card p2-why-atlas" aria-labelledby="why-atlas-title">
+      <p className="eyebrow">¿POR QUÉ ATLAS LLEGA A ESTA CONCLUSIÓN?</p>
+      <h3 id="why-atlas-title" className="sr-only">Motivos deportivos</h3>
+      <ul>{bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>
+    </section>
+  );
+}
+
 function RedTeamResult({ redTeam }) {
   if (!redTeam) return null;
   return (
@@ -840,6 +869,7 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         estimatedProbability={analysis.marketSelection?.primary?.estimated_probability}
       />
       <SideComparisonReading sideComparison={sideComparison} oppositeMarket={director.opposite_market} conclusion={director.sports_price_conclusion} />
+      <WhyAtlasReasoning candidate={analysis.marketSelection?.primary} marketLabel={director.market_evaluated?.label} />
       {sideComparison ? <section className="p2-simple-sports-reading" aria-label="Lectura deportiva por lado">
         {Number.isFinite(marketAudit?.distribution_center) ? <p>La distribución observada se centra alrededor de {marketAudit.distribution_center} {director.market_evaluated?.label?.toLowerCase() || "eventos"}. Esta referencia no suma producción y concesión como si fueran equipos distintos.</p> : null}
         {Number.isFinite(marketAudit?.expected_total) ? <div className="p2-component-summary" aria-label="Componentes del mercado">
@@ -1672,6 +1702,7 @@ function InitialAnalysisResult({ analysis }) {
       </p>
       <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(primary?.sports_score) ? `${primary.sports_score}/100` : "No disponible"}</strong></p>
       <SideComparisonReading sideComparison={director?.side_comparison} oppositeMarket={director?.opposite_market} conclusion={director?.sports_price_conclusion} />
+      <WhyAtlasReasoning candidate={primary} marketLabel={director?.market_evaluated?.label} />
       {otherFamilies.length ? (
         <section aria-labelledby="initial-other-families-title">
           <h3 id="initial-other-families-title">Otras familias que Atlas comparó</h3>
