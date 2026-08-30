@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { buildConservativeParlays } from "@/core/intelligence/parlayPolicy";
 import { localDateTimeToUtcIso, todayLocalDateString, utcIsoToLocalDateTimeInput } from "@/core/intelligence/dateTimeContext";
 import { manualOddsCopyWarning } from "@/core/intelligence/oddsIntelligence";
@@ -279,6 +279,34 @@ function formatEffectiveSample(value, maximumFractionDigits = 1) {
   return new Intl.NumberFormat("es-CO", { maximumFractionDigits }).format(Number(value));
 }
 
+const METRIC_HINTS = Object.freeze({
+  "SOLIDEZ ATLAS":
+    "Indica qué tan sólido y respaldado está técnicamente el análisis según calidad de muestra, incertidumbre, cobertura y estabilidad. No es la probabilidad de acertar.",
+  "Probabilidad estimada Atlas": "Estimación de Atlas sobre la probabilidad de que ocurra esta selección. Es una estimación estadística, no una garantía.",
+  "PROBABILIDAD ESTIMADA": "Estimación de Atlas sobre la probabilidad de que ocurra esta selección. Es una estimación estadística, no una garantía.",
+  "Dirección Radar": "ALTA: las señales deportivas tienden hacia valores superiores respecto a la línea analizada. BAJA: tienden hacia valores inferiores. NEUTRAL: no existe una dirección suficientemente clara. BAJA describe dirección, no baja calidad ni baja probabilidad.",
+  "Convergencia Radar": "Indica cuánto coinciden y qué tan consistentes son las señales deportivas consideradas por el Radar. No es una probabilidad.",
+  "Contraevidencia": "Señales relevantes que contradicen la oportunidad detectada. Si son suficientemente fuertes, Atlas puede bloquear la oportunidad.",
+  "Coherencia del modelo": "Mide si los distintos componentes y la distribución del modelo son consistentes entre sí. Puede ser correcta, problemática o desconocida según la evidencia disponible.",
+  "Incertidumbre": "Representa el rango de duda alrededor de la estimación. Una incertidumbre menor implica una estimación más precisa; una mayor exige más cautela.",
+  "Soporte": "Resume la cantidad y calidad de evidencia que respalda esta lectura deportiva. Más soporte no equivale automáticamente a mayor probabilidad.",
+});
+
+function InfoHint({ label, text }) {
+  const tooltipId = useId();
+  return (
+    <span className="p2-info-hint">
+      <button type="button" className="p2-info-hint-trigger" aria-label={`Más información sobre ${label}`} aria-describedby={tooltipId}>ⓘ</button>
+      <span id={tooltipId} role="tooltip" className="p2-info-hint-tooltip">{text}</span>
+    </span>
+  );
+}
+
+function MetricLabel({ label }) {
+  const hint = METRIC_HINTS[label];
+  return <span className="p2-metric-label">{label}{hint ? <InfoHint label={label} text={hint} /> : null}</span>;
+}
+
 function seasonFor(competition, date) {
   const year = Number(date?.slice(0, 4));
   if (!Number.isInteger(year)) return competition?.currentSeason || "";
@@ -321,7 +349,7 @@ function DefinitionGrid({ entries }) {
     <dl className="p2-definition-grid">
       {entries.map(([label, value]) => (
         <div key={label}>
-          <dt>{label}</dt>
+          <dt>{typeof label === "string" && METRIC_HINTS[label] ? <MetricLabel label={label} /> : label}</dt>
           <dd>{formatValue(value)}</dd>
         </div>
       ))}
@@ -667,7 +695,7 @@ function RadarBadge({ radar }) {
       <p className="eyebrow">RADAR</p>
       <p className="p2-radar-state"><strong>{state.label}</strong></p>
       <DefinitionGrid entries={[
-        ["Dirección", radarDirectionLabel(radar.radar_direction)],
+        ["Dirección Radar", radarDirectionLabel(radar.radar_direction)],
         ["Convergencia Radar", Number.isFinite(radar.radar_score) ? `${radar.radar_score}/100` : "No disponible"],
         ["Contraevidencia", adversarialStatusLabel(radar.adversarial_passed)],
         ["Coherencia del modelo", coherenceLabel(radar.model_coherence?.coherent)],
@@ -772,9 +800,9 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
         <span className="p2-decision-status-icon" aria-hidden="true">{directorDecisionIcon(analysisDecision)}</span>
         <div><small>RESULTADO DE ATLAS</small><h3>{analysisDecision.label}</h3><p>{analysisDecision.explanation}</p></div>
       </section>
-      <p className="p2-solidez-atlas"><small>SOLIDEZ ATLAS</small> <strong>{Number.isFinite(analysis.marketSelection?.primary?.sports_score) ? `${analysis.marketSelection.primary.sports_score}/100` : "No disponible"}</strong></p>
+      <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(analysis.marketSelection?.primary?.sports_score) ? `${analysis.marketSelection.primary.sports_score}/100` : "No disponible"}</strong></p>
       <div className="p2-director-metrics" aria-label="Resumen del dictamen">
-        <span><small>Probabilidad estimada Atlas</small><strong>{Number.isFinite(analysis.marketSelection?.primary?.probability_percent) ? `${analysis.marketSelection.primary.probability_percent}%` : "No disponible"}</strong>{analysis.marketSelection?.primary?.probability_classification ? <small>{analysis.marketSelection.primary.probability_classification}</small> : null}</span>
+        <span><small><MetricLabel label="Probabilidad estimada Atlas" /></small><strong>{Number.isFinite(analysis.marketSelection?.primary?.probability_percent) ? `${analysis.marketSelection.primary.probability_percent}%` : "No disponible"}</strong>{analysis.marketSelection?.primary?.probability_classification ? <small>{analysis.marketSelection.primary.probability_classification}</small> : null}</span>
         <span><small>Precio</small><strong>{presentation.has_current_price ? `${price.bookmaker} @${price.decimal_odds}` : "Pendiente"}</strong></span>
         <span><small>Riesgo</small><strong>{simpleRisks.length ? "Con alertas" : "Sin alerta específica"}</strong></span>
       </div>
@@ -1617,7 +1645,7 @@ function InitialAnalysisResult({ analysis }) {
         <span>{analysis?.marketSelection?.exact_requested_line_unavailable ? "Línea exacta no disponible" : displaySelection(primary?.selection || director?.market_evaluated?.label)}</span>
       </div>
       <p className="p2-initial-probability">
-        <small>Probabilidad estimada Atlas</small>
+        <small><MetricLabel label="Probabilidad estimada Atlas" /></small>
         <strong>{Number.isFinite(primary?.probability_percent) ? `${primary.probability_percent}%` : "No disponible"}</strong>
         {primary?.probability_classification ? <span>{primary.probability_classification}</span> : null}
       </p>
@@ -1706,9 +1734,9 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone, qu
       {primary ? <span className="p2-chip p2-chip-candidate">Mejor opción inicial</span> : null}
       <h3>{candidate.fixture}</h3>
       <p className="p2-simple-selection"><strong>{displaySelection(candidate.selection)}</strong><span>{displayMarket(candidate.marketId || candidate.market)} · línea {candidate.line}</span></p>
-      <p className="p2-solidez-atlas"><small>SOLIDEZ ATLAS</small> <strong>{Number.isFinite(candidate.sportsScore) ? `${candidate.sportsScore}/100` : "No disponible"}</strong></p>
+      <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(candidate.sportsScore) ? `${candidate.sportsScore}/100` : "No disponible"}</strong></p>
       <p className="p2-simple-probability">
-        <small>PROBABILIDAD ESTIMADA</small>
+        <small><MetricLabel label="PROBABILIDAD ESTIMADA" /></small>
         {Number.isFinite(candidate.probabilityPercent) ? (
           <>
             <strong>{candidate.probabilityPercent}%</strong>
@@ -1719,7 +1747,7 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone, qu
         )}
       </p>
       <RadarBadge radar={candidate.radarAnalysis} />
-      {candidate.atlasRecommendation ? <p><strong>Motivo deportivo de inclusión:</strong> {candidate.atlasRecommendation.reason}<br /><small>{candidate.atlasRecommendation.frontier_note}</small><br /><small>Soporte {candidate.atlasRecommendation.support}/100 · incertidumbre {Number((candidate.atlasRecommendation.uncertainty_width * 100).toFixed(1))}%</small></p> : null}
+      {candidate.atlasRecommendation ? <p><strong>Motivo deportivo de inclusión:</strong> {candidate.atlasRecommendation.reason}<br /><small>{candidate.atlasRecommendation.frontier_note}</small><br /><small><MetricLabel label="Soporte" /> {candidate.atlasRecommendation.support}/100 · <MetricLabel label="Incertidumbre" /> {Number((candidate.atlasRecommendation.uncertainty_width * 100).toFixed(1))}%</small></p> : null}
       <p>{reason}</p>
       <EconomicsPanel decimalOdds={exactQuote?.decimal_odds} bookmaker={exactQuote?.bookmaker_name} impliedProbability={exactQuote?.implied_probability} estimatedProbability={candidate.estimatedProbability} />
       <small>{formatDate(candidate.kickoff, candidate.timezone || timezone)}</small>
