@@ -2848,7 +2848,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
             <section className="p2-journey-result" aria-labelledby="value-radar-title">
               <h3 id="value-radar-title">RADAR DE VALOR ATLAS</h3>
               <p>Solo se evalúan selecciones con identidad y cuota exactas. Una cuota alta no gana por ser alta.</p>
-              {journey.valueRadar?.opportunities?.length ? <div className="p2-candidate-grid">{journey.valueRadar.opportunities.map((opportunity) => <ValueOpportunityCard key={`${opportunity.fixture_id}-${opportunity.market_family}-${opportunity.direction}-${opportunity.line}-${opportunity.quote_id}`} opportunity={opportunity} onOpen={openCandidate} timezone={defaultTimezone} />)}</div> : <StatusNotice value={state("No hay cuotas exactas vigentes para evaluar el Radar de Valor.", "empty")} />}
+              {journey.valueRadar?.message ? <p><small>{journey.valueRadar.message}</small></p> : null}
+              {journey.valueRadar?.opportunities?.length ? <div className="p2-candidate-grid">{journey.valueRadar.opportunities.map((opportunity) => <ValueOpportunityCard key={`${opportunity.fixture_id}-${opportunity.market_family}-${opportunity.direction}-${opportunity.line}-${opportunity.quote_id}`} opportunity={opportunity} onOpen={openCandidate} timezone={defaultTimezone} />)}</div> : <StatusNotice value={state(journey.valueRadar?.message || "No hay cuotas exactas vigentes para evaluar el Radar de Valor.", "empty")} />}
             </section>
           ) : null}
         </section>

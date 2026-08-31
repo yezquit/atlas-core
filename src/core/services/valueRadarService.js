@@ -5,6 +5,8 @@ import { normalizeProviderOdds } from "../intelligence/oddsIntelligence.js";
 import { ASIAN_TOTAL_GOALS_FAMILY, ASIAN_TOTAL_GOALS_LABEL, asianSettlementExplanation } from "../intelligence/asianTotalGoals.js";
 import { evaluateValueOpportunity, rankValueOpportunities } from "../intelligence/valueRadar.js";
 
+const VALUE_RADAR_FAMILIES = Object.freeze(["goals", "corners", "cards", "total_shots", "shots_on_goal", ASIAN_TOTAL_GOALS_FAMILY]);
+
 function classicOpportunity(candidate) {
   const normalized = {
     fixture_id: candidate.fixtureId,
@@ -125,12 +127,39 @@ export async function buildJourneyValueRadar({ classicCandidates = [], analyses 
     }
   }
   const opportunities = rankValueOpportunities([...classic, ...asian]);
+
+  // Diagnóstico visible: distingue "no hay candidatos deportivos" de "hay
+  // candidatos pero ninguno tiene cuota exacta" — nunca inventa un motivo,
+  // solo cuenta lo que ya se calculó arriba. sports_candidates_count
+  // refleja exactamente el universo clásico recibido (el mismo que "104
+  // candidatos deportivos" del diagnóstico); exact_quote_candidates_count
+  // son los que YA traían activeQuote (hidratado antes de llamar a esta
+  // función, vía recoverJourneyCandidateOdds — no se recalcula aquí).
+  const sportsCandidatesCount = classicCandidates.length;
+  const exactQuoteCandidatesCount = classicCandidates.filter((candidate) => candidate.activeQuote).length;
+  const exactQuotesByFamily = Object.fromEntries(VALUE_RADAR_FAMILIES.map((family) => [family, 0]));
+  for (const opportunity of opportunities) {
+    if (opportunity.quote_exact && exactQuotesByFamily[opportunity.market_family] !== undefined) {
+      exactQuotesByFamily[opportunity.market_family] += 1;
+    }
+  }
+  const message = sportsCandidatesCount === 0
+    ? "Atlas no encontró candidatos deportivos para evaluar en esta jornada."
+    : exactQuoteCandidatesCount === 0 && asian.length === 0
+      ? `Atlas encontró ${sportsCandidatesCount} candidatos deportivos, pero ninguno tiene una cuota exacta disponible para evaluar valor en este momento.`
+      : `${exactQuoteCandidatesCount} de ${sportsCandidatesCount} candidatos tienen precio exacto disponible.`;
+
   return {
     contract: "AtlasValueRadarResult",
-    version: 1,
+    version: 2,
     status: opportunities.length ? "available" : "not_evaluable",
     opportunities,
     exact_quotes_only: true,
-    limitations: opportunities.length ? [] : ["No hay cuotas exactas vigentes para el universo deportivo analizado."],
+    sports_candidates_count: sportsCandidatesCount,
+    exact_quote_candidates_count: exactQuoteCandidatesCount,
+    evaluated_opportunities_count: opportunities.length,
+    exact_quotes_by_family: exactQuotesByFamily,
+    message,
+    limitations: opportunities.length ? [] : [message],
   };
 }
