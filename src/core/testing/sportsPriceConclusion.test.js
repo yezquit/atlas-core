@@ -81,7 +81,7 @@ async function analyze({ previousVersion, selectedOdds, oppositeOdds }) {
   );
 }
 
-test("1. selected unfavorable + opposite marginal con edge positivo: recomienda esperar y nombra la alternativa, sin decir 'sin valor'", async () => {
+test("1. selected unfavorable + opposite marginal con edge positivo: describe la brecha de cada lado sin usar voces oficiales del Director", async () => {
   // Caso real: Under 35.8% @1.82 (edge -19.1pp, unfavorable); Over 64.2% @1.93
   // (edge +12.4pp) pero confidenceScore 60 < 75 -> marginal, no favorable.
   const previousVersion = buildPreviousVersion({
@@ -93,9 +93,14 @@ test("1. selected unfavorable + opposite marginal con edge positivo: recomienda 
   assert.equal(result.director.opposite_market.price_assessment.status, "marginal");
   assert.ok(result.director.opposite_market.price_assessment.price_gap > 0);
   const conclusion = result.director.sports_price_conclusion;
-  assert.match(conclusion, /NO recomiendo Menos de 25\.5/);
-  assert.match(conclusion, /Más de 25\.5.*mejor valor matemático/);
-  assert.match(conclusion, /ESPERAR/);
+  assert.match(conclusion, /Menos de 25\.5.*diferencia negativa/);
+  assert.match(conclusion, /Más de 25\.5.*diferencia positiva/);
+  assert.match(conclusion, /hay valor matemático aparente/);
+  // Solo DirectorAtlas puede emitir SÍ/ESPERAR/NO: esta explicación económica
+  // intermedia nunca debe usar esas voces ni verbos de recomendación.
+  assert.doesNotMatch(conclusion, /ESPERAR/);
+  assert.doesNotMatch(conclusion, /recomiendo/i);
+  assert.doesNotMatch(conclusion, /\bprefiere\b/i);
   assert.doesNotMatch(conclusion, /ninguna de las dos cuotas ofrece valor suficiente/i);
 });
 
@@ -112,7 +117,7 @@ test("2. ambos lados desfavorables: sí puede decir que ninguna cuota ofrece val
   assert.equal(result.director.sports_price_conclusion, "Ninguna de las dos cuotas ofrece valor suficiente.");
 });
 
-test("3. lado contrario favorable: Atlas dice claramente que prefiere el lado contrario", async () => {
+test("3. lado contrario favorable: la explicación lo señala sin usar voces oficiales del Director", async () => {
   const previousVersion = buildPreviousVersion({
     underProbability: 0.30, overProbability: 0.70,
     uncertaintyLow: 0.45, uncertaintyHigh: 0.60, confidenceScore: 85, sampleSize: 20,
@@ -122,11 +127,13 @@ test("3. lado contrario favorable: Atlas dice claramente que prefiere el lado co
   const result = await analyze({ previousVersion, selectedOdds: "1.50", oppositeOdds: "2.20" });
   assert.equal(result.director.opposite_market.price_assessment.status, "favorable_preliminary");
   const conclusion = result.director.sports_price_conclusion;
-  assert.match(conclusion, /Atlas prefiere Más de 25\.5/);
-  assert.match(conclusion, /probabilidad\/precio/);
+  assert.match(conclusion, /Más de 25\.5.*relación probabilidad\/precio favorable/);
+  assert.doesNotMatch(conclusion, /ESPERAR/);
+  assert.doesNotMatch(conclusion, /recomiendo/i);
+  assert.doesNotMatch(conclusion, /\bprefiere\b/i);
 });
 
-test("4. lado seleccionado favorable: Atlas dice claramente que prefiere el lado seleccionado", async () => {
+test("4. lado seleccionado favorable: la explicación lo señala sin usar voces oficiales del Director", async () => {
   const previousVersion = buildPreviousVersion({
     underProbability: 0.70, overProbability: 0.30,
     uncertaintyLow: 0.55, uncertaintyHigh: 0.70, confidenceScore: 85, sampleSize: 20,
@@ -136,6 +143,8 @@ test("4. lado seleccionado favorable: Atlas dice claramente que prefiere el lado
   const result = await analyze({ previousVersion, selectedOdds: "1.60", oppositeOdds: "2.50" });
   assert.equal(result.director.price_assessment.status, "favorable_preliminary");
   const conclusion = result.director.sports_price_conclusion;
-  assert.match(conclusion, /Atlas prefiere Menos de 25\.5/);
-  assert.match(conclusion, /probabilidad\/precio/);
+  assert.match(conclusion, /Menos de 25\.5.*relación probabilidad\/precio favorable/);
+  assert.doesNotMatch(conclusion, /ESPERAR/);
+  assert.doesNotMatch(conclusion, /recomiendo/i);
+  assert.doesNotMatch(conclusion, /\bprefiere\b/i);
 });

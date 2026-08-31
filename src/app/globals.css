@@ -6289,7 +6289,7 @@ textarea:focus-visible {
 
 .p2-director-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--atlas-space-2);
 }
 
@@ -6304,7 +6304,7 @@ textarea:focus-visible {
 .p2-director-metrics small,
 .p2-director-metrics strong {
   display: block;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .p2-director-metrics small {

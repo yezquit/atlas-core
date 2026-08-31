@@ -607,24 +607,28 @@ function buildSportsPriceConclusion({ marketCandidate, sideComparison, priceAsse
   const selectedGap = formatSignedPoints(priceAssessment?.price_gap_percentage_points);
   const oppositeGap = formatSignedPoints(oppositeMarket.price_assessment?.price_gap_percentage_points);
 
+  // IMPORTANTE: esta es una explicación económica intermedia, no una voz
+  // oficial. Solo DirectorAtlas puede decir SÍ/ESPERAR/NO — estas frases
+  // nunca usan "recomiendo", "prefiere", "apostar" ni "ESPERAR": describen
+  // únicamente la relación probabilidad/precio de cada lado.
   if (selectedCategory === "favorable") {
-    return `Atlas prefiere ${selectedLabel}${selectedTag} tanto deportivamente como por relación probabilidad/precio.`;
+    return `${selectedLabel}${selectedTag} presenta una relación probabilidad/precio favorable: la diferencia frente a la cuota es positiva y clara.`;
   }
   if (oppositeCategory === "favorable") {
-    return `Atlas prefiere ${oppositeLabel}${oppositeTag} tanto deportivamente como por relación probabilidad/precio.`;
+    return `${oppositeLabel}${oppositeTag} presenta una relación probabilidad/precio favorable: la diferencia frente a la cuota es positiva y clara, a diferencia de ${selectedLabel}${selectedTag}.`;
   }
   if (selectedCategory === "no_value" && oppositeCategory === "no_value") {
     return "Ninguna de las dos cuotas ofrece valor suficiente.";
   }
   if (selectedCategory === "no_value" && oppositeCategory === "marginal_positive") {
-    return `NO recomiendo ${selectedLabel}${selectedTag}. ${oppositeLabel}${oppositeTag} es la alternativa con mejor valor matemático (edge ${oppositeGap} pp), pero ATLAS mantiene ESPERAR porque la evidencia todavía no alcanza el nivel de confianza requerido para una recomendación firme.`;
+    return `${selectedLabel}${selectedTag} muestra una diferencia negativa frente a la cuota (precio insuficiente). ${oppositeLabel}${oppositeTag} muestra una diferencia positiva (edge ${oppositeGap} pp) — hay valor matemático aparente, aunque la evidencia disponible todavía aconseja cautela.`;
   }
   if (selectedCategory === "marginal_positive" && oppositeCategory === "no_value") {
-    return `Hay valor matemático aparente en ${selectedLabel}${selectedTag} (edge ${selectedGap} pp), pero la evidencia no es suficientemente sólida para recomendar apostar. ATLAS mantiene ESPERAR.`;
+    return `Hay valor matemático aparente en ${selectedLabel}${selectedTag} (edge ${selectedGap} pp), aunque la evidencia disponible todavía aconseja cautela.`;
   }
   // Ambos lados muestran edge positivo pero ninguno alcanza el umbral de
   // confianza/ancho: hay valor aparente en ambos, no ausencia de valor.
-  return "Hay valor matemático aparente en ambos lados, pero la evidencia no es suficientemente sólida para recomendar apostar en ninguno. ATLAS mantiene ESPERAR.";
+  return "Hay valor matemático aparente en ambos lados, aunque la evidencia disponible todavía aconseja cautela en los dos.";
 }
 
 export function buildOperationalDirectorVerdict({

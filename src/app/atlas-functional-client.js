@@ -785,6 +785,80 @@ function WhyAtlasReasoning({ candidate, marketLabel }) {
   );
 }
 
+// Redacta la brecha probabilidad/precio en palabras simples. Es puramente
+// descriptivo (magnitud y signo de un price_gap_percentage_points YA
+// calculado por evaluateMarketPrice) — nunca una voz oficial ("SÍ"/"ESPERAR"/
+// "NO" son exclusivas de DirectorAtlas) ni un umbral de decisión: no altera
+// price_assessment.status ni ninguna regla existente.
+function describeGapMagnitude(gapPoints) {
+  if (!Number.isFinite(gapPoints)) return null;
+  if (gapPoints >= 5) return `Existe una ventaja matemática aparente importante de +${gapPoints} puntos porcentuales.`;
+  if (gapPoints > 0) return `Existe una ventaja matemática aparente de +${gapPoints} puntos porcentuales.`;
+  if (gapPoints > -5) return `La diferencia es de solo ${gapPoints} puntos porcentuales: deportivamente la selección conserva respaldo y está muy cerca del nivel que exige la cuota, aunque el precio ofrecido queda ligeramente por debajo de lo que Atlas considera suficiente.`;
+  return `Atlas está ${Math.abs(gapPoints)} puntos porcentuales por debajo del nivel que exige la cuota: el precio paga demasiado poco para el riesgo que Atlas estima.`;
+}
+
+// Todos los números vienen ya calculados (implied_probability, gap, sports_score);
+// esta función solo los redacta. NUNCA calcula edge a partir de Solidez —
+// Solidez y edge son dos métricas independientes y se muestran por separado.
+function buildNumbersExplanation({ label, decimalOdds, impliedProbability, estimatedProbability, gapPoints, sportsScore }) {
+  if (!Number.isFinite(decimalOdds) || !Number.isFinite(impliedProbability) || !Number.isFinite(estimatedProbability) || !Number.isFinite(gapPoints)) return null;
+  const impliedPercent = Number((impliedProbability * 100).toFixed(1));
+  const estimatedPercent = Number((estimatedProbability * 100).toFixed(1));
+  const direction = gapPoints >= 0 ? "por encima" : "por debajo";
+  return {
+    demandParagraph: `Una cuota de ${decimalOdds} significa que ${label ? `"${label}"` : "esta selección"} necesita acertarse aproximadamente el ${impliedPercent}% de las veces para justificar matemáticamente ese precio.`,
+    atlasParagraph: `Atlas calcula aproximadamente un ${estimatedPercent}% de probabilidad para ${label || "esta selección"}.`,
+    differenceParagraph: `Atlas está ${Math.abs(gapPoints)} puntos porcentuales ${direction} de lo que exige la cuota.`,
+    simpleParagraph: `La casa exige aproximadamente ${impliedPercent}%, mientras Atlas estima ${estimatedPercent}%. ${describeGapMagnitude(gapPoints)}`,
+    solidezParagraph: Number.isFinite(sportsScore) ? `Solidez Atlas: ${sportsScore}/100. La Solidez indica qué tan respaldado está el análisis por los datos disponibles; NO es una probabilidad.` : null,
+  };
+}
+
+function NumbersExplanation({ label, priceAssessment, sportsScore, oppositeLabel, oppositeAssessment }) {
+  const primary = buildNumbersExplanation({
+    label,
+    decimalOdds: priceAssessment?.decimal_odds,
+    impliedProbability: priceAssessment?.implied_probability,
+    estimatedProbability: priceAssessment?.preliminary_probability,
+    gapPoints: priceAssessment?.price_gap_percentage_points,
+    sportsScore,
+  });
+  if (!primary) return null;
+  const oppositeGap = oppositeAssessment?.price_gap_percentage_points;
+  const hasOpposite = Number.isFinite(oppositeGap) && Number.isFinite(oppositeAssessment?.decimal_odds) && Number.isFinite(oppositeAssessment?.implied_probability) && Number.isFinite(oppositeAssessment?.preliminary_probability);
+  const selectedGap = priceAssessment?.price_gap_percentage_points;
+  return (
+    <section className="p2-stage-card p2-numbers-explanation" aria-labelledby="numbers-explanation-title">
+      <p className="eyebrow" id="numbers-explanation-title">¿QUÉ SIGNIFICAN ESTOS NÚMEROS?</p>
+      <h4>¿Qué exige la cuota?</h4>
+      <p>{primary.demandParagraph}</p>
+      <h4>¿Qué estima Atlas?</h4>
+      <p>{primary.atlasParagraph}</p>
+      <h4>¿Qué diferencia hay?</h4>
+      <p>{primary.differenceParagraph}</p>
+      <h4>En palabras simples</h4>
+      <p>{primary.simpleParagraph}</p>
+      {primary.solidezParagraph ? <p>{primary.solidezParagraph}</p> : null}
+      {hasOpposite ? (
+        <>
+          <h4>Lado contrario</h4>
+          <DefinitionGrid entries={[
+            ["Atlas (contrario)", percentage(oppositeAssessment.preliminary_probability)],
+            ["Cuota (contraria)", oppositeAssessment.decimal_odds],
+            ["Exige (contraria)", percentage(oppositeAssessment.implied_probability)],
+            ["Diferencia (contraria)", `${oppositeGap > 0 ? "+" : ""}${oppositeGap} pp`],
+          ]} />
+          <p>{Number(selectedGap) >= Number(oppositeGap)
+            ? "El lado seleccionado presenta una relación probabilidad/precio considerablemente más favorable."
+            : "El lado contrario presenta una relación probabilidad/precio considerablemente más favorable."}</p>
+        </>
+      ) : null}
+      <p><small>La decisión definitiva corresponde a DirectorAtlas después de considerar el análisis completo.</small></p>
+    </section>
+  );
+}
+
 function RedTeamResult({ redTeam }) {
   if (!redTeam) return null;
   return (
@@ -870,6 +944,13 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
       />
       <SideComparisonReading sideComparison={sideComparison} oppositeMarket={director.opposite_market} conclusion={director.sports_price_conclusion} />
       <WhyAtlasReasoning candidate={analysis.marketSelection?.primary} marketLabel={director.market_evaluated?.label} />
+      <NumbersExplanation
+        label={analysis.marketSelection?.primary?.selection}
+        priceAssessment={director.price_assessment}
+        sportsScore={analysis.marketSelection?.primary?.sports_score}
+        oppositeLabel={director.opposite_market?.selection}
+        oppositeAssessment={director.opposite_market?.price_assessment}
+      />
       {sideComparison ? <section className="p2-simple-sports-reading" aria-label="Lectura deportiva por lado">
         {Number.isFinite(marketAudit?.distribution_center) ? <p>La distribución observada se centra alrededor de {marketAudit.distribution_center} {director.market_evaluated?.label?.toLowerCase() || "eventos"}. Esta referencia no suma producción y concesión como si fueran equipos distintos.</p> : null}
         {Number.isFinite(marketAudit?.expected_total) ? <div className="p2-component-summary" aria-label="Componentes del mercado">
@@ -1703,6 +1784,13 @@ function InitialAnalysisResult({ analysis }) {
       <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(primary?.sports_score) ? `${primary.sports_score}/100` : "No disponible"}</strong></p>
       <SideComparisonReading sideComparison={director?.side_comparison} oppositeMarket={director?.opposite_market} conclusion={director?.sports_price_conclusion} />
       <WhyAtlasReasoning candidate={primary} marketLabel={director?.market_evaluated?.label} />
+      <NumbersExplanation
+        label={primary?.selection}
+        priceAssessment={director?.price_assessment}
+        sportsScore={primary?.sports_score}
+        oppositeLabel={director?.opposite_market?.selection}
+        oppositeAssessment={director?.opposite_market?.price_assessment}
+      />
       {otherFamilies.length ? (
         <section aria-labelledby="initial-other-families-title">
           <h3 id="initial-other-families-title">Otras familias que Atlas comparó</h3>
