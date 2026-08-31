@@ -4,6 +4,7 @@ import {
   PERSONAL_OWNER_ID,
   belongsToPersonalOwner,
 } from "../auth/personalIdentity.js";
+import { ASIAN_TOTAL_GOALS_FAMILY, settleAsianTotalGoals } from "./asianTotalGoals.js";
 
 export const OFFICIAL_PREDICTION_STATUS = Object.freeze({
   PENDING: "pending",
@@ -19,6 +20,10 @@ export const RESOLVABLE_MARKET_STAT = Object.freeze({
   cards: "yellow_cards",
   total_shots: "total_shots",
   shots_on_goal: "shots_on_goal",
+  // El total de goles reales del partido es exactamente el mismo valor que
+  // ya usa la familia "goals" (mismo statKey "goals" en automaticOutcome);
+  // asian_total_goals reutiliza ese mismo dato, no un cálculo nuevo.
+  [ASIAN_TOTAL_GOALS_FAMILY]: "goals",
 });
 
 function finiteNumber(value) {
@@ -207,7 +212,7 @@ export function createOfficialPredictionSnapshot(analysis, {
       versions: { operational_engine: analysis.pipeline_version || null, director_contract: `${director.contract || "DirectorLiveVerdict"}@${director.version || "unknown"}`, probability_methodology: null, scout_ranker: null, scout_candidate_id: null },
       live_context: { snapshot_id: snapshot.snapshot_id, minute: snapshot.minute, status: snapshot.status, score_at_prediction: snapshot.score, live_stats_snapshot: snapshot.statistics, live_timestamp: snapshot.captured_at },
       source_metadata: { competition_key: analysis.competition_key || null, requested_date: snapshot.kickoff_utc?.slice(0, 10) || null, season: snapshot.season ?? null, timezone: null, evidence_refs: [], gemini_context_id: null, line_origin: "live_snapshot_projection" },
-      resolution: { status: OFFICIAL_PREDICTION_STATUS.PENDING, actual_total: null, source: null, resolved_at: null, reason: null },
+      resolution: { status: OFFICIAL_PREDICTION_STATUS.PENDING, actual_total: null, source: null, resolved_at: null, reason: null, asian_settlement: null },
     });
   }
 
@@ -280,6 +285,7 @@ export function createOfficialPredictionSnapshot(analysis, {
       source: null,
       resolved_at: null,
       reason: null,
+      asian_settlement: null,
     },
   });
 }
@@ -294,11 +300,25 @@ export function resolveOfficialPrediction(prediction, {
   if (prediction.resolution?.status !== OFFICIAL_PREDICTION_STATUS.PENDING) return prediction;
 
   let status;
+  let asianSettlement = null;
   const actual = finiteNumber(actualTotal);
   if (notEvaluableReason) {
     status = OFFICIAL_PREDICTION_STATUS.NOT_EVALUABLE;
   } else if (actual === null) {
     throw new TypeError("actual_total_or_not_evaluable_reason_required");
+  } else if (prediction.market_family === ASIAN_TOTAL_GOALS_FAMILY) {
+    // Las líneas asiáticas de cuarto (X.25/X.75) pueden liquidar en
+    // half_win/half_loss: un resultado parcial, no un acierto/fallo
+    // completo. El umbral binario simple (actual > line) de las demás
+    // familias las clasificaría mal. Se reutiliza la MISMA función de
+    // liquidación ya usada en el ledger de apuestas (asianTotalGoals.js) y
+    // se conserva el detalle explícito en resolution.asian_settlement en
+    // vez de colapsarlo en silencio a hit/miss.
+    asianSettlement = settleAsianTotalGoals({ totalGoals: actual, line: Number(prediction.line), direction: prediction.direction });
+    status = asianSettlement.status === "not_evaluable" ? OFFICIAL_PREDICTION_STATUS.NOT_EVALUABLE
+      : asianSettlement.status === "push" ? OFFICIAL_PREDICTION_STATUS.VOID
+        : (asianSettlement.status === "full_win" || asianSettlement.status === "half_win") ? OFFICIAL_PREDICTION_STATUS.HIT
+          : OFFICIAL_PREDICTION_STATUS.MISS;
   } else if (actual === Number(prediction.line)) {
     status = OFFICIAL_PREDICTION_STATUS.VOID;
   } else {
@@ -314,6 +334,7 @@ export function resolveOfficialPrediction(prediction, {
       source: source || "manual_user_input",
       resolved_at: resolvedAt,
       reason: notEvaluableReason,
+      asian_settlement: asianSettlement,
     },
   });
 }

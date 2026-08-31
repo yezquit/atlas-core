@@ -419,3 +419,86 @@ test("34. resolver una predicción no modifica los campos V3 originales", () => 
   assert.equal(after.technical_support_score, before.technical_support_score);
   assert.equal(after.ranking_eligible, before.ranking_eligible);
 });
+
+function asianPrediction(overrides = {}) {
+  const source = analysis({
+    director: {
+      market_evaluated: { family: "asian_total_goals", label: "Asiático (Más/Menos) — Total de goles" },
+      selection: overrides.selection || "Over 2.75",
+      line: overrides.line ?? 2.75,
+      sports_verdict: {
+        status: "sports_candidate",
+        selection: overrides.selection || "Over 2.75",
+        direction: overrides.direction || "over",
+        line: overrides.line ?? 2.75,
+        sports_score: 78,
+        estimated_probability: 0.6,
+      },
+    },
+  });
+  return snapshot({ predictionId: `asian-${Math.random()}` }, source);
+}
+
+test("35. Asian Total Goals con línea de cuarto liquida half_win explícito, no un hit binario silencioso", () => {
+  // Over 2.75 = 50% Over 2.5 + 50% Over 3. Con 3 goles: la mitad de 2.5 gana, la mitad de 3 empata -> half_win.
+  const pending = asianPrediction({ direction: "over", line: 2.75 });
+  const resolved = resolveOfficialPrediction(pending, { actualTotal: 3, source: "manual_user_input" });
+  assert.equal(resolved.resolution.status, "hit");
+  assert.equal(resolved.resolution.asian_settlement.status, "half_win");
+  assert.equal(resolved.resolution.asian_settlement.parts.length, 2);
+});
+
+test("36. Asian Total Goals con línea de cuarto liquida half_loss explícito, no un miss binario silencioso", () => {
+  // Over 2.75 con 2 goles: la mitad de 2.5 pierde, la mitad de 3 pierde -> full_loss (no half). Usamos Over 2.25 con 2 goles para half_loss real.
+  const pending = asianPrediction({ direction: "over", line: 2.25 });
+  const resolved = resolveOfficialPrediction(pending, { actualTotal: 2, source: "manual_user_input" });
+  assert.equal(resolved.resolution.status, "miss");
+  assert.equal(resolved.resolution.asian_settlement.status, "half_loss");
+});
+
+test("37. Asian Total Goals con línea de cuarto también liquida full_win/full_loss explícitos cuando ambas mitades coinciden", () => {
+  const fullWinCase = resolveOfficialPrediction(asianPrediction({ direction: "over", line: 2.25 }), { actualTotal: 3, source: "manual_user_input" });
+  assert.equal(fullWinCase.resolution.status, "hit");
+  assert.equal(fullWinCase.resolution.asian_settlement.status, "full_win");
+
+  const fullLossCase = resolveOfficialPrediction(asianPrediction({ direction: "over", line: 2.75 }), { actualTotal: 1, source: "manual_user_input" });
+  assert.equal(fullLossCase.resolution.status, "miss");
+  assert.equal(fullLossCase.resolution.asian_settlement.status, "full_loss");
+});
+
+test("38. Asian Total Goals con línea entera/media no lleva asian_settlement de cuarto (whole/half quedan en un único tramo)", () => {
+  const wholeLine = resolveOfficialPrediction(asianPrediction({ direction: "over", line: 3 }), { actualTotal: 3, source: "manual_user_input" });
+  assert.equal(wholeLine.resolution.status, "void");
+  assert.equal(wholeLine.resolution.asian_settlement.status, "push");
+  assert.equal(wholeLine.resolution.asian_settlement.parts.length, 1);
+});
+
+test("39. familias no asiáticas nunca llevan asian_settlement", () => {
+  const resolved = resolveOfficialPrediction(snapshot(), { actualTotal: 1, source: "manual_user_input" });
+  assert.equal(resolved.market_family, "goals");
+  assert.equal(resolved.resolution.asian_settlement, null);
+});
+
+test("40. resolución automática por api_football también liquida cuartos asiáticos correctamente", async () => {
+  const gateway = {
+    loadFixtureById: async () => ({ fixture: { status: { isFinished: true }, score: { goals: { home: 2, away: 1 } } } }),
+  };
+  const source = analysis({
+    director: {
+      market_evaluated: { family: "asian_total_goals", label: "Asiático (Más/Menos) — Total de goles" },
+      selection: "Over 2.75", line: 2.75,
+      sports_verdict: { status: "sports_candidate", selection: "Over 2.75", direction: "over", line: 2.75, sports_score: 78 },
+    },
+  });
+  const { service } = serviceHarness({ sourceAnalysis: source, gateway });
+  const registered = await service.register({ analysisId: "analysis-001" });
+  const result = await service.resolveOne({ predictionId: registered.prediction.prediction_id, source: "api_football" });
+  assert.equal(result.prediction.resolution.status, "hit");
+  assert.equal(result.prediction.resolution.asian_settlement.status, "half_win");
+  assert.equal(result.prediction.resolution.actual_total, 3);
+});
+
+test("41. el snapshot pendiente ya incluye asian_settlement:null antes de resolver (forma estable del contrato)", () => {
+  const item = snapshot();
+  assert.equal(item.resolution.asian_settlement, null);
+});
