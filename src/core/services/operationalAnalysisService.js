@@ -196,7 +196,23 @@ function snapshotCandidate(previousVersion) {
     side_comparison: director?.side_comparison || null,
     limitations: probability.limitations || director?.probability_limitations || [],
     asian_settlement_profile: probability.asian_settlement_profile || null,
+    input_sources: probability.inputs_used || [],
+    methodology_version: probability.methodology_version || null,
   };
+}
+
+// Identidad exacta (fixture ya fijado por previousVersion + market_family +
+// direction + line): si coincide exactamente con lo que previousVersion ya
+// tenía calculado, es el MISMO snapshot deportivo, no un candidato distinto.
+// Nunca hereda probabilidad de otra línea/dirección/familia.
+function recoverExactSnapshotCandidate(previousVersion, { fixtureId, marketFamily, direction, line } = {}) {
+  const candidate = snapshotCandidate(previousVersion);
+  if (!candidate || !marketFamily || !direction || !Number.isFinite(Number(line))) return null;
+  if (fixtureId !== undefined && Number(previousVersion?.fixture_id) !== Number(fixtureId)) return null;
+  if (candidate.market_family !== marketFamily) return null;
+  if (candidate.direction !== direction) return null;
+  if (Number(candidate.line) !== Number(line)) return null;
+  return candidate;
 }
 
 function snapshotFixture(previousVersion) {
@@ -467,6 +483,8 @@ export function resolveManualExactSelection({
   quotes = [],
   preferredQuote = null,
   allowSpecificLimitedSample = false,
+  previousVersion = null,
+  fixtureId = null,
 } = {}) {
   if (!marketSelection || requestedLine === null || requestedLine === undefined || !marketFamily || !requestedSelection) {
     return marketSelection;
@@ -490,6 +508,27 @@ export function resolveManualExactSelection({
     allowSpecificLimitedSample,
   });
   if (!exactEvaluation.exact_selection_ready) {
+    // Un reanálisis (p. ej. al incorporar Gemini) que no logra recalcular la
+    // misma línea exacta NO debe degradar a "no disponible" un snapshot
+    // deportivo que ya existía para esta identidad exacta (mismo fixture +
+    // market_family + direction + line). Ese snapshot es evidencia deportiva
+    // válida obtenida antes; se conserva íntegro (probabilidad, Solidez,
+    // incertidumbre) y solo se descarta si la identidad realmente cambió.
+    const preserved = recoverExactSnapshotCandidate(previousVersion, { fixtureId, marketFamily, direction, line: requestedLine });
+    if (preserved) {
+      return {
+        ...marketSelection,
+        primary: preserved,
+        alternatives: (marketSelection.ranked_candidates || []).filter((candidate) => candidate.market_family === marketFamily).slice(0, 3),
+        exact_requested_line_unavailable: false,
+        exact_line_available: true,
+        ready_for_pricing: true,
+        requested_line: Number(requestedLine),
+        requested_direction: direction,
+        preserved_from_previous_snapshot: true,
+        explanation: `${preserved.selection} conserva la probabilidad deportiva ya calculada para esta misma identidad exacta; Atlas no pudo recalcularla de nuevo en este momento (${exactEvaluation.reason}).`,
+      };
+    }
     const unavailable = selectExactRequestedCandidate(marketSelection, { marketFamily, requestedLine, requestedSelection, lineOrigin });
     return {
       ...unavailable,
@@ -763,6 +802,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       quotes: oddsResult.quotes,
       preferredQuote,
       allowSpecificLimitedSample: analysisMode === "specific",
+      previousVersion,
+      fixtureId: base.fixture.fixtureId,
     });
   }
   // Fase 3B: MarketOpportunityRadar corre por familia de mercado, consumiendo
