@@ -210,6 +210,29 @@ function snapshotFixture(previousVersion) {
   };
 }
 
+function geminiSelectionSignature(originalText, selectedIds) {
+  if (!originalText) return null;
+  return `${originalText}::${[...new Set(selectedIds || [])].sort().join(",")}`;
+}
+
+// El atajo de "solo precio" solo es válido cuando el contexto Gemini que
+// llega en esta solicitud es EXACTAMENTE el mismo que ya quedó incorporado
+// en previousVersion (mismo texto original + mismos elementos seleccionados).
+// Gemini SÍ puede desplazar estimated_probability (reanálisis intencional,
+// ver F47b) — reutilizar el snapshot cuando Gemini cambió dejaría esa
+// probabilidad desactualizada y, además, el gemini_context del snapshot
+// nunca se actualizaba: ordenar cuota->Gemini reincorporaba Gemini en la
+// misma llamada que reenvía la cuota ya evaluada, así que el atajo se
+// activaba de nuevo y descartaba el Gemini recién validado en silencio.
+function geminiCompatibleWithSnapshot(input, previousVersion) {
+  const incoming = geminiSelectionSignature(input.geminiContext?.original_text, input.selectedGeminiItemIds);
+  const existing = geminiSelectionSignature(
+    previousVersion?.gemini_context?.original_text,
+    (previousVersion?.gemini_context?.selected_items || []).map((item) => item.id)
+  );
+  return incoming === existing;
+}
+
 export function isCompatiblePriceSnapshot(input, previousVersion) {
   const candidate = snapshotCandidate(previousVersion);
   const quote = input.manualOdds;
@@ -219,7 +242,8 @@ export function isCompatiblePriceSnapshot(input, previousVersion) {
     normalizedDirection(quote.direction || quote.selection) === candidate.direction &&
     Number(quote.line) === Number(candidate.line) &&
     Number(input.line) === Number(candidate.line) &&
-    normalizedDirection(input.selection) === candidate.direction;
+    normalizedDirection(input.selection) === candidate.direction &&
+    geminiCompatibleWithSnapshot(input, previousVersion);
 }
 
 function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
