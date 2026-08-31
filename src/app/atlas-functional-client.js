@@ -882,7 +882,7 @@ function PreflightResult({ preflight }) {
   );
 }
 
-function DirectorResult({ analysis, headingRef, onShowExpert }) {
+function DirectorResult({ analysis, headingRef, onShowExpert, onAddToManualParlay, manualParlayLegCount = 0 }) {
   const director = analysis?.director;
   if (!director) return null;
   const price = director.price_assessment;
@@ -990,7 +990,12 @@ function DirectorResult({ analysis, headingRef, onShowExpert }) {
       </section>
       {priceDecision ? <section className={`p2-simple-final p2-simple-decision-${priceDecision.status}`} aria-label="Decisión final"><small>DECISIÓN FINAL</small><h3><span className="p2-decision-status-icon" aria-hidden="true">{directorDecisionIcon(priceDecision)}</span> {priceDecision.label}</h3><p>{simplePriceMessage}</p></section> : null}
       {priceDecision?.status === "yes" ? (
-        <BetRegistrationButton analysisId={analysis?.analysisVersion?.analysis_id} />
+        <>
+          <BetRegistrationButton analysisId={analysis?.analysisVersion?.analysis_id} />
+          {onAddToManualParlay ? (
+            <ManualParlayAddButton analysis={analysis} presentation={presentation} legCount={manualParlayLegCount} onAdd={onAddToManualParlay} />
+          ) : null}
+        </>
       ) : null}
       {analysisDecision.status === "yes" ? <OfficialPredictionRegistration analysisId={analysis?.analysisVersion?.analysis_id} /> : null}
       <button type="button" className="secondary-button" onClick={() => onShowExpert(displayStatus(director.parlay_eligibility))}>Ver análisis completo</button>
@@ -1095,6 +1100,49 @@ function BetRegistrationButton({ analysisId }) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+function ManualParlayAddButton({ analysis, presentation, legCount, onAdd }) {
+  const [status, setStatus] = useState({ status: "idle", message: "" });
+  const atMax = legCount >= 4;
+  return (
+    <div className="p2-manual-parlay-add">
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={atMax}
+        onClick={() => setStatus(onAdd(analysis, presentation))}
+      >
+        Agregar a Parlay manual
+      </button>
+      {atMax ? <p><small>El Parlay manual ya tiene el máximo de 4 selecciones.</small></p> : null}
+      {status.message ? <p role={status.ok === false ? "alert" : "status"}>{status.message}</p> : null}
+    </div>
+  );
+}
+
+function ManualParlayPanel({ legs, onRemove, onSave, status }) {
+  if (!legs.length) return null;
+  const canSave = legs.length >= 2 && legs.length <= 4;
+  return (
+    <section className="p2-stage-card p2-manual-parlay-panel" aria-labelledby="manual-parlay-title">
+      <p className="eyebrow" id="manual-parlay-title">PARLAY MANUAL PENDIENTE ({legs.length}/4)</p>
+      <ul>
+        {legs.map((leg, index) => (
+          <li key={`${leg.fixture_id}-${leg.market_family}`}>
+            <strong>{leg.home_team} vs {leg.away_team}</strong> — {displaySelection(leg.selection)}
+            <small> · {Number.isFinite(leg.preliminary_probability) ? `${(leg.preliminary_probability * 100).toFixed(1)}%` : "Probabilidad no disponible"} · Solidez {Number.isFinite(leg.sports_score) ? `${leg.sports_score}/100` : "No disponible"} · {leg.bookmaker ? `${leg.bookmaker} @${leg.decimal_odds}` : "Cuota no disponible"}</small>
+            <button type="button" className="secondary-button" onClick={() => onRemove(index)}>Quitar</button>
+          </li>
+        ))}
+      </ul>
+      {!canSave ? <p><small>El Parlay manual necesita entre 2 y 4 selecciones para poder guardarse.</small></p> : null}
+      <button type="button" className="primary-button" disabled={!canSave || status.status === "loading"} onClick={onSave}>
+        {status.status === "loading" ? "Registrando Parlay…" : "Guardar Parlay manual"}
+      </button>
+      {status.message ? <p role={status.status === "error" ? "alert" : "status"}>{status.message}</p> : null}
+    </section>
   );
 }
 
@@ -1816,7 +1864,7 @@ function InitialAnalysisResult({ analysis }) {
   );
 }
 
-function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteChange, onEvaluatePrices, showComparison }) {
+function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteChange, onEvaluatePrices, showComparison, onAddToManualParlay, manualParlayLegCount }) {
   const [mode, setMode] = useState("simple");
   const directorHeadingRef = useRef(null);
   useEffect(() => {
@@ -1844,7 +1892,7 @@ function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteC
             <>
               <CompetitiveContextResult context={analysis.competitiveContext} />
               <GeminiContextSummary analysis={analysis} onShowExpert={() => setMode("expert")} />
-              <DirectorResult analysis={analysis} headingRef={directorHeadingRef} onShowExpert={() => setMode("expert")} />
+              <DirectorResult analysis={analysis} headingRef={directorHeadingRef} onShowExpert={() => setMode("expert")} onAddToManualParlay={onAddToManualParlay} manualParlayLegCount={manualParlayLegCount} />
             </>
           ) : <InitialAnalysisResult analysis={analysis} />}
         </div>
@@ -2028,6 +2076,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   const [showActiveComparison, setShowActiveComparison] = useState(false);
   const [candidateQuotes, setCandidateQuotes] = useState({});
   const [fixtureQuoteLedgers, setFixtureQuoteLedgers] = useState({});
+  const [manualParlayLegs, setManualParlayLegs] = useState([]);
+  const [manualParlayStatus, setManualParlayStatus] = useState({ status: "idle", message: "" });
   const [selectedQuoteEntry, setSelectedQuoteEntry] = useState(null);
   const fixturesRequest = useRef(null);
   const analysisRequest = useRef(null);
@@ -2388,6 +2438,105 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     await runOperationalAnalysis({ reanalysis: true });
   }
 
+  // Contenedor manual de Parlay: cada pierna es un análisis individual ya
+  // resuelto por Atlas. Nunca recalcula probabilidad/Solidez/cuota — solo
+  // conserva la referencia exacta ya calculada por marketSelection.primary
+  // y director. Vive en el componente principal (no en DirectorResult, que
+  // remonta con cada análisis) para persistir mientras el usuario analiza
+  // varios partidos antes de guardar el Parlay.
+  function buildManualParlayLeg(targetAnalysis, presentation) {
+    const primary = targetAnalysis?.marketSelection?.primary;
+    const director = targetAnalysis?.director;
+    const fixture = director?.fixture;
+    if (!primary || !director || !fixture?.fixture_id) return null;
+    return {
+      analysis_id: targetAnalysis?.analysisVersion?.analysis_id || null,
+      fixture_id: fixture.fixture_id,
+      competition: fixture.competition || null,
+      home_team: fixture.home_team || null,
+      away_team: fixture.away_team || null,
+      kickoff_utc: fixture.kickoff_utc || fixture.kickoff || null,
+      market_family: director.market_evaluated?.family || primary.market_family,
+      selection: director.selection || primary.selection,
+      direction: primary.direction,
+      line: director.line ?? primary.line,
+      sports_score: primary.sports_score,
+      preliminary_probability: primary.estimated_probability,
+      decimal_odds: director.price_assessment?.decimal_odds ?? null,
+      bookmaker: director.price_assessment?.bookmaker ?? null,
+      economic_status: director.price_assessment?.status ?? null,
+      atlas_sports_verdict: presentation?.analysis_decision?.label ?? null,
+      atlas_price_decision: presentation?.price_decision?.label ?? null,
+    };
+  }
+
+  function addToManualParlay(targetAnalysis, presentation) {
+    const leg = buildManualParlayLeg(targetAnalysis, presentation);
+    if (!leg) return { ok: false, message: "No se pudo preparar esta selección para el Parlay." };
+    if (manualParlayLegs.length >= 4) return { ok: false, message: "El Parlay manual admite máximo 4 selecciones." };
+    if (manualParlayLegs.some((item) => item.fixture_id === leg.fixture_id && item.market_family === leg.market_family)) {
+      return { ok: false, message: "Ya existe una selección de este partido y esta familia en el Parlay." };
+    }
+    setManualParlayLegs((current) => [...current, leg]);
+    setManualParlayStatus({ status: "idle", message: "" });
+    return { ok: true, message: `Agregada al Parlay manual (${manualParlayLegs.length + 1}/4).` };
+  }
+
+  function removeFromManualParlay(index) {
+    setManualParlayLegs((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  async function saveManualParlay() {
+    if (manualParlayLegs.length < 2 || manualParlayLegs.length > 4) {
+      setManualParlayStatus({ status: "error", message: "El Parlay manual necesita entre 2 y 4 selecciones." });
+      return;
+    }
+    const bookmaker = window.prompt("Casa de apuestas para el Parlay:");
+    if (!bookmaker) return;
+    const rawOdds = window.prompt("Cuota combinada real ofrecida por la casa para todo el Parlay:");
+    if (rawOdds === null) return;
+    const decimalOdds = Number(String(rawOdds).replace(",", "."));
+    if (!Number.isFinite(decimalOdds) || decimalOdds <= 1) {
+      setManualParlayStatus({ status: "error", message: "Introduce una cuota combinada válida mayor que 1." });
+      return;
+    }
+    const rawStake = window.prompt("Monto apostado en COP (ej. 10000):");
+    if (rawStake === null) return;
+    const stakeAmount = Number(String(rawStake).trim());
+    if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) {
+      setManualParlayStatus({ status: "error", message: "Introduce un monto válido mayor que cero." });
+      return;
+    }
+    setManualParlayStatus({ status: "loading", message: "Registrando Parlay…" });
+    try {
+      const response = await fetch("/api/bets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          betType: "combination",
+          combinationId: `manual-${Date.now()}`,
+          product: "parlay",
+          mode: "manual",
+          legs: manualParlayLegs,
+          bookmaker,
+          decimalOdds,
+          oddsSource: "manual_user_input",
+          stakeAmount,
+          currency: "COP",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setManualParlayStatus({ status: "error", message: result?.message || "No fue posible registrar el Parlay." });
+        return;
+      }
+      setManualParlayLegs([]);
+      setManualParlayStatus({ status: "success", message: "Parlay manual registrado correctamente." });
+    } catch {
+      setManualParlayStatus({ status: "error", message: "No fue posible conectar con el registro de apuestas." });
+    }
+  }
+
   async function chooseAlternativeAsExact(alternative) {
     if (!alternative) return;
     setLine(String(alternative.line));
@@ -2740,7 +2889,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           </div>
           {!analysis?.director ? <button type="button" className="primary-button p2-primary" onClick={analyzeSelectedFixture} disabled={analysisState.status === "loading" || !selectedFixtureId || !specificOptionReady}>{analysisState.status === "loading" ? "Analizando el partido…" : "Analizar deportivamente"}</button> : null}
           <StatusNotice value={analysisState} />
-          {analysisForDisplay?.director ? <AnalysisResult key={`${analysisForDisplay.selectedFixtureId}-${analysisForDisplay.analysisVersion?.analysis_id || "result"}`} analysis={analysisForDisplay} analysisCompleted={analysisCompleted} candidateQuotes={candidateQuotes} onQuoteChange={updateCandidateQuote} onEvaluatePrices={() => runOperationalAnalysis({ reanalysis: true })} showComparison={showActiveComparison} /> : null}
+          {analysisForDisplay?.director ? <AnalysisResult key={`${analysisForDisplay.selectedFixtureId}-${analysisForDisplay.analysisVersion?.analysis_id || "result"}`} analysis={analysisForDisplay} analysisCompleted={analysisCompleted} candidateQuotes={candidateQuotes} onQuoteChange={updateCandidateQuote} onEvaluatePrices={() => runOperationalAnalysis({ reanalysis: true })} showComparison={showActiveComparison} onAddToManualParlay={addToManualParlay} manualParlayLegCount={manualParlayLegs.length} /> : null}
+          <ManualParlayPanel legs={manualParlayLegs} onRemove={removeFromManualParlay} onSave={saveManualParlay} status={manualParlayStatus} />
           {quoteTargetReady || analysis?.marketSelection?.exact_requested_line_unavailable ? <section className="p2-entry-panel p2-user-quote p2-final-quote-entry" aria-labelledby="user-quote-form-title">
             <p className="eyebrow" id="user-quote-form-title">EVALUAR CUOTA ACTUAL</p>
             <label>

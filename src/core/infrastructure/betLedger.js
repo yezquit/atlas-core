@@ -48,6 +48,11 @@ function combinationLegSnapshot(leg = {}) {
   }
 
   return Object.freeze({
+    // analysis_id conserva la referencia exacta al análisis individual que
+    // originó esta pierna (Bloque 1: "cada pierna conserva referencia al
+    // análisis individual original"). Es opcional: las combinaciones
+    // automáticas de Journey no siempre tienen un analysis_id persistido.
+    analysis_id: leg.analysis_id ?? leg.analysisId ?? null,
     fixture_id: fixtureId,
     competition: leg.competition ?? null,
     home_team: leg.home_team ?? leg.homeTeam ?? null,
@@ -63,11 +68,17 @@ function combinationLegSnapshot(leg = {}) {
       leg.preliminary_probability ?? leg.preliminaryProbability ?? leg.probability
     ),
     decimal_odds: numberOrNull(leg.decimal_odds ?? leg.decimalOdds),
+    bookmaker: leg.bookmaker ?? null,
     economic_status:
       leg.economic_status ??
       leg.economic_price_status ??
       leg.price_status ??
       null,
+    // Decisión de DirectorAtlas al momento de agregar la pierna (voces
+    // oficiales únicamente, ya calculadas por buildSimpleDirectorPresentation
+    // — nunca recalculadas aquí).
+    atlas_sports_verdict: leg.atlas_sports_verdict ?? leg.atlasSportsVerdict ?? null,
+    atlas_price_decision: leg.atlas_price_decision ?? leg.atlasPriceDecision ?? null,
   });
 }
 
