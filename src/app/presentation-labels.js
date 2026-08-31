@@ -21,6 +21,9 @@ const STATUS_LABELS = Object.freeze({
   stale: "Desactualizada",
   unavailable: "No disponible",
   void: "Nulo",
+  half_won: "Media ganada",
+  half_lost: "Media perdida",
+  push: "Push",
 });
 
 const MARKET_LABELS = Object.freeze({
@@ -29,6 +32,7 @@ const MARKET_LABELS = Object.freeze({
   goals: "Goles",
   shots_on_goal: "Remates a puerta",
   total_shots: "Remates totales",
+  asian_total_goals: "Asiático (Más/Menos) — Total de goles",
 });
 
 const PROVIDER_STATUS_LABELS = Object.freeze({

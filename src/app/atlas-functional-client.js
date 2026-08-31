@@ -5,6 +5,7 @@ import { buildConservativeParlays } from "@/core/intelligence/parlayPolicy";
 import { localDateTimeToUtcIso, todayLocalDateString, utcIsoToLocalDateTimeInput } from "@/core/intelligence/dateTimeContext";
 import { manualOddsCopyWarning } from "@/core/intelligence/oddsIntelligence";
 import { buildJourneyOperationalRanking, findFixtureQuoteEntry, summarizeJourneyQuoteCoverage } from "@/core/intelligence/fixtureQuoteLedger";
+import { asianSettlementExplanation } from "@/core/intelligence/asianTotalGoals";
 import { buildSimpleDirectorPresentation } from "@/core/modules/directorAtlas";
 import AtlasCombinationBuilder from "./atlas-combination-builder";
 import AtlasPredictionMemory, { OfficialPredictionRegistration } from "./atlas-prediction-memory";
@@ -1584,8 +1585,11 @@ function BetTrackerView({ timezone }) {
               ["Apuestas", summary.bet_count],
               ["Pendientes", summary.pending_count],
               ["Ganadas", summary.won_count],
+              ["Medio ganadas", summary.half_won_count],
               ["Perdidas", summary.lost_count],
+              ["Medio perdidas", summary.half_lost_count],
               ["Nulas", summary.void_count],
+              ["Push", summary.push_count],
               ["Total apostado", `${formatValue(summary.total_staked)} COP`],
               ["Retorno total", `${formatValue(summary.total_payout)} COP`],
               ["Ganancia / pérdida", `${formatValue(summary.net_profit_loss)} COP`],
@@ -1645,7 +1649,10 @@ function BetTrackerView({ timezone }) {
                 ) : (
                   <div className="p2-inline-actions p2-result-entry">
                     <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "won")}>Ganada</button>
+                    {bet.market_family === "asian_total_goals" ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "half_won")}>Media ganada</button> : null}
                     <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "lost")}>Perdida</button>
+                    {bet.market_family === "asian_total_goals" ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "half_lost")}>Media perdida</button> : null}
+                    {bet.market_family === "asian_total_goals" ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "push")}>Push</button> : null}
                     <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "void")}>Nula</button>
                   </div>
                 )}
@@ -1873,6 +1880,9 @@ function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteC
     heading.focus({ preventScroll: true });
     heading.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [analysis.analysisVersion?.analysis_id]);
+  const asianExplanation = analysis.exactSelection?.market_family === "asian_total_goals"
+    ? asianSettlementExplanation({ line: analysis.exactSelection.line, direction: analysis.exactSelection.direction })
+    : null;
   return (
     <section className="p2-result" aria-labelledby="result-title">
       <div className="p2-result-heading">
@@ -1888,6 +1898,7 @@ function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteC
       <ComparisonVisibilityContext.Provider value={showComparison}>
       {mode === "simple" ? (
         <div data-result-mode="simple">
+          {asianExplanation ? <section className="p2-stage-card"><h3>Cómo se liquida esta línea asiática</h3><p>{asianExplanation}</p></section> : null}
           {analysisCompleted ? (
             <>
               <CompetitiveContextResult context={analysis.competitiveContext} />
@@ -1898,6 +1909,7 @@ function AnalysisResult({ analysis, analysisCompleted, candidateQuotes, onQuoteC
         </div>
       ) : (
         <div data-result-mode="expert">
+          {analysis.preliminaryProbability?.asian_settlement_profile ? <details className="p2-source-details"><summary>Probabilidades de liquidación asiática</summary><pre>{JSON.stringify(analysis.preliminaryProbability.asian_settlement_profile, null, 2)}</pre></details> : null}
           <ExpertResult analysis={analysis}/>
           <ScoutResult analysis={analysis} candidateQuotes={candidateQuotes} onQuoteChange={onQuoteChange} onEvaluatePrices={onEvaluatePrices} />
           <RedTeamResult redTeam={analysis.redTeam} />
@@ -1942,6 +1954,46 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone, qu
       <EconomicsPanel decimalOdds={exactQuote?.decimal_odds} bookmaker={exactQuote?.bookmaker_name} impliedProbability={exactQuote?.implied_probability} estimatedProbability={candidate.estimatedProbability} />
       <small>{formatDate(candidate.kickoff, candidate.timezone || timezone)}</small>
       <button type="button" className="primary-button" onClick={() => onOpen(candidate)}>Analizar esta opción</button>
+    </article>
+  );
+}
+
+const VALUE_STATUS_LABELS = Object.freeze({ interesting: "INTERESANTE", watch: "EN OBSERVACIÓN", no_value: "SIN VALOR", not_evaluable: "NO EVALUABLE" });
+
+function ValueOpportunityCard({ opportunity, onOpen, timezone }) {
+  const asian = opportunity.market_family === "asian_total_goals" || opportunity.marketId === "asian_total_goals";
+  return (
+    <article className="p2-candidate-card p2-value-card">
+      <p className="eyebrow">RADAR DE VALOR ATLAS</p>
+      <span className={`p2-chip p2-value-${opportunity.status}`}>{VALUE_STATUS_LABELS[opportunity.status] || "NO EVALUABLE"}</span>
+      <h3>{opportunity.fixture}</h3>
+      <p className="p2-simple-selection"><strong>{displaySelection(opportunity.selection)}</strong><span>{displayMarket(opportunity.marketId || opportunity.market_family)} · línea {opportunity.line}</span></p>
+      <p><strong>{opportunity.bookmaker} está pagando {opportunity.decimal_odds}.</strong></p>
+      <p>{opportunity.simple_message}</p>
+      {Number.isFinite(opportunity.fair_odds_atlas) ? <p>Según Atlas, una cuota cercana a <strong>{opportunity.fair_odds_atlas.toFixed(2)}</strong> sería un precio más equilibrado para el riesgo calculado.</p> : null}
+      {asian ? <p>{opportunity.asianSettlementExplanation || "La apuesta conserva la liquidación asiática exacta de la línea."}</p> : null}
+      <details>
+        <summary>Ver detalle técnico</summary>
+        <DefinitionGrid entries={[
+          ["Probabilidad Atlas", percentage(opportunity.estimated_probability)],
+          ["Cuota ofrecida", opportunity.decimal_odds],
+          ["Cuota justa Atlas", Number.isFinite(opportunity.fair_odds_atlas) ? opportunity.fair_odds_atlas.toFixed(4) : "No disponible"],
+          ["Probabilidad implícita", percentage(opportunity.implied_probability)],
+          ["Raw edge", Number.isFinite(opportunity.raw_edge_pp) ? `${opportunity.raw_edge_pp.toFixed(2)} pp` : "No disponible"],
+          ["Edge conservador", Number.isFinite(opportunity.conservative_edge_pp) ? `${opportunity.conservative_edge_pp.toFixed(2)} pp` : "No disponible"],
+          ["EV / ROI esperado", Number.isFinite(opportunity.expected_roi) ? percentage(opportunity.expected_roi) : "No disponible"],
+          ["SOLIDEZ ATLAS", Number.isFinite(opportunity.sports_score) ? `${opportunity.sports_score}/100` : "No disponible"],
+          ["Identidad exacta", `${opportunity.fixture_id}:${opportunity.market_family}:${opportunity.direction}:${opportunity.line}`],
+        ]} />
+        {opportunity.asian_settlement_profile ? <pre>{JSON.stringify(opportunity.asian_settlement_profile.probabilities, null, 2)}</pre> : null}
+        <p><strong>PP:</strong> Puntos porcentuales. 48% frente a 42% = 6 pp.</p>
+        <p><strong>EDGE:</strong> Diferencia entre la probabilidad que Atlas estima y lo que exige el precio.</p>
+        <p><strong>CUOTA JUSTA:</strong> Precio aproximadamente equilibrado según el riesgo que Atlas calcula.</p>
+        <p><strong>EV:</strong> Resultado promedio esperado en situaciones comparables; no garantiza esta apuesta.</p>
+        <p><strong>SOLIDEZ:</strong> Respaldo del análisis por los datos disponibles; no es probabilidad.</p>
+      </details>
+      <small>{formatDate(opportunity.kickoff, opportunity.timezone || timezone)}</small>
+      <button type="button" className="primary-button" onClick={() => onOpen(opportunity)}>Analizar esta opción</button>
     </article>
   );
 }
@@ -2033,7 +2085,7 @@ function JourneyTechnicalDetails({ journey, quoteLedgers, operationalRanking, qu
   );
 }
 
-export default function AtlasFunctionalClient({ competitionGroups, markets, defaultTimezone = "America/Bogota", ownerId = "personal" }) {
+export default function AtlasFunctionalClient({ competitionGroups, markets, specificMarkets = markets, defaultTimezone = "America/Bogota", ownerId = "personal" }) {
   const competitions = useMemo(
     () => competitionGroups.flatMap((group) => group.competitions),
     [competitionGroups]
@@ -2047,6 +2099,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   );
   const [journeyMarketIds, setJourneyMarketIds] = useState(markets.map((market) => market.id));
   const [journeyAnalysisMode, setJourneyAnalysisMode] = useState("general");
+  const [journeyProductMode, setJourneyProductMode] = useState("classic");
   const [journeyState, setJourneyState] = useState(state("Configura la jornada y pulsa “Escanear jornada”."));
   const [journey, setJourney] = useState(null);
   const journeyRequest = useRef(null);
@@ -2473,6 +2526,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
   function addToManualParlay(targetAnalysis, presentation) {
     const leg = buildManualParlayLeg(targetAnalysis, presentation);
     if (!leg) return { ok: false, message: "No se pudo preparar esta selección para el Parlay." };
+    const asianQuarter = leg.market_family === "asian_total_goals" && [0.25, 0.75].includes(((Number(leg.line) % 1) + 1) % 1);
+    if (asianQuarter) return { ok: false, message: "Las líneas asiáticas .25/.75 se registran únicamente como apuestas individuales en esta versión." };
     if (manualParlayLegs.length >= 4) return { ok: false, message: "El Parlay manual admite máximo 4 selecciones." };
     if (manualParlayLegs.some((item) => item.fixture_id === leg.fixture_id && item.market_family === leg.market_family)) {
       return { ok: false, message: "Ya existe una selección de este partido y esta familia en el Parlay." };
@@ -2628,7 +2683,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
     };
     const transferred = { ...transferredBase, line_origin: transferredBase.line_origin || "transferred_candidate" };
     const storedOperation = findFixtureQuoteEntry(fixtureQuoteLedgers[String(candidate.fixtureId)], candidate);
-    const storedQuote = storedOperation?.active_quote || storedOperation?.latest_known_quote || null;
+    const storedQuote = candidate.activeQuote || storedOperation?.active_quote || storedOperation?.latest_known_quote || null;
     setTransferredCandidate(transferred);
     setAnalysisMode("specific");
     setMarketId(transferred.market_family);
@@ -2722,6 +2777,12 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
 
           <div className="p2-filter-section">
             <fieldset className="p2-market-filters">
+              <legend>Capacidad</legend>
+              <label><input type="radio" name="journey-product-mode" checked={journeyProductMode === "classic"} onChange={() => setJourneyProductMode("classic")} />ANÁLISIS CLÁSICO</label>
+              <label><input type="radio" name="journey-product-mode" checked={journeyProductMode === "value"} onChange={() => setJourneyProductMode("value")} />RADAR DE VALOR</label>
+              <small>{journeyProductMode === "classic" ? "Busca las opciones deportivas más sólidas según el modelo actual." : "Busca precios exactos donde la casa parece pagar mejor de lo que Atlas considera justo."}</small>
+            </fieldset>
+            <fieldset className="p2-market-filters">
               <legend>Modo de análisis</legend>
               <label><input type="radio" name="journey-analysis-mode" checked={journeyAnalysisMode === "general"} onChange={() => { setJourneyAnalysisMode("general"); invalidateJourney(); }} />Buscar mejor opción general</label>
               <label><input type="radio" name="journey-analysis-mode" checked={journeyAnalysisMode === "specific"} onChange={() => { setJourneyAnalysisMode("specific"); setJourneyMarketIds([journeyMarketIds[0] || markets[0]?.id || "goals"]); invalidateJourney(); }} />Analizar un mercado específico</label>
@@ -2772,7 +2833,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           </button>
           <StatusNotice value={journeyState} />
 
-          {journey ? (
+          {journey && journeyProductMode === "classic" ? (
             <section className="p2-journey-result" aria-labelledby="journey-summary-title">
               <h3 id="journey-summary-title">RECOMENDADAS POR ATLAS</h3>
               <p>{journey.recommendedCandidates?.length ? `${journey.recommendedCandidates.length} selecciones destacadas por Atlas. El catálogo completo sigue disponible abajo.` : "ATLAS no encontró selecciones con suficiente respaldo para destacar en esta jornada."}</p>
@@ -2782,6 +2843,12 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
               <details className="p2-source-details"><summary>OTRAS OPCIONES ANALIZADAS — {Math.max(0, (journey.candidates || []).length - (journey.recommendedCandidates || []).length)}</summary><div className="p2-candidate-grid">{(journey.candidates || []).filter((candidate) => !(journey.recommendedCandidates || []).some((recommended) => recommended.fixtureId === candidate.fixtureId && recommended.marketId === candidate.marketId && recommended.direction === candidate.direction && recommended.line === candidate.line)).map((candidate) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}</div></details>
              <JourneyMatchesReviewed journey={journey} />
              <JourneyTechnicalDetails journey={journey} quoteLedgers={fixtureQuoteLedgers} operationalRanking={journeyOperationalRanking} quoteCoverage={journeyQuoteCoverage} technicalLabel="Respaldo deportivo" />
+            </section>
+          ) : journey && journeyProductMode === "value" ? (
+            <section className="p2-journey-result" aria-labelledby="value-radar-title">
+              <h3 id="value-radar-title">RADAR DE VALOR ATLAS</h3>
+              <p>Solo se evalúan selecciones con identidad y cuota exactas. Una cuota alta no gana por ser alta.</p>
+              {journey.valueRadar?.opportunities?.length ? <div className="p2-candidate-grid">{journey.valueRadar.opportunities.map((opportunity) => <ValueOpportunityCard key={`${opportunity.fixture_id}-${opportunity.market_family}-${opportunity.direction}-${opportunity.line}-${opportunity.quote_id}`} opportunity={opportunity} onOpen={openCandidate} timezone={defaultTimezone} />)}</div> : <StatusNotice value={state("No hay cuotas exactas vigentes para evaluar el Radar de Valor.", "empty")} />}
             </section>
           ) : null}
         </section>
@@ -2805,7 +2872,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
           {transferredCandidate ? (
             <section className="p2-transferred-candidate" aria-labelledby="transferred-candidate-title">
               <p className="eyebrow">Candidato transferido desde la jornada</p>
-              <h3 id="transferred-candidate-title">{markets.find((item) => item.id === transferredCandidate.market_family)?.label || transferredCandidate.market_family} · {transferredCandidate.direction === "over" ? "Más de" : "Menos de"} {transferredCandidate.line}</h3>
+              <h3 id="transferred-candidate-title">{specificMarkets.find((item) => item.id === transferredCandidate.market_family)?.label || transferredCandidate.market_family} · {transferredCandidate.direction === "over" ? "Más de" : "Menos de"} {transferredCandidate.line}</h3>
               <p>Atlas conservará exactamente esta selección durante la investigación.</p>
               <details className="p2-source-details"><summary>Ver datos técnicos de la preselección</summary><DefinitionGrid entries={[
                 ["Probabilidad preliminar", percentage(transferredCandidate.preliminary_probability)],
@@ -2864,7 +2931,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                 <label>
                   <span>5 · Familia</span>
                   <select value={marketId} onChange={(event) => { setMarketId(event.target.value); clearTemporaryQuote(); invalidateAnalysis(); }}>
-                    {markets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
+                    {specificMarkets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
                   </select>
                 </label>
                 <p>Con la familia es suficiente: Atlas determinará automáticamente la dirección y la línea.</p>
@@ -2878,10 +2945,10 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, defa
                 {analysisMode === "specific" ? <label>
                   <span>5 · Familia de mercado</span>
                   <select value={marketId} disabled>
-                  {markets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
+                  {specificMarkets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
                   </select>
                 </label> : <div className="p2-family-copy"><strong>Atlas comparará las cinco familias.</strong><small>La cuota no participa en esta comparación inicial; se evaluará únicamente al final.</small></div>}
-                <label><span>Mercado candidato</span><input readOnly value={analysis?.director?.market_evaluated?.label || markets.find((item) => item.id === transferredCandidate?.market_family)?.label || "Atlas lo determinará"} /></label>
+                <label><span>Mercado candidato</span><input readOnly value={analysis?.director?.market_evaluated?.label || specificMarkets.find((item) => item.id === transferredCandidate?.market_family)?.label || "Atlas lo determinará"} /></label>
                 <label><span>Selección candidata</span><input readOnly value={analysis?.director?.selection || transferredCandidate?.selection ? displaySelection(analysis?.director?.selection || transferredCandidate?.selection) : "Atlas la determinará"} /></label>
                 <label><span>Línea sugerida</span><input readOnly value={analysis?.director?.line ?? transferredCandidate?.line ?? "Atlas la determinará"} /></label>
               </section>

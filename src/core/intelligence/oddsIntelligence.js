@@ -4,6 +4,7 @@ import {
 } from "../contracts/operationalContracts.js";
 
 const MARKET_NAME_RULES = Object.freeze([
+  ["asian_total_goals", ["asian total goals", "asian goals over/under", "asian goals", "total goals asian", "asiatico total de goles", "total asiatico de goles"]],
   ["shots_on_goal", ["shots on goal", "shots on target", "remates a puerta"]],
   ["total_shots", ["total shots", "shots total", "remates totales"]],
   ["cards", ["cards", "bookings", "tarjetas"]],

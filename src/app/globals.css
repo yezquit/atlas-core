@@ -32,6 +32,16 @@
   --accent-strong: #48a9f8;
 }
 
+.p2-value-card {
+  border-color: rgba(245, 185, 66, 0.42);
+  background: linear-gradient(145deg, rgba(32, 25, 12, 0.96), rgba(13, 16, 22, 0.98));
+}
+
+.p2-value-interesting { color: #ffe29a; border-color: #d7a83d; }
+.p2-value-watch { color: #d9e7ff; border-color: #6c8fc4; }
+.p2-value-no_value { color: #ffc3c3; border-color: #a54c4c; }
+.p2-value-not_evaluable { color: #c4cbd5; border-color: #606975; }
+
 * {
   box-sizing: border-box;
 }

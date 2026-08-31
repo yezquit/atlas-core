@@ -238,12 +238,12 @@ export async function PATCH(request) {
     );
   }
 
-  if (!["won", "lost", "void"].includes(input.outcome)) {
+  if (!["won", "half_won", "lost", "half_lost", "void", "push"].includes(input.outcome)) {
     return Response.json(
       {
         status: "unavailable",
         errorCode: "invalid_outcome",
-        message: "El resultado debe ser won, lost o void.",
+        message: "El resultado no pertenece al contrato de liquidación soportado.",
       },
       { status: 400 }
     );

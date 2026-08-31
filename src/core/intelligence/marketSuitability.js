@@ -3,6 +3,7 @@ import {
   ODDS_VERIFICATION_STATUS,
   PRICE_EVALUATION_STATUS,
 } from "../contracts/operationalContracts.js";
+import { evaluateValueOpportunity, VALUE_RADAR_STATUS } from "./valueRadar.js";
 
 function round(value, decimals = 4) {
   return Number(Number(value).toFixed(decimals));
@@ -20,7 +21,39 @@ export function evaluateMarketPrice({
   phase = "early_review",
   favorableGap = 0.03,
   controlledUncertaintyWidth = 0.25,
+  marketFamily = null,
+  asianSettlementProfile = null,
 } = {}) {
+  if (marketFamily === "asian_total_goals") {
+    const value = evaluateValueOpportunity({
+      candidate: {
+        fixture_id: oddsQuote?.fixture_id,
+        market_family: marketFamily,
+        direction: oddsQuote?.direction || oddsQuote?.selection,
+        line: oddsQuote?.line,
+        estimated_probability: preliminaryProbability?.point_estimate,
+        uncertainty_low: preliminaryProbability?.uncertainty_low,
+        uncertainty_high: preliminaryProbability?.uncertainty_high,
+      },
+      quote: oddsQuote,
+      asianSettlementProfile,
+    });
+    const status = value.status === VALUE_RADAR_STATUS.INTERESTING ? PRICE_EVALUATION_STATUS.FAVORABLE_PRELIMINARY
+      : value.status === VALUE_RADAR_STATUS.NO_VALUE ? PRICE_EVALUATION_STATUS.UNFAVORABLE
+        : value.status === VALUE_RADAR_STATUS.NOT_EVALUABLE ? PRICE_EVALUATION_STATUS.UNAVAILABLE
+          : PRICE_EVALUATION_STATUS.MARGINAL;
+    return {
+      contract: "PriceEvaluation",
+      version: 1,
+      ...value,
+      status,
+      price_gap: Number.isFinite(value.raw_edge_pp) ? round(value.raw_edge_pp / 100) : null,
+      price_gap_percentage_points: value.raw_edge_pp,
+      expected_value_claimed: false,
+      model_notice: "Evaluación asiática preliminar basada en liquidación completa; no garantiza resultados.",
+      message: value.simple_message,
+    };
+  }
   const modelNotice = "El modelo es preliminar y aún no está suficientemente calibrado para afirmar valor esperado.";
   const base = {
     contract: "PriceEvaluation",
@@ -102,9 +135,11 @@ export function assessMarketSuitability({
   preliminaryProbability = null,
   sampleSize = preliminaryProbability?.sample_size_effective || (sampleSufficient ? 5 : 0),
   phase = "early_review",
+  marketFamily = null,
+  asianSettlementProfile = null,
 } = {}) {
   const conditions = [];
-  const priceEvaluation = evaluateMarketPrice({ oddsQuote, preliminaryProbability, confidenceScore, sampleSize, phase });
+  const priceEvaluation = evaluateMarketPrice({ oddsQuote, preliminaryProbability, confidenceScore, sampleSize, phase, marketFamily, asianSettlementProfile });
   let status;
   if (blocked || contextBlocked || !fixtureVerified) {
     status = MARKET_SUITABILITY.BLOCKED;

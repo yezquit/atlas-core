@@ -8,7 +8,19 @@ export const SPORTS_MARKETS = Object.freeze([
   { id: "corners", label: "Córners" },
 ]);
 
+export const SPECIFIC_SPORTS_MARKETS = Object.freeze([
+  ...SPORTS_MARKETS,
+  { id: "asian_total_goals", label: "Asiático (Más/Menos) — Total de goles" },
+]);
+
 const MARKET_RULES = Object.freeze({
+  asian_total_goals: {
+    label: "Asiático (Más/Menos) — Total de goles",
+    leagueMetric: "goals_per_match",
+    teamMetric: "goals_for_per_match",
+    requiresReferee: false,
+    weatherRisks: ["heavy_rain", "strong_wind", "extreme_heat", "extreme_cold"],
+  },
   goals: {
     label: "Goles",
     leagueMetric: "goals_per_match",

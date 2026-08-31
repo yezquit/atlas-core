@@ -92,6 +92,12 @@ export async function registerTrackedBet({
     currency,
     analyzedAt: director.analyzed_at || analysis.analyzed_at || null,
     placedAt: new Date().toISOString(),
+    valueRadarStatus: analysis.value_radar?.status || null,
+    fairOddsAtDecision: analysis.value_radar?.fair_odds_atlas || null,
+    rawEdgePp: analysis.value_radar?.raw_edge_pp || null,
+    conservativeEdgePp: analysis.value_radar?.conservative_edge_pp || null,
+    expectedRoi: analysis.value_radar?.expected_roi || null,
+    asianSettlementProfile: analysis.preliminary_probability?.asian_settlement_profile || null,
   });
 
   await ledger.appendBet(bet);

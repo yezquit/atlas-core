@@ -17,6 +17,7 @@ import { createUnavailablePreMatchItem, normalizeInjuries, normalizeLineups } fr
 import { buildOperationalDirectorVerdict } from "../modules/directorAtlas.js";
 import { classifyProbability, toProbabilityPercent } from "../intelligence/probabilityClassification.js";
 import { buildMarketOpportunityRadar, attachRadarContext } from "../intelligence/marketOpportunityRadar.js";
+import { evaluateValueOpportunity } from "../intelligence/valueRadar.js";
 import { analyzeSportsFixture } from "./sportsIntelligenceService.js";
 
 function coverageFlag(coverage, path) {
@@ -194,6 +195,7 @@ function snapshotCandidate(previousVersion) {
     technical_support_score: sports?.technical_support_score,
     side_comparison: director?.side_comparison || null,
     limitations: probability.limitations || director?.probability_limitations || [],
+    asian_settlement_profile: probability.asian_settlement_profile || null,
   };
 }
 
@@ -274,6 +276,8 @@ function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
     preliminaryProbability: previousVersion.preliminary_probability,
     sampleSize: candidate.sample_size_effective,
     phase: previousVersion.phase,
+    marketFamily: candidate.market_family,
+    asianSettlementProfile: previousVersion.preliminary_probability?.asian_settlement_profile || null,
   });
   const marketAssessment = {
     market_family: candidate.market_family,
@@ -314,7 +318,8 @@ function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
     intendedUse: input.intendedUse || "individual",
   });
   attachLineOriginToDirector(director, previousVersion.line_origin || LINE_ORIGIN.USER_SELECTED, previousVersion.director.context_summary || {});
-  const version = buildAnalysisVersion({
+  const valueRadar = evaluateValueOpportunity({ candidate: { ...candidate, fixture_id: fixture.fixtureId }, quote, asianSettlementProfile: candidate.asian_settlement_profile });
+  const version = { ...buildAnalysisVersion({
     fixture,
     phase: previousVersion.phase,
     inputs: { ...input, sourceAnalysisId: previousVersion.analysis_id, price_only_snapshot: true },
@@ -327,7 +332,7 @@ function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
     preliminaryProbability: previousVersion.preliminary_probability,
     director,
     engineVersion: OPERATIONAL_ENGINE_VERSION,
-  }, { idFactory, now: () => analyzedAt });
+  }, { idFactory, now: () => analyzedAt }), value_radar: valueRadar };
   return {
     status: DATA_LOAD_STATUS.SUCCESS,
     selectedFixtureId: fixture.fixtureId,
@@ -340,6 +345,7 @@ function priceOnlySnapshotResult(input, previousVersion, { now, idFactory }) {
     selectedOdds: quote,
     activeQuote: quote,
     director,
+    valueRadar,
     gemini: { context: previousVersion.gemini_context, applied_items: previousVersion.gemini_context?.selected_items || [] },
     analysisVersion: version,
     changesSincePrevious: compareAnalysisVersions(previousVersion, version),
@@ -844,6 +850,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     methodology_version: primaryCandidate.methodology_version,
     model_validation_status: "preliminary_unvalidated",
     represents_confidence: false,
+    asian_settlement_profile: primaryCandidate.asian_settlement_profile || null,
   } : null;
   const requirements = marketAssessment?.data_requirements?.length || 0;
   const available = marketAssessment?.available_evidence?.length || 0;
@@ -877,6 +884,8 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     preliminaryProbability,
     sampleSize,
     phase: input.phase || phaseInfo.phase,
+    marketFamily: primaryCandidate?.market_family || null,
+    asianSettlementProfile: primaryCandidate?.asian_settlement_profile || null,
   });
   const operationalCompleteness = buildOperationalCompleteness({
     oddsQuote: selectedOdds,
@@ -1020,7 +1029,8 @@ targetOdds: input.targetDreamOdds || 20,
 selections: input.dreamSelections || 5,
 }
 );
-  const version = buildAnalysisVersion({
+  const valueRadar = evaluateValueOpportunity({ candidate: { ...primaryCandidate, fixture_id: base.fixture.fixtureId }, quote: selectedOdds, asianSettlementProfile: primaryCandidate?.asian_settlement_profile });
+  const version = { ...buildAnalysisVersion({
     fixture: base.fixture,
     phase: input.phase,
     inputs: { ...input, lineOrigin, geminiResponse: input.geminiResponse ? "stored_in_gemini_context" : null, lineup_status: context.lineups.status, injury_status: context.injuries.status, referee_status: base.refereeProfile?.status, weather_status: base.venueWeatherContext?.weather_status },
@@ -1035,7 +1045,7 @@ selections: input.dreamSelections || 5,
     director,
     parlay,
     engineVersion: OPERATIONAL_ENGINE_VERSION,
-  }, { idFactory, now: () => analyzedAt });
+  }, { idFactory, now: () => analyzedAt }), value_radar: valueRadar };
   const changes = previousVersion || input.reanalysis ? compareAnalysisVersions(previousVersion, version) : null;
   const individualPick = {
     contract: "IndividualPickAssessment",
@@ -1106,6 +1116,7 @@ selections: input.dreamSelections || 5,
     dreamParlays,
     individualPick,
     director,
+    valueRadar,
     analysisVersion: version,
     changesSincePrevious: changes,
     telemetry,

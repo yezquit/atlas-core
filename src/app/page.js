@@ -1,7 +1,7 @@
 import AtlasFunctionalClient from "./atlas-functional-client";
 import { groupApiFootballCompetitions } from "@/core/data/apiFootballLeagues";
 import { currentPersonalSession } from "@/core/auth/personalSessionServer";
-import { SPORTS_MARKETS } from "@/core/intelligence/marketEngine";
+import { SPORTS_MARKETS, SPECIFIC_SPORTS_MARKETS } from "@/core/intelligence/marketEngine";
 import { redirect } from "next/navigation";
 import Image from "next/image";
 
@@ -33,6 +33,7 @@ export default async function Home() {
         <AtlasFunctionalClient
           competitionGroups={competitionGroups}
           markets={SPORTS_MARKETS}
+          specificMarkets={SPECIFIC_SPORTS_MARKETS}
           defaultTimezone={defaultTimezone}
           ownerId={session.ownerId}
         />

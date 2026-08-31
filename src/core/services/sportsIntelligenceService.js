@@ -6,6 +6,8 @@ import {
 import { buildLeagueIntelligence } from "../intelligence/leagueIntelligence.js";
 import {
   SPORTS_MARKETS,
+  SPECIFIC_SPORTS_MARKETS,
+  evaluateSportsMarket,
   evaluateSportsMarkets,
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
@@ -26,11 +28,12 @@ import { assessPrematchEligibility, filterPrematchFixtures } from "../intelligen
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
 import { normalizeTimeZone } from "../intelligence/dateTimeContext.js";
+import { buildJourneyValueRadar } from "./valueRadarService.js";
 
 const PROFILE_WINDOW_DAYS = 120;
 const PROFILE_FIXTURE_LIMIT = 10;
 const REFEREE_FIXTURE_LIMIT = 10;
-const SUPPORTED_MARKET_IDS = new Set(SPORTS_MARKETS.map((market) => market.id));
+const SUPPORTED_MARKET_IDS = new Set(SPECIFIC_SPORTS_MARKETS.map((market) => market.id));
 
 // Idéntico a attachRadarContextByFamily en operationalAnalysisService.js
 // (Fase 3B): cada candidato recibe el radar_context de SU PROPIA familia,
@@ -344,6 +347,18 @@ export async function analyzeSportsFixture(input, gateway) {
     line: input.line || null,
     odds: input.odds || null,
   });
+  if (input.marketId === "asian_total_goals") {
+    marketAssessments.push(evaluateSportsMarket({
+      marketId: "asian_total_goals",
+      leagueProfile,
+      homeTeamProfile,
+      awayTeamProfile,
+      refereeProfile,
+      venueWeatherContext,
+      line: input.line || null,
+      odds: null,
+    }));
+  }
   const requestedMarketIds = Array.isArray(input.marketIds)
     ? new Set(input.marketIds)
     : null;
@@ -503,7 +518,7 @@ export function attachCompetitionProfile(candidate, profiles = []) {
   } : candidate;
 }
 
-export async function recoverJourneyCandidateOdds(candidates, gateway, now) {
+export async function recoverJourneyCandidateOdds(candidates, gateway, now, oddsCache = null) {
   if (typeof gateway.loadFixtureOdds !== "function" || candidates.length === 0) return candidates;
   const fixtureContext = new Map(candidates.map((candidate) => [Number(candidate.fixtureId), candidate]));
   const oddsByFixture = new Map(await Promise.all([...fixtureContext].map(async ([fixtureId, candidate]) => {
@@ -511,6 +526,7 @@ export async function recoverJourneyCandidateOdds(candidates, gateway, now) {
       const raw = await gateway.loadFixtureOdds(fixtureId);
       if (raw.status !== DATA_LOAD_STATUS.SUCCESS) return [fixtureId, []];
       const normalized = normalizeProviderOdds({ response: raw.response, fixtureId, now, kickoff: candidate.kickoff });
+      if (oddsCache instanceof Map) oddsCache.set(fixtureId, normalized.quotes);
       return [fixtureId, normalized.quotes];
     } catch {
       return [fixtureId, []];
@@ -811,15 +827,18 @@ export async function scanSportsJourney(input, gateway) {
     analysisCandidates.filter((entry) => entry.candidate?.ranking_eligible === true)
   ).slice(0, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
   const combinationSports = selectCombinationJourneyCandidates(combinationEntries, maximumCandidates).map(toJourneyCandidate).map((candidate) => attachCompetitionProfile(candidate, competitionProfiles));
+  const journeyOddsCache = new Map();
   const pricedUniverse = await recoverJourneyCandidateOdds(
     [...new Map([...highlightedSports, ...combinationSports].map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate])).values()],
     gateway,
     referenceNow,
+    journeyOddsCache,
   );
   const pricedByIdentity = new Map(pricedUniverse.map((candidate) => [`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`, candidate]));
   const highlighted = highlightedSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
   const combinationCandidates = combinationSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
   const recommendedCandidates = buildJourneyRecommendationShortlist(highlighted);
+  const valueRadar = await buildJourneyValueRadar({ classicCandidates: highlighted, analyses: reviewed, gateway, now: referenceNow, oddsByFixture: journeyOddsCache });
   const fixturesByCompetition = Object.fromEntries(
     [...fixtures.reduce((map, item) => {
       const name = item.competition.localName;
@@ -860,6 +879,7 @@ export async function scanSportsJourney(input, gateway) {
     candidates: highlighted,
     recommendedCandidates,
     combinationCandidates,
+    valueRadar,
     competitionProfilesApplied: competitionProfiles.length,
     warnings,
     executionTimeMs: Date.now() - startedAt,

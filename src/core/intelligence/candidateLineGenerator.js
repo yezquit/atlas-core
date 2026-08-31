@@ -2,6 +2,7 @@ import { estimatePreliminaryMarketProbability } from "./preliminaryMarketModel.j
 import { contextShiftForMarket } from "./geminiImpactMapper.js";
 import { buildCanonicalObservations } from "./canonicalObservations.js";
 import { buildMarketComponents } from "./marketComponentAdapter.js";
+import { ASIAN_TOTAL_GOALS_FAMILY, buildAsianSettlementProfile } from "./asianTotalGoals.js";
 import {
   ESTIMATED_PROBABILITY_REPRESENTS,
   classifyProbability,
@@ -33,6 +34,7 @@ const METHODOLOGIES = Object.freeze({
   cards: "empirical_discipline_volume_with_optional_referee_limit",
   total_shots: "empirical_shot_volume_dynamic_half_lines",
   shots_on_goal: "empirical_accuracy_volume_dynamic_half_lines",
+  asian_total_goals: "empirical_discrete_goal_mass_asian_settlement",
 });
 
 function numeric(values = []) { return values.map(Number).filter(Number.isFinite); }
@@ -209,16 +211,51 @@ export function generateCandidateLines(input = {}) {
 
 export function evaluateExactMarketLine({ marketFamily, direction, line, ...context } = {}) {
   const normalizedDirection = String(direction || "").trim().toLowerCase();
-  const standardCanonical = buildCanonicalObservations({ ...context, marketFamily });
+  const sourceFamily = marketFamily === ASIAN_TOTAL_GOALS_FAMILY ? "goals" : marketFamily;
+  const standardCanonical = buildCanonicalObservations({ ...context, marketFamily: sourceFamily });
   const standardSources = new Set(standardCanonical.sources.map((source) => source.name));
   const standardCoverageComplete = standardSources.has("league") &&
     [...standardSources].some((name) => name.startsWith("home_")) &&
     [...standardSources].some((name) => name.startsWith("away_"));
   const useSpecificLimitedSample = Boolean(context.allowSpecificLimitedSample && !standardCoverageComplete);
   const canonicalObservations = useSpecificLimitedSample
-    ? buildCanonicalObservations({ ...context, marketFamily }, { allowSubthresholdSources: true })
+    ? buildCanonicalObservations({ ...context, marketFamily: sourceFamily }, { allowSubthresholdSources: true })
     : standardCanonical;
-  const distribution = buildMarketDistribution({ ...context, marketFamily, canonicalObservations });
+  const distribution = buildMarketDistribution({ ...context, marketFamily: sourceFamily, canonicalObservations });
+  if (marketFamily === ASIAN_TOTAL_GOALS_FAMILY) {
+    const profile = buildAsianSettlementProfile({ canonicalObservations, line, direction: normalizedDirection });
+    if (!distribution || !profile) {
+      return { contract: "ExactMarketLineEvaluation", version: 1, status: "unavailable", exact_selection_ready: false, candidate: null, reason: "insufficient_distribution_data" };
+    }
+    const point = profile.weighted_win_probability;
+    const n = Math.max(1, Number(profile.effective_sample_size));
+    const z = 1.645;
+    const denominator = 1 + z ** 2 / n;
+    const center = (point + z ** 2 / (2 * n)) / denominator;
+    const margin = z / denominator * Math.sqrt(point * (1 - point) / n + z ** 2 / (4 * n ** 2));
+    const probability = {
+      probability_status: "preliminary",
+      point_estimate: point,
+      uncertainty_low: Math.max(0, center - margin),
+      uncertainty_high: Math.min(1, center + margin),
+      sample_size_effective: profile.effective_sample_size,
+      inputs_used: distribution.input_sources,
+      limitations: ["Distribución asiática derivada exclusivamente de la masa empírica canónica de goles.", "Los pushes y medias ganancias/pérdidas se conservan por separado."],
+      model_validation_status: "preliminary_unvalidated",
+      canonical_threshold_distribution: { market_family: marketFamily, line: Number(line), weighted_win_probability: point, fixture_ids: profile.fixture_ids },
+    };
+    const candidate = buildMarketLineCandidate({
+      input: { ...context, marketFamily },
+      distribution: { ...distribution, market_family: marketFamily, methodology_version: `${CANDIDATE_LINE_GENERATOR_VERSION}:${METHODOLOGIES[marketFamily]}` },
+      line: Number(line),
+      direction: normalizedDirection,
+      probability,
+    });
+    candidate.asian_settlement_profile = profile;
+    candidate.selection = `${normalizedDirection === "over" ? "Over" : "Under"} ${Number(line)}`;
+    candidate.candidate_id = `${marketFamily}:${normalizedDirection}:${Number(line)}`;
+    return { contract: "ExactMarketLineEvaluation", version: 1, status: "ready_for_pricing", exact_selection_ready: true, candidate, reason: null };
+  }
   if (!distribution || !isValidCandidateLine(marketFamily, line, distribution, { manualExact: true })) {
     const result = { reason: distribution ? "unsupported_exact_line" : "insufficient_distribution_data" };
     return {

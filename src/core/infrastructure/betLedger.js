@@ -5,7 +5,7 @@ import {
 
 export const DEFAULT_LOCAL_USER_ID = "local-user";
 
-const VALID_BET_OUTCOMES = new Set(["won", "lost", "void"]);
+const VALID_BET_OUTCOMES = new Set(["won", "half_won", "lost", "half_lost", "void", "push"]);
 const VALID_COMBINATION_MODES = new Set(["automatic", "manual", "mixed"]);
 const COMBINATION_LIMITS = Object.freeze({
   parlay: Object.freeze({ minimum: 2, maximum: 4 }),
@@ -106,6 +106,12 @@ export function createBetRecord({
   currency = "COP",
   analyzedAt = null,
   placedAt = new Date().toISOString(),
+  valueRadarStatus = null,
+  fairOddsAtDecision = null,
+  rawEdgePp = null,
+  conservativeEdgePp = null,
+  expectedRoi = null,
+  asianSettlementProfile = null,
 } = {}) {
   if (!betId) throw new TypeError("bet_id_required");
   if (!userId) throw new TypeError("user_id_required");
@@ -165,6 +171,12 @@ export function createBetRecord({
     analyzed_at: analyzedAt,
     placed_at: placedAt,
     settled_at: null,
+    value_radar_status: valueRadarStatus,
+    fair_odds_at_decision: numberOrNull(fairOddsAtDecision),
+    raw_edge_pp: numberOrNull(rawEdgePp),
+    conservative_edge_pp: numberOrNull(conservativeEdgePp),
+    expected_roi: numberOrNull(expectedRoi),
+    asian_settlement_profile: asianSettlementProfile,
   });
 }
 
@@ -260,19 +272,15 @@ export function settleBetRecord(
   const stake = Number(bet.stake_amount);
   const odds = Number(bet.decimal_odds);
 
-  const payout =
-    outcome === "won"
-      ? roundMoney(stake * odds)
-      : outcome === "void"
-        ? roundMoney(stake)
-        : 0;
+  const payout = outcome === "won" ? roundMoney(stake * odds)
+    : outcome === "half_won" ? roundMoney(stake + stake * (odds - 1) / 2)
+      : outcome === "half_lost" ? roundMoney(stake / 2)
+        : ["void", "push"].includes(outcome) ? roundMoney(stake) : 0;
 
-  const profitLoss =
-    outcome === "won"
-      ? roundMoney(stake * (odds - 1))
-      : outcome === "lost"
-        ? roundMoney(-stake)
-        : 0;
+  const profitLoss = outcome === "won" ? roundMoney(stake * (odds - 1))
+    : outcome === "half_won" ? roundMoney(stake * (odds - 1) / 2)
+      : outcome === "half_lost" ? roundMoney(-stake / 2)
+        : outcome === "lost" ? roundMoney(-stake) : 0;
 
   return Object.freeze({
     ...bet,
@@ -378,11 +386,11 @@ export function createMemoryBetLedger(initialEvents = []) {
       const bets = await this.list(ownerId ? { ownerId } : { userId });
 
       const settled = bets.filter((item) =>
-        ["won", "lost", "void"].includes(item.status)
+        ["won", "half_won", "lost", "half_lost", "void", "push"].includes(item.status)
       );
 
       const financial = settled.filter((item) =>
-        ["won", "lost"].includes(item.status)
+        ["won", "half_won", "lost", "half_lost"].includes(item.status)
       );
 
       const totalStaked = bets.reduce(
@@ -410,8 +418,11 @@ export function createMemoryBetLedger(initialEvents = []) {
         bet_count: bets.length,
         pending_count: bets.filter((item) => item.status === "pending").length,
         won_count: bets.filter((item) => item.status === "won").length,
+        half_won_count: bets.filter((item) => item.status === "half_won").length,
         lost_count: bets.filter((item) => item.status === "lost").length,
+        half_lost_count: bets.filter((item) => item.status === "half_lost").length,
         void_count: bets.filter((item) => item.status === "void").length,
+        push_count: bets.filter((item) => item.status === "push").length,
 
         settled_count: settled.length,
 
