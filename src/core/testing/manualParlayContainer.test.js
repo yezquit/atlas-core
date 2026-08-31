@@ -193,3 +193,12 @@ test("8. el resultado del Parlay no modifica el resultado individual de cada pro
   const calibrationSource = await readFile(new URL("../intelligence/resultCalibration.js", import.meta.url), "utf8");
   assert.doesNotMatch(calibrationSource, /combination|parlay|dream/i);
 });
+
+test("9. una línea de cuarto asiática (.25/.75) queda explícitamente bloqueada del Parlay manual, no aproximada en silencio", async () => {
+  const source = await readFile(clientPath, "utf8");
+  const block = source.match(/function addToManualParlay[\s\S]*?\n  \}\n/)?.[0];
+  assert.ok(block, "debe existir addToManualParlay");
+  assert.match(block, /asian_total_goals/);
+  assert.match(block, /0\.25,\s*0\.75/);
+  assert.match(block, /únicamente como apuestas individuales/);
+});

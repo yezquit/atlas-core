@@ -74,6 +74,7 @@ export async function registerTrackedBet({
     kickoffUtc: fixture.kickoff_utc || fixture.kickoff || null,
     marketFamily: director.market_evaluated?.family || quote.market_family,
     selection: director.selection || quote.selection,
+    direction: director.sports_verdict?.direction || quote.direction || null,
     line: director.line ?? quote.line ?? null,
     analysisConfidenceScore:
       director.analysis_confidence_score ??
@@ -83,6 +84,7 @@ export async function registerTrackedBet({
       director.estimated_probability ??
       analysis.preliminary_probability?.point_estimate ??
       null,
+    sportsScore: director.sports_verdict?.sports_score ?? null,
     atlasSportsVerdict: presentation.analysis_decision.label,
     atlasPriceDecision: presentation.price_decision.label,
     bookmaker: quote.bookmaker_name,

@@ -94,9 +94,11 @@ export function createBetRecord({
   kickoffUtc = null,
   marketFamily = null,
   selection = null,
+  direction = null,
   line = null,
   analysisConfidenceScore = null,
   preliminaryProbability = null,
+  sportsScore = null,
   atlasSportsVerdict = null,
   atlasPriceDecision = null,
   bookmaker,
@@ -145,10 +147,12 @@ export function createBetRecord({
 
     market_family: marketFamily,
     selection,
+    direction,
     line: numberOrNull(line),
 
     analysis_confidence_score: numberOrNull(analysisConfidenceScore),
     preliminary_probability: numberOrNull(preliminaryProbability),
+    sports_score: numberOrNull(sportsScore),
 
     atlas_sports_verdict: atlasSportsVerdict,
     atlas_price_decision: atlasPriceDecision,

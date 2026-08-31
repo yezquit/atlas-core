@@ -173,3 +173,76 @@ test("rechaza stake, cuota o resultado inválidos", () => {
     /invalid_bet_outcome/
   );
 });
+
+test("una apuesta individual conserva direction y sports_score en el snapshot", () => {
+  const bet = exampleBet({ direction: "under", sportsScore: 78 });
+  assert.equal(bet.direction, "under");
+  assert.equal(bet.sports_score, 78);
+});
+
+test("push devuelve el stake completo y no genera ganancia ni pérdida", () => {
+  const settled = settleBetRecord(exampleBet(), { outcome: "push" });
+  assert.equal(settled.payout, 50000);
+  assert.equal(settled.profit_loss, 0);
+});
+
+test("una apuesta pendiente nunca se reporta como lost sin liquidarse explícitamente", () => {
+  const bet = exampleBet();
+  assert.equal(bet.status, "pending");
+  assert.notEqual(bet.status, "lost");
+  assert.equal(bet.profit_loss, null);
+  assert.equal(bet.payout, null);
+});
+
+test("Asian Total Goals: full_win, push y full_loss calculan el monto financiero real", () => {
+  const asianBet = exampleBet({ marketFamily: "asian_total_goals", line: 2.5, decimalOdds: 2, stakeAmount: 100 });
+
+  const fullWin = settleBetRecord(asianBet, { outcome: "won" });
+  assert.deepEqual([fullWin.payout, fullWin.profit_loss], [200, 100]);
+
+  const pushResult = settleBetRecord(asianBet, { outcome: "push" });
+  assert.deepEqual([pushResult.payout, pushResult.profit_loss], [100, 0]);
+
+  const fullLoss = settleBetRecord(asianBet, { outcome: "lost" });
+  assert.deepEqual([fullLoss.payout, fullLoss.profit_loss], [0, -100]);
+});
+
+test("liquidar una apuesta nunca modifica preliminary_probability ni sports_score del snapshot original", () => {
+  const bet = exampleBet({ preliminaryProbability: 0.686, sportsScore: 78 });
+  const settled = settleBetRecord(bet, { outcome: "won" });
+  assert.equal(settled.preliminary_probability, bet.preliminary_probability);
+  assert.equal(settled.sports_score, bet.sports_score);
+  assert.equal(settled.decimal_odds, bet.decimal_odds);
+});
+
+test("un registro legacy sin direction/sports_score sigue siendo legible por el ledger", async () => {
+  const ledger = createMemoryBetLedger();
+  const legacyBet = Object.freeze({
+    contract: "BetRecord",
+    version: 1,
+    bet_id: "legacy-plain-1",
+    user_id: DEFAULT_LOCAL_USER_ID,
+    owner_id: "personal",
+    analysis_id: "legacy-analysis-plain",
+    fixture_id: 999,
+    market_family: "goals",
+    selection: "Under 2.5",
+    line: 2.5,
+    bookmaker: "Casa",
+    decimal_odds: 1.8,
+    stake_amount: 1000,
+    currency: "COP",
+    status: "pending",
+    result_source: null,
+    actual_total: null,
+    payout: null,
+    profit_loss: null,
+    placed_at: "2026-01-01T00:00:00.000Z",
+    settled_at: null,
+  });
+  await ledger.appendBet(legacyBet);
+  const stored = await ledger.getById("legacy-plain-1");
+  assert.equal(stored.analysis_id, "legacy-analysis-plain");
+  assert.equal(stored.direction, undefined);
+  assert.equal(stored.sports_score, undefined);
+});
