@@ -8,6 +8,7 @@ import {
 } from "../contracts/atlasContracts.js";
 import { MARKET_SUITABILITY, PRICE_EVALUATION_STATUS } from "../contracts/operationalContracts.js";
 import { evaluateMarketPrice } from "../intelligence/marketSuitability.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY, TEAM_ASIAN_HANDICAP_LABEL } from "../intelligence/teamAsianHandicap.js";
 
 function normalizeText(value = "") {
   return value
@@ -899,7 +900,16 @@ export function buildOperationalDirectorVerdict({
     } : null,
     analyzed_at: analyzedAt,
     analysis_phase: phase,
-    market_evaluated: marketAssessment ? { family: marketAssessment.market_family, label: marketAssessment.market_label } : null,
+    // team_asian_handicap nunca pasa por base.marketAssessments (generación
+    // separada por equipo, ver sportsIntelligenceService.js/
+    // operationalAnalysisService.js): sin este fallback, market_evaluated
+    // quedaba en null y bloqueaba Memoria/Bet Tracker aunque marketCandidate
+    // ya tuviera la identidad completa.
+    market_evaluated: marketAssessment
+      ? { family: marketAssessment.market_family, label: marketAssessment.market_label }
+      : marketCandidate?.market_family === TEAM_ASIAN_HANDICAP_FAMILY
+        ? { family: TEAM_ASIAN_HANDICAP_FAMILY, label: TEAM_ASIAN_HANDICAP_LABEL }
+        : null,
     selection: marketCandidate?.selection || oddsQuote?.selection || null,
     line: marketCandidate?.line ?? oddsQuote?.line ?? marketAssessment?.line ?? null,
     odds: oddsQuote?.decimal_odds || (marketAssessment?.odds ? Number(marketAssessment.odds) : null),
