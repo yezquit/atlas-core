@@ -1,6 +1,7 @@
 import { PRICE_EVALUATION_STATUS } from "../contracts/operationalContracts.js";
 import { evaluateMarketPrice } from "./marketSuitability.js";
 import { selectCandidateQuote } from "./marketCandidateRanker.js";
+import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
 import { isModelLimitation } from "./redTeamAtlas.js";
 
 function unique(items = []) {
@@ -22,6 +23,13 @@ function candidateSignals(candidate, assessment) {
   };
 }
 
+function settlementFavorability(candidate) {
+  if (typeof candidate?.sports_favorability === "number" && Number.isFinite(candidate.sports_favorability)) {
+    return candidate.sports_favorability;
+  }
+  return candidate?.preliminary_probability;
+}
+
 export function buildScoutAtlas({ marketSelection, marketAssessments = [], lineOrigin = "atlas_selected", maximum = 5 } = {}) {
   const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
   const catalogue = [...new Map((marketSelection?.ranked_candidates || [])
@@ -33,12 +41,18 @@ export function buildScoutAtlas({ marketSelection, marketAssessments = [], lineO
   const deduplicated = recommended && !visible.some((candidate) => candidate.candidate_id === recommended.candidate_id)
     ? [recommended, ...visible.slice(0, -1)]
     : visible;
-  const mostProbable = [...deduplicated].sort((left, right) => right.preliminary_probability - left.preliminary_probability || left.rank - right.rank)[0];
+  const mostProbable = deduplicated
+    .filter((candidate) => !isSettlementFavorabilityCandidate(candidate))
+    .sort((left, right) => right.preliminary_probability - left.preliminary_probability || left.rank - right.rank)[0];
+  const mostFavorable = deduplicated
+    .filter(isSettlementFavorabilityCandidate)
+    .sort((left, right) => settlementFavorability(right) - settlementFavorability(left) || left.rank - right.rank)[0];
   const candidates = deduplicated.map((candidate, index) => {
     const labels = [];
     if (candidate.candidate_id === recommendationId) labels.push("atlas_recommendation");
     else if (index === 0) labels.push("best_sports_support");
     if (candidate.candidate_id === mostProbable?.candidate_id) labels.push("highest_probability");
+    if (candidate.candidate_id === mostFavorable?.candidate_id) labels.push("highest_favorability");
     if (!labels.length) labels.push("relevant_alternative");
     const assessment = assessmentByFamily.get(candidate.market_family);
     const signals = candidateSignals(candidate, assessment);

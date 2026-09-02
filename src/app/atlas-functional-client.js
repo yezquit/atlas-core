@@ -649,6 +649,7 @@ const SCOUT_LABELS = Object.freeze({
   atlas_recommendation: "Recomendación Atlas",
   best_sports_support: "Mejor opción deportiva",
   highest_probability: "Mayor probabilidad",
+  highest_favorability: "Mayor Favorabilidad Atlas",
   relevant_alternative: "Alternativa relevante",
 });
 
