@@ -75,6 +75,9 @@ export async function registerTrackedBet({
     marketFamily: director.market_evaluated?.family || quote.market_family,
     selection: director.selection || quote.selection,
     direction: director.sports_verdict?.direction || quote.direction || null,
+    // Identidad explícita por equipo para team_asian_handicap (nunca
+    // direction=over|under — decisión 13); null para el resto de familias.
+    teamId: director.sports_verdict?.team_id ?? quote.team_id ?? null,
     line: director.line ?? quote.line ?? null,
     analysisConfidenceScore:
       director.analysis_confidence_score ??

@@ -260,12 +260,14 @@ function pointsDifference(estimated, implied) {
 // campos ya expuestos por asianTotalGoals.js/candidateLineGenerator.js.
 //
 // Fallback (sección 10): si un registro no trae probability_semantics pero sí
-// market_family==="asian_total_goals" de forma inequívoca, se presenta igual
-// como Favorabilidad — nunca se reinterpreta ninguna otra familia.
+// market_family==="asian_total_goals"|"team_asian_handicap" de forma
+// inequívoca, se presenta igual como Favorabilidad — nunca se reinterpreta
+// ninguna otra familia. Necesario para registros que nunca guardan
+// probability_semantics (p. ej. BetRecord en betLedger.js).
 function isSettlementFavorabilitySource(source) {
   if (!source) return false;
   if (source.probability_semantics === "settlement_favorability") return true;
-  return source.market_family === "asian_total_goals";
+  return source.market_family === "asian_total_goals" || source.market_family === "team_asian_handicap";
 }
 
 function candidateProbabilityDisplay(source) {
@@ -1796,10 +1798,10 @@ function BetTrackerView({ timezone }) {
                 ) : (
                   <div className="p2-inline-actions p2-result-entry">
                     <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "won")}>Ganada</button>
-                    {bet.market_family === "asian_total_goals" ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "half_won")}>Media ganada</button> : null}
+                    {isSettlementFavorabilitySource({ market_family: bet.market_family }) ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "half_won")}>Media ganada</button> : null}
                     <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "lost")}>Perdida</button>
-                    {bet.market_family === "asian_total_goals" ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "half_lost")}>Media perdida</button> : null}
-                    {bet.market_family === "asian_total_goals" ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "push")}>Push</button> : null}
+                    {isSettlementFavorabilitySource({ market_family: bet.market_family }) ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "half_lost")}>Media perdida</button> : null}
+                    {isSettlementFavorabilitySource({ market_family: bet.market_family }) ? <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "push")}>Push</button> : null}
                     <button type="button" className="secondary-button" disabled={Boolean(settlingBetId)} onClick={() => settleBet(bet.bet_id, "void")}>Nula</button>
                   </div>
                 )}

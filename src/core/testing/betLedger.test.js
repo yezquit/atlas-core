@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   DEFAULT_LOCAL_USER_ID,
@@ -245,4 +246,80 @@ test("un registro legacy sin direction/sports_score sigue siendo legible por el 
   assert.equal(stored.analysis_id, "legacy-analysis-plain");
   assert.equal(stored.direction, undefined);
   assert.equal(stored.sports_score, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// team_asian_handicap en el Bet Tracker — bloqueadores reales encontrados y
+// corregidos en este bloque: (1) createBetRecord no conservaba team_id
+// (identidad real de team_asian_handicap: fixture_id+market_family+team_id+
+// line, nunca direction=over|under); (2) el registro financiero
+// (settleBetRecord) ya era genérico por family, pero la UI de liquidación
+// (BetTrackerView) solo mostraba los botones de resultado parcial
+// (Media ganada/Media perdida/Push) para market_family==="asian_total_goals",
+// dejando a team_asian_handicap sin forma de liquidarse correctamente en
+// líneas de cuarto (que también resuelven half_win/push/half_loss).
+// ---------------------------------------------------------------------------
+
+function exampleTeamAsianHandicapBet(overrides = {}) {
+  return exampleBet({
+    marketFamily: "team_asian_handicap",
+    selection: "Local -0.75",
+    direction: "home",
+    teamId: 10,
+    line: -0.75,
+    ...overrides,
+  });
+}
+
+test("una apuesta individual team_asian_handicap conserva team_id (identidad por equipo, no por direction)", () => {
+  const bet = exampleTeamAsianHandicapBet();
+  assert.equal(bet.market_family, "team_asian_handicap");
+  assert.equal(bet.team_id, 10);
+  assert.equal(bet.direction, "home");
+  assert.equal(bet.line, -0.75);
+});
+
+test("familias clásicas y asian_total_goals no llevan team_id (campo puramente aditivo)", () => {
+  assert.equal(exampleBet().team_id, null);
+  assert.equal(exampleBet({ marketFamily: "asian_total_goals" }).team_id, null);
+});
+
+test("team_asian_handicap: full_win, half_win, push, half_loss y full_loss calculan el monto financiero real (mismo settlement genérico que asian_total_goals)", () => {
+  const teamAhBet = exampleTeamAsianHandicapBet({ decimalOdds: 2, stakeAmount: 100 });
+
+  const fullWin = settleBetRecord(teamAhBet, { outcome: "won" });
+  assert.deepEqual([fullWin.payout, fullWin.profit_loss], [200, 100]);
+
+  const halfWin = settleBetRecord(teamAhBet, { outcome: "half_won" });
+  assert.deepEqual([halfWin.payout, halfWin.profit_loss], [150, 50]);
+
+  const pushResult = settleBetRecord(teamAhBet, { outcome: "push" });
+  assert.deepEqual([pushResult.payout, pushResult.profit_loss], [100, 0]);
+
+  const halfLoss = settleBetRecord(teamAhBet, { outcome: "half_lost" });
+  assert.deepEqual([halfLoss.payout, halfLoss.profit_loss], [50, -50]);
+
+  const fullLoss = settleBetRecord(teamAhBet, { outcome: "lost" });
+  assert.deepEqual([fullLoss.payout, fullLoss.profit_loss], [0, -100]);
+});
+
+test("liquidar una apuesta team_asian_handicap nunca modifica team_id, line ni el resto del snapshot original", () => {
+  const bet = exampleTeamAsianHandicapBet();
+  const settled = settleBetRecord(bet, { outcome: "half_won" });
+  assert.equal(settled.team_id, bet.team_id);
+  assert.equal(settled.line, bet.line);
+  assert.equal(settled.direction, bet.direction);
+  assert.equal(settled.market_family, bet.market_family);
+});
+
+test("registerTrackedBet extrae team_id desde director.sports_verdict.team_id (identidad de equipo, no direction)", async () => {
+  const source = await readFile(new URL("../services/betTrackerServer.js", import.meta.url), "utf8");
+  assert.match(source, /teamId:\s*director\.sports_verdict\?\.team_id\s*\?\?\s*quote\.team_id\s*\?\?\s*null/);
+});
+
+test("la vista de apuestas muestra Media ganada/Media perdida/Push tanto para asian_total_goals como para team_asian_handicap", async () => {
+  const source = await readFile(new URL("../../app/atlas-functional-client.js", import.meta.url), "utf8");
+  const betTrackerBlock = source.slice(source.indexOf("function BetTrackerView("), source.indexOf("function HistoryView("));
+  assert.match(betTrackerBlock, /isSettlementFavorabilitySource\(\{ market_family: bet\.market_family \}\)/);
+  assert.doesNotMatch(betTrackerBlock, /bet\.market_family === "asian_total_goals"/, "ya no debe quedar el gating antiguo solo para asian_total_goals");
 });

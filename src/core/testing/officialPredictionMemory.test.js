@@ -502,3 +502,193 @@ test("41. el snapshot pendiente ya incluye asian_settlement:null antes de resolv
   const item = snapshot();
   assert.equal(item.resolution.asian_settlement, null);
 });
+
+// ---------------------------------------------------------------------------
+// team_asian_handicap en Memoria — bloqueador real encontrado y corregido en
+// este bloque: officialPredictionEligibility exigía direction=over|under
+// (normalizedDirection solo reconoce ese vocabulario) y team_asian_handicap
+// identifica el lado por equipo (side: home|away + team_id), nunca por
+// direction — así que NINGUNA predicción team_asian_handicap podía
+// registrarse jamás como pronóstico oficial. Resolución: full_win/half_win
+// -> HIT, push -> VOID, half_loss/full_loss -> MISS (mismo mapeo ya usado
+// para asian_total_goals), aplicado sobre la diferencia de gol desde la
+// perspectiva del equipo seleccionado (side), no sobre un total.
+// ---------------------------------------------------------------------------
+
+function teamAsianHandicapPrediction(overrides = {}) {
+  const source = analysis({
+    director: {
+      market_evaluated: { family: "team_asian_handicap", label: "Asiático — Hándicap por equipo" },
+      selection: overrides.selection || "Local -0.75",
+      line: overrides.line ?? -0.75,
+      sports_verdict: {
+        status: "sports_candidate",
+        selection: overrides.selection || "Local -0.75",
+        direction: overrides.side || "home",
+        team_id: overrides.teamId ?? 10,
+        line: overrides.line ?? -0.75,
+        sports_score: 78,
+        estimated_probability: overrides.estimatedProbability ?? 0.55,
+      },
+    },
+  });
+  return snapshot({ predictionId: `team-ah-${Math.random()}` }, source);
+}
+
+test("42. team_asian_handicap SÍ puede registrarse como pronóstico oficial (side/team_id sustituyen direction)", () => {
+  const source = analysis({
+    director: {
+      market_evaluated: { family: "team_asian_handicap", label: "Asiático — Hándicap por equipo" },
+      selection: "Local -0.75",
+      line: -0.75,
+      sports_verdict: { status: "sports_candidate", selection: "Local -0.75", direction: "home", team_id: 10, line: -0.75, sports_score: 78 },
+    },
+  });
+  const eligibility = officialPredictionEligibility(source);
+  assert.equal(eligibility.eligible, true, `debería ser elegible: ${eligibility.reasons.join(", ")}`);
+});
+
+test("43. sin equipo (side) o sin team_id, team_asian_handicap NO es elegible (nunca fabrica identidad)", () => {
+  const withoutSide = analysis({ director: { market_evaluated: { family: "team_asian_handicap", label: "Asiático — Hándicap por equipo" }, selection: "Local -0.75", line: -0.75, sports_verdict: { status: "sports_candidate", selection: "Local -0.75", direction: "over", team_id: 10, line: -0.75, sports_score: 78 } } });
+  assert.equal(officialPredictionEligibility(withoutSide).eligible, false);
+  assert.ok(officialPredictionEligibility(withoutSide).reasons.includes("side_missing"));
+
+  const withoutTeamId = analysis({ director: { market_evaluated: { family: "team_asian_handicap", label: "Asiático — Hándicap por equipo" }, selection: "Local -0.75", line: -0.75, sports_verdict: { status: "sports_candidate", selection: "Local -0.75", direction: "home", line: -0.75, sports_score: 78 } } });
+  assert.equal(officialPredictionEligibility(withoutTeamId).eligible, false);
+  assert.ok(officialPredictionEligibility(withoutTeamId).reasons.includes("team_id_missing"));
+});
+
+test("44. el snapshot de team_asian_handicap conserva side y team_id", () => {
+  const item = teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.75 });
+  assert.equal(item.market_family, "team_asian_handicap");
+  assert.equal(item.side, "home");
+  assert.equal(item.team_id, 10);
+  assert.equal(item.line, -0.75);
+  // direction=over|under nunca se fabrica para team_asian_handicap (decisión 13).
+  assert.equal(item.direction, null);
+});
+
+test("45. resolución team_asian_handicap: full_win y half_win -> HIT", () => {
+  // Local -0.75 (parte -0.5 y -1): diferencia de gol +1 (ganó 1-0) -> -0.5 gana, -1 empata -> half_win -> HIT.
+  const halfWin = resolveOfficialPrediction(teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.75 }), { actualTotal: 1, source: "manual_user_input" });
+  assert.equal(halfWin.resolution.status, "hit");
+  assert.equal(halfWin.resolution.asian_settlement.status, "half_win");
+
+  // Local -0.5: diferencia +2 (ganó por 2) -> full_win -> HIT.
+  const fullWin = resolveOfficialPrediction(teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.5 }), { actualTotal: 2, source: "manual_user_input" });
+  assert.equal(fullWin.resolution.status, "hit");
+  assert.equal(fullWin.resolution.asian_settlement.status, "full_win");
+});
+
+test("46. resolución team_asian_handicap: push -> VOID", () => {
+  // Local -1 (línea entera): diferencia exacta +1 -> push -> VOID.
+  const push = resolveOfficialPrediction(teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -1 }), { actualTotal: 1, source: "manual_user_input" });
+  assert.equal(push.resolution.status, "void");
+  assert.equal(push.resolution.asian_settlement.status, "push");
+});
+
+test("47. resolución team_asian_handicap: half_loss y full_loss -> MISS", () => {
+  // Local -0.75: diferencia 0 (empate) -> -0.5 pierde, -1 pierde -> full_loss -> MISS.
+  const fullLoss = resolveOfficialPrediction(teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.75 }), { actualTotal: 0, source: "manual_user_input" });
+  assert.equal(fullLoss.resolution.status, "miss");
+  assert.equal(fullLoss.resolution.asian_settlement.status, "full_loss");
+
+  // Local -0.25 (parte 0 y -0.5): diferencia 0 -> 0 empata, -0.5 pierde -> half_loss -> MISS.
+  const halfLoss = resolveOfficialPrediction(teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.25 }), { actualTotal: 0, source: "manual_user_input" });
+  assert.equal(halfLoss.resolution.status, "miss");
+  assert.equal(halfLoss.resolution.asian_settlement.status, "half_loss");
+});
+
+test("48. la diferencia de gol se calcula desde la perspectiva del equipo seleccionado (side), no como un total ciego", () => {
+  // Visitante -0.5 (equipo visitante favorito por 0.5): el visitante ganó 3-1 -> diferencia desde su perspectiva = away-home = 2 -> full_win -> HIT.
+  const awayFavoriteWins = resolveOfficialPrediction(
+    teamAsianHandicapPrediction({ side: "away", teamId: 20, line: -0.5 }),
+    { actualTotal: 2, source: "manual_user_input" },
+  );
+  assert.equal(awayFavoriteWins.resolution.status, "hit");
+  assert.equal(awayFavoriteWins.resolution.asian_settlement.status, "full_win");
+});
+
+test("49. resolución automática por api_football calcula la diferencia de gol real según side y liquida correctamente", async () => {
+  const gateway = {
+    loadFixtureById: async () => ({ fixture: { status: { isFinished: true }, score: { goals: { home: 1, away: 0 } } } }),
+  };
+  const source = analysis({
+    director: {
+      market_evaluated: { family: "team_asian_handicap", label: "Asiático — Hándicap por equipo" },
+      selection: "Local -0.75", line: -0.75,
+      sports_verdict: { status: "sports_candidate", selection: "Local -0.75", direction: "home", team_id: 10, line: -0.75, sports_score: 78 },
+    },
+  });
+  const { service } = serviceHarness({ sourceAnalysis: source, gateway });
+  const registered = await service.register({ analysisId: "analysis-001" });
+  const result = await service.resolveOne({ predictionId: registered.prediction.prediction_id, source: "api_football" });
+  // home 1 - away 0 = diferencia +1 desde side=home -> Local -0.75 -> half_win -> HIT.
+  assert.equal(result.prediction.resolution.status, "hit");
+  assert.equal(result.prediction.resolution.asian_settlement.status, "half_win");
+  assert.equal(result.prediction.resolution.actual_total, 1);
+});
+
+test("50. resolución manual admite diferencia de gol negativa para team_asian_handicap (no se rechaza como actualTotal negativo inválido)", async () => {
+  const { service } = serviceHarness({ sourceAnalysis: analysis({
+    director: {
+      market_evaluated: { family: "team_asian_handicap", label: "Asiático — Hándicap por equipo" },
+      selection: "Local +1.5", line: 1.5,
+      sports_verdict: { status: "sports_candidate", selection: "Local +1.5", direction: "home", team_id: 10, line: 1.5, sports_score: 78 },
+    },
+  }) });
+  const registered = await service.register({ analysisId: "analysis-001" });
+  // El equipo local perdió por 2 (diferencia -2): línea +1.5 (medio/entera,
+  // un solo tramo) -> margen -2+1.5=-0.5 < 0 -> full_loss -> MISS. Lo que
+  // esta prueba protege es que actualTotal=-2 (negativo) NO se rechaza como
+  // "invalid_actual_total" para esta familia, a diferencia de las demás.
+  const result = await service.resolveOne({ predictionId: registered.prediction.prediction_id, source: "manual_user_input", actualTotal: -2 });
+  assert.equal(result.prediction.resolution.status, "miss");
+  assert.equal(result.prediction.resolution.asian_settlement.status, "full_loss");
+});
+
+test("53. team_asian_handicap (como asian_total_goals) queda excluido de la calibración binaria clásica — no implementa una nueva calibración Asian", () => {
+  const classicOnly = [settled("hit"), settled("miss"), settled("miss"), settled("miss")];
+  const withoutTeamAh = calculateOfficialPredictionCalibration(classicOnly);
+  const bandWithout = withoutTeamAh.bands.find((item) => item.label === "70–79%");
+
+  // Favorabilidad Atlas 0.75 caería DENTRO de la banda 70-79% si se contara
+  // como probabilidad clásica: si el filtro isSettlementFavorabilityCandidate
+  // faltara, average_predicted_probability/hit_rate de esa banda cambiarían.
+  const teamAhHit = resolveOfficialPrediction(
+    teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.5, estimatedProbability: 0.75 }),
+    { actualTotal: 2, source: "manual_user_input" },
+  );
+  const withTeamAh = calculateOfficialPredictionCalibration([...classicOnly, teamAhHit]);
+  const bandWith = withTeamAh.bands.find((item) => item.label === "70–79%");
+
+  assert.equal(bandWith.average_predicted_probability, bandWithout.average_predicted_probability);
+  assert.equal(bandWith.hit_rate, bandWithout.hit_rate);
+  assert.equal(bandWith.calibration_label, bandWithout.calibration_label);
+
+  // by_market_family en calculateOfficialPredictionMetrics sí reporta
+  // team_asian_handicap (métricas hit/miss generales por familia) — la
+  // exclusión aplica solo a la calibración binaria de probabilidad.
+  const metrics = calculateOfficialPredictionMetrics([...classicOnly, teamAhHit]);
+  assert.equal(metrics.by_market_family.team_asian_handicap.hits, 1);
+});
+
+test("51. Favorabilidad Atlas de team_asian_handicap nunca se persiste ni se lee como probabilidad binaria clásica", () => {
+  const item = teamAsianHandicapPrediction({ side: "home", teamId: 10, line: -0.75 });
+  // estimated_probability guarda el mismo valor numérico que el resto de
+  // Atlas (Favorabilidad Atlas para esta familia) — la distinción correcta
+  // se hace por market_family en lectura/calibración, nunca renombrando el
+  // campo. calculateOfficialPredictionCalibration ya excluye estas familias
+  // (isSettlementFavorabilityCandidate) de la calibración binaria clásica.
+  assert.equal(item.estimated_probability, 0.55);
+  assert.equal(item.market_family, "team_asian_handicap");
+});
+
+test("52. familias no asiáticas y asian_total_goals no llevan side/team_id (campo puramente aditivo)", () => {
+  const classic = snapshot();
+  assert.equal(classic.side, null);
+  assert.equal(classic.team_id, null);
+  const asian = asianPrediction();
+  assert.equal(asian.side, null);
+  assert.equal(asian.team_id, null);
+});

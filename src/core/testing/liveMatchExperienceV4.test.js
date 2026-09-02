@@ -214,6 +214,35 @@ test("13. una línea LIVE de goles no hereda estimated_probability, línea ni sp
   assert.ok(liveCandidate.reasons.some((text) => /Minuto 70/.test(text)));
 });
 
+// ---------------------------------------------------------------------------
+// Riesgo real detectado en el cierre de ATLAS Live: LivePrematchContext leía
+// prematchDirector.estimated_probability y lo formateaba SIEMPRE como
+// "Probabilidad estimada prematch: XX%", sin comprobar
+// probability_semantics/market_family. Si el contexto prematch guardado es
+// un análisis asian_total_goals o team_asian_handicap, ese valor es
+// Favorabilidad Atlas (sports_favorability), no una probabilidad literal —
+// se mostraría como una probabilidad falsa. Estas pruebas fijan el contrato
+// correcto: Favorabilidad Atlas /100 para settlement_favorability, "%" solo
+// para clásicos.
+// ---------------------------------------------------------------------------
+
+test("15. LivePrematchContext distingue settlement_favorability (asian_total_goals/team_asian_handicap) de probabilidad clásica", async () => {
+  const source = await readFile(clientPath, "utf8");
+  assert.match(source, /function isSettlementFavorabilitySource\(/, "debe existir un helper que distinga Favorabilidad de probabilidad literal para el contexto prematch");
+  const prematchBlock = source.slice(source.indexOf("function LivePrematchContext"), source.indexOf("function LiveAnalysis"));
+  assert.match(prematchBlock, /isSettlementFavorabilitySource\(prematchDirector\)/);
+  assert.match(prematchBlock, /Favorabilidad Atlas prematch/);
+  assert.match(prematchBlock, /Probabilidad estimada prematch/);
+});
+
+test("16. el contexto prematch nunca formatea Favorabilidad Atlas con signo de porcentaje", async () => {
+  const source = await readFile(clientPath, "utf8");
+  const favorabilityFnMatch = source.match(/function prematchFavorabilityLabel\(value\) \{\n\s*return[^\n]*\n\}/);
+  assert.ok(favorabilityFnMatch, "debe existir un formateador dedicado para Favorabilidad prematch (/100, nunca %)");
+  assert.match(favorabilityFnMatch[0], /\/100/);
+  assert.doesNotMatch(favorabilityFnMatch[0], /%/);
+});
+
 test("14. selectLatestPrematchAnalysis rechaza kickoff_distance_minutes ausente, null, NaN o no numérico", () => {
   const missing = prematchAnalysisVersion({ analysis_id: "missing" });
   delete missing.kickoff_distance_minutes;

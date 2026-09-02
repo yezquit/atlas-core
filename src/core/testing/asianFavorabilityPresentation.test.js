@@ -185,8 +185,11 @@ test("rankReason distingue Favorabilidad de Probabilidad sin tocar calculateSpor
 // Fallback para registros anteriores (sección 10)
 // -----------------------------------------------------------------------
 
+// ACTUALIZADO: el fallback se amplió a team_asian_handicap (necesario para
+// registros como BetRecord, que nunca guardan probability_semantics) — sigue
+// sin reinterpretar ninguna otra familia.
 test("el fallback usa market_family cuando falta probability_semantics, sin reinterpretar otras familias", () => {
-  assert.match(clientSource, /if \(source\.probability_semantics === "settlement_favorability"\) return true;\s*\n\s*return source\.market_family === "asian_total_goals";/);
+  assert.match(clientSource, /if \(source\.probability_semantics === "settlement_favorability"\) return true;\s*\n\s*return source\.market_family === "asian_total_goals" \|\| source\.market_family === "team_asian_handicap";/);
 });
 
 // -----------------------------------------------------------------------

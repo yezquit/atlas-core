@@ -5,6 +5,7 @@ import {
   belongsToPersonalOwner,
 } from "../auth/personalIdentity.js";
 import { ASIAN_TOTAL_GOALS_FAMILY, settleAsianTotalGoals } from "./asianTotalGoals.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY, isValidTeamAsianHandicapSide, settleTeamAsianHandicap } from "./teamAsianHandicap.js";
 import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
 
 export const OFFICIAL_PREDICTION_STATUS = Object.freeze({
@@ -25,6 +26,11 @@ export const RESOLVABLE_MARKET_STAT = Object.freeze({
   // ya usa la familia "goals" (mismo statKey "goals" en automaticOutcome);
   // asian_total_goals reutiliza ese mismo dato, no un cálculo nuevo.
   [ASIAN_TOTAL_GOALS_FAMILY]: "goals",
+  // team_asian_handicap también depende únicamente del marcador real
+  // (mismo statKey "goals"), pero automaticOutcome (predictionMemoryService.js)
+  // lo interpreta como diferencia de gol desde la perspectiva del equipo
+  // seleccionado (side), nunca como un total.
+  [TEAM_ASIAN_HANDICAP_FAMILY]: "goals",
 });
 
 function finiteNumber(value) {
@@ -110,14 +116,35 @@ export function officialPredictionPublicDecision(analysis) {
   };
 }
 
+// team_asian_handicap identifica el lado por equipo (side: home|away +
+// team_id), nunca por direction=over|under (decisión 13,
+// teamAsianHandicap.js) — nunca se fabrica una dirección falsa para
+// satisfacer los chequeos de identidad genéricos de abajo.
+function isTeamAsianHandicap(director) {
+  return director?.market_evaluated?.family === TEAM_ASIAN_HANDICAP_FAMILY;
+}
+
+function pushIdentityReasons(reasons, { teamAsianHandicap, direction, validSide, hasTeamId }) {
+  if (teamAsianHandicap) {
+    if (!validSide) reasons.push("side_missing");
+    if (!hasTeamId) reasons.push("team_id_missing");
+  } else if (!direction) {
+    reasons.push("direction_missing");
+  }
+}
+
 export function officialPredictionEligibility(analysis, publicDecision = null) {
   const director = analysis?.director || {};
   const fixture = director.fixture || {};
   const sports = director.sports_verdict || {};
-  const direction = normalizedDirection(sports.direction || director.selection);
+  const teamAsianHandicap = isTeamAsianHandicap(director);
+  const direction = teamAsianHandicap ? null : normalizedDirection(sports.direction || director.selection);
+  const validSide = teamAsianHandicap && isValidTeamAsianHandicapSide(sports.direction);
+  const hasTeamId = teamAsianHandicap && Number.isInteger(Number(sports.team_id)) && Number(sports.team_id) > 0;
   const line = finiteNumber(sports.line ?? director.line);
   const resolvedPublicDecision = publicDecision || officialPredictionPublicDecision(analysis);
   const reasons = [];
+  const identity = { teamAsianHandicap, direction, validSide, hasTeamId };
 
   if (isLiveAnalysis(analysis)) {
     const snapshot = analysis.snapshot;
@@ -128,7 +155,7 @@ export function officialPredictionEligibility(analysis, publicDecision = null) {
     if (sports.status !== "sports_candidate") reasons.push("director_sports_support_required");
     if (resolvedPublicDecision.status !== "yes") reasons.push("public_director_support_required");
     if (!director.market_evaluated?.family) reasons.push("market_family_missing");
-    if (!direction) reasons.push("direction_missing");
+    pushIdentityReasons(reasons, identity);
     if (line === null) reasons.push("line_missing");
     if (!fixture.home_team || !fixture.away_team) reasons.push("teams_missing");
     return deepFreeze({ contract: "OfficialPredictionEligibility", version: 1, eligible: reasons.length === 0, status: reasons.length === 0 ? "official_prediction_eligible" : "candidate_only", reasons });
@@ -143,7 +170,7 @@ export function officialPredictionEligibility(analysis, publicDecision = null) {
   if (resolvedPublicDecision.status !== "yes") reasons.push("public_director_support_required");
   if (!director.market_evaluated?.family) reasons.push("market_family_missing");
   if (!sports.selection && !director.selection) reasons.push("selection_missing");
-  if (!direction) reasons.push("direction_missing");
+  pushIdentityReasons(reasons, identity);
   if (line === null) reasons.push("line_missing");
   if (!fixture.home_team || !fixture.away_team) reasons.push("teams_missing");
 
@@ -159,12 +186,16 @@ export function officialPredictionEligibility(analysis, publicDecision = null) {
 export function officialPredictionFingerprint(analysis) {
   const director = analysis?.director || {};
   const sports = director.sports_verdict || {};
+  const teamAsianHandicap = isTeamAsianHandicap(director);
   return [
     isLiveAnalysis(analysis) ? "official_prediction_live_v1" : "official_prediction_v1",
     ...(isLiveAnalysis(analysis) ? [analysis?.snapshot?.snapshot_id] : [analysis?.analysis_id]),
     analysis?.fixture_id ?? director.fixture?.fixture_id,
     director.market_evaluated?.family,
-    normalizedDirection(sports.direction || director.selection),
+    // team_asian_handicap se identifica por team_id (nunca direction) para
+    // que dos equipos del mismo fixture/línea nunca colisionen en la misma
+    // huella de deduplicación.
+    teamAsianHandicap ? sports.team_id ?? null : normalizedDirection(sports.direction || director.selection),
     finiteNumber(sports.line ?? director.line),
   ].map((value) => encodeURIComponent(String(value ?? ""))).join(":");
 }
@@ -204,6 +235,11 @@ export function createOfficialPredictionSnapshot(analysis, {
       season: snapshot.season ?? null, home_team: snapshot.home_team, away_team: snapshot.away_team,
       mode: "live", market_family: director.market_evaluated.family,
       selection: sports.selection || director.selection, direction: normalizedDirection(sports.direction || director.selection),
+      // Identidad explícita por equipo para team_asian_handicap (side +
+      // team_id, nunca direction=over|under — decisión 13); null para el
+      // resto de familias, campo puramente aditivo.
+      side: isTeamAsianHandicap(director) ? sports.direction ?? null : null,
+      team_id: sports.team_id ?? null,
       line: finiteNumber(sports.line ?? director.line), active_quote: quote,
       estimated_probability: null, probability_status: "unavailable", uncertainty: { low: null, high: null },
       confidence_score: finiteNumber(director.analysis_confidence_score), sports_score: finiteNumber(sports.sports_score),
@@ -237,6 +273,11 @@ export function createOfficialPredictionSnapshot(analysis, {
     market_family: director.market_evaluated.family,
     selection: sports.selection || director.selection,
     direction: normalizedDirection(sports.direction || director.selection),
+    // Identidad explícita por equipo para team_asian_handicap (side +
+    // team_id, nunca direction=over|under — decisión 13); null para el
+    // resto de familias, campo puramente aditivo.
+    side: isTeamAsianHandicap(director) ? sports.direction ?? null : null,
+    team_id: sports.team_id ?? null,
     line: finiteNumber(sports.line ?? director.line),
     active_quote: quote,
     estimated_probability: estimatedProbability,
@@ -316,6 +357,21 @@ export function resolveOfficialPrediction(prediction, {
     // se conserva el detalle explícito en resolution.asian_settlement en
     // vez de colapsarlo en silencio a hit/miss.
     asianSettlement = settleAsianTotalGoals({ totalGoals: actual, line: Number(prediction.line), direction: prediction.direction });
+    status = asianSettlement.status === "not_evaluable" ? OFFICIAL_PREDICTION_STATUS.NOT_EVALUABLE
+      : asianSettlement.status === "push" ? OFFICIAL_PREDICTION_STATUS.VOID
+        : (asianSettlement.status === "full_win" || asianSettlement.status === "half_win") ? OFFICIAL_PREDICTION_STATUS.HIT
+          : OFFICIAL_PREDICTION_STATUS.MISS;
+  } else if (prediction.market_family === TEAM_ASIAN_HANDICAP_FAMILY) {
+    // Mismo settlement de 5 estados que asian_total_goals, pero aplicado
+    // sobre la diferencia de gol desde la perspectiva del equipo
+    // seleccionado (side), nunca sobre un total. `actual` YA es esa
+    // diferencia (calculada por el caller a partir del marcador real y
+    // prediction.side — ver automaticOutcome en predictionMemoryService.js)
+    // y puede ser negativa. Reutiliza settleTeamAsianHandicap
+    // (teamAsianHandicap.js) sin modificarlo: opponentGoals=0 es válido
+    // porque esa función solo usa la resta (selectedTeamGoals-opponentGoals),
+    // nunca los goles absolutos por separado.
+    asianSettlement = settleTeamAsianHandicap({ selectedTeamGoals: actual, opponentGoals: 0, line: Number(prediction.line) });
     status = asianSettlement.status === "not_evaluable" ? OFFICIAL_PREDICTION_STATUS.NOT_EVALUABLE
       : asianSettlement.status === "push" ? OFFICIAL_PREDICTION_STATUS.VOID
         : (asianSettlement.status === "full_win" || asianSettlement.status === "half_win") ? OFFICIAL_PREDICTION_STATUS.HIT

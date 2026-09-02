@@ -21,8 +21,24 @@ function viabilityLabel(value) {
   return VIABILITY_LABELS[value] || "No accionable actualmente";
 }
 
+// El contexto prematch guardado puede venir de cualquier familia de mercado,
+// incluidas asian_total_goals/team_asian_handicap (settlement de 5 estados).
+// Para esas familias, director.estimated_probability es Favorabilidad Atlas
+// (media ponderada del settlement), NUNCA una probabilidad literal de ganar
+// — mismo predicado que ya usa el resto de Atlas (isSettlementFavorabilitySource
+// en atlas-functional-client.js), aquí adaptado al director prematch guardado,
+// que no siempre trae probability_semantics explícito.
+function isSettlementFavorabilitySource(director) {
+  const family = director?.market_evaluated?.family || director?.sports_verdict?.market_family;
+  return family === "asian_total_goals" || family === "team_asian_handicap";
+}
+
 function prematchProbabilityLabel(value) {
   return Number.isFinite(value) ? `${Math.round(value * 100)}%` : "No disponible";
+}
+
+function prematchFavorabilityLabel(value) {
+  return Number.isFinite(value) ? `${Math.round(value * 100)}/100` : "No disponible";
 }
 
 function LivePrematchContext({ prematchContext }) {
@@ -34,11 +50,12 @@ function LivePrematchContext({ prematchContext }) {
     </section>;
   }
   const prematchDirector = prematchContext.director || {};
+  const isFavorability = isSettlementFavorabilitySource(prematchDirector);
   return <section className="p2-live-prematch" aria-labelledby="live-prematch-title">
     <p className="eyebrow">CONTEXTO PREMATCH</p>
     <h3 id="live-prematch-title">Lo que Atlas ya sabía antes del partido</h3>
     <p><strong>{displaySelectionLabel(prematchDirector.selection || prematchDirector.market_evaluated?.label)}</strong></p>
-    <p><small>Probabilidad estimada prematch</small> <strong>{prematchProbabilityLabel(prematchDirector.estimated_probability)}</strong></p>
+    <p><small>{isFavorability ? "Favorabilidad Atlas prematch" : "Probabilidad estimada prematch"}</small> <strong>{isFavorability ? prematchFavorabilityLabel(prematchDirector.estimated_probability) : prematchProbabilityLabel(prematchDirector.estimated_probability)}</strong></p>
   </section>;
 }
 

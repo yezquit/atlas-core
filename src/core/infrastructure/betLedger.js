@@ -62,6 +62,7 @@ function combinationLegSnapshot(leg = {}) {
     market_family: String(marketFamily),
     selection: leg.selection ?? null,
     direction: leg.direction ?? null,
+    team_id: numberOrNull(leg.team_id ?? leg.teamId),
     line: numberOrNull(leg.line),
     sports_score: numberOrNull(leg.sports_score ?? leg.sportsScore),
     preliminary_probability: numberOrNull(
@@ -95,6 +96,7 @@ export function createBetRecord({
   marketFamily = null,
   selection = null,
   direction = null,
+  teamId = null,
   line = null,
   analysisConfidenceScore = null,
   preliminaryProbability = null,
@@ -148,6 +150,10 @@ export function createBetRecord({
     market_family: marketFamily,
     selection,
     direction,
+    // Identidad explícita por equipo para team_asian_handicap (nunca
+    // direction=over|under — decisión 13); null para el resto de familias,
+    // campo puramente aditivo.
+    team_id: numberOrNull(teamId),
     line: numberOrNull(line),
 
     analysis_confidence_score: numberOrNull(analysisConfidenceScore),

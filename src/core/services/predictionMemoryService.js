@@ -9,6 +9,7 @@ import {
   createOfficialPredictionSnapshot,
   resolveOfficialPrediction,
 } from "../intelligence/officialPrediction.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY, isValidTeamAsianHandicapSide } from "../intelligence/teamAsianHandicap.js";
 
 async function automaticOutcome(prediction, gateway) {
   const competition = getApiFootballCompetitionByKey(prediction.competition_key || prediction.source_metadata?.competition_key);
@@ -40,7 +41,16 @@ async function automaticOutcome(prediction, gateway) {
     if (home === null || home === undefined || away === null || away === undefined) {
       return { state: "not_evaluable", reason: "finished_fixture_score_missing" };
     }
-    const actualTotal = Number(home) + Number(away);
+    const isTeamAsianHandicap = prediction.market_family === TEAM_ASIAN_HANDICAP_FAMILY;
+    // team_asian_handicap resuelve sobre la diferencia de gol desde la
+    // perspectiva del equipo seleccionado (side), nunca sobre el total de
+    // goles del partido — mismo marcador real, interpretación distinta.
+    if (isTeamAsianHandicap && !isValidTeamAsianHandicapSide(prediction.side)) {
+      return { state: "not_evaluable", reason: "team_asian_handicap_side_missing" };
+    }
+    const actualTotal = isTeamAsianHandicap
+      ? (prediction.side === "home" ? Number(home) - Number(away) : Number(away) - Number(home))
+      : Number(home) + Number(away);
     return Number.isFinite(actualTotal)
       ? { state: "resolved", actualTotal }
       : { state: "not_evaluable", reason: "finished_fixture_score_invalid" };
@@ -112,7 +122,11 @@ export function createPredictionMemoryService({
     if (prediction.resolution?.status !== "pending") return { prediction, deduplicated: true, update_status: "already_resolved" };
 
     if (source === "manual_user_input") {
-      if (!Number.isInteger(Number(actualTotal)) || Number(actualTotal) < 0) throw new Error("invalid_actual_total");
+      // team_asian_handicap resuelve sobre una diferencia de gol (puede ser
+      // negativa si el equipo seleccionado perdió); el resto de familias
+      // sigue exigiendo un total real no negativo, como siempre.
+      const allowsNegativeActual = prediction.market_family === TEAM_ASIAN_HANDICAP_FAMILY;
+      if (!Number.isInteger(Number(actualTotal)) || (!allowsNegativeActual && Number(actualTotal) < 0)) throw new Error("invalid_actual_total");
       const resolved = resolveOfficialPrediction(prediction, { actualTotal: Number(actualTotal), source, resolvedAt: now() });
       return { ...(await store.appendResolution(resolved)), update_status: "resolved" };
     }
