@@ -145,6 +145,20 @@ export function buildMarketDistribution(input = {}) {
   };
 }
 
+// Distribución deportiva de asian_total_goals: composición delgada sobre la
+// infraestructura de "goals" ya existente (misma buildCanonicalObservations,
+// mismo buildMarketDistribution, sin fórmula nueva). Cadena:
+//   datos deportivos → canonical observations de "goals" → distribución
+// generateAsianTotalGoalLines (asianTotalGoals.js) consume el resultado para
+// producir líneas Atlas. No lee ni acepta cuotas, bookmaker, líneas del
+// proveedor ni implied_probability: solo reenvía el `context` recibido hacia
+// buildCanonicalObservations/buildMarketDistribution, que en sí mismos nunca
+// leen ese tipo de campo (ver canonicalObservations.js/SOURCES).
+export function buildAsianTotalGoalDistribution(context = {}) {
+  const canonicalObservations = buildCanonicalObservations({ ...context, marketFamily: "goals" });
+  return buildMarketDistribution({ ...context, marketFamily: "goals", canonicalObservations });
+}
+
 function dynamicHalfLines(distribution, family) {
   const minimum = family === "shots_on_goal" ? 1.5 : 5.5;
   const maximum = family === "shots_on_goal" ? 24.5 : 60.5;
