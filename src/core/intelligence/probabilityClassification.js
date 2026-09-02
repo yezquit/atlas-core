@@ -49,3 +49,14 @@ export function classifyProbability(probability) {
 export function isCalibratedModel(modelValidationStatus) {
   return CALIBRATED_MODEL_VALIDATION_STATUSES.includes(modelValidationStatus);
 }
+
+// sports_favorability (asian_total_goals) es un atractivo deportivo de
+// settlement, no una probabilidad literal de ganar (ver asianTotalGoals.js).
+// Los consumidores que comparan/ponderan probabilidad deben ramificar en
+// este predicado en vez de re-derivar la condición cada uno por su cuenta.
+// market_family se conserva como respaldo defensivo para candidatos
+// antiguos que pudieran carecer de probability_semantics.
+export function isSettlementFavorabilityCandidate(candidate) {
+  return candidate?.probability_semantics === "settlement_favorability"
+    || candidate?.market_family === "asian_total_goals";
+}

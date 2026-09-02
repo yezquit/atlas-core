@@ -3,6 +3,7 @@ import {
   ESTIMATED_PROBABILITY_REPRESENTS,
   classifyProbability,
   isCalibratedModel,
+  isSettlementFavorabilityCandidate,
   isValidProbability,
   toProbabilityPercent,
 } from "./probabilityClassification.js";
@@ -67,17 +68,35 @@ function deriveEstimatedProbability(candidate) {
   return isValidProbability(candidate?.preliminary_probability) ? candidate.preliminary_probability : null;
 }
 
+// Peso combinado de los seis componentes semánticamente neutrales (todo
+// calculateSportsScore salvo probabilityBalance). Se usa para renormalizar
+// Solidez a escala 0-100 para settlement_favorability sin inventar ninguna
+// ancla nueva de Favorabilidad.
+const SETTLEMENT_FAVORABILITY_NEUTRAL_WEIGHT = 0.2 + 0.15 + 0.15 + 0.05 + 0.1 + 0.05;
+
 export function calculateSportsScore(candidate, { marketAssessment = null, confidenceScore = null } = {}) {
   if (candidate?.probability_status !== "preliminary") return 0;
-  const probability = Number(candidate.preliminary_probability);
   const intervalWidth = Math.max(0, Number(candidate.uncertainty_high) - Number(candidate.uncertainty_low));
-  const probabilityBalance = clamp(100 - Math.abs(probability - 0.68) * 180);
   const uncertainty = clamp(100 - intervalWidth * 125);
   const effectiveSample = clamp((Number(candidate.sample_size_effective) / 20) * 100);
   const coverage = clamp(Number(marketAssessment?.technical_support_score ?? 70));
   const confidence = clamp(Number(confidenceScore ?? coverage));
   const lineStability = calculateLineStabilityScore(candidate);
   const sensitivity = clamp(100 - (candidate.limitations?.length || 0) * 3 - (candidate.context_adjustment?.changed_distribution ? 8 : 0));
+  if (isSettlementFavorabilityCandidate(candidate)) {
+    // sports_favorability (Favorabilidad Atlas) es un atractivo deportivo de
+    // settlement, no una probabilidad literal de ganar — nunca debe
+    // alimentar un componente diseñado alrededor de una forma ideal de
+    // probabilidad (ver ATLAS_DECISIONS_LOG.md, decisión 52). Solidez para
+    // esta semántica mide únicamente calidad/robustez de la evidencia,
+    // reutilizando los mismos seis componentes neutrales de abajo,
+    // renormalizados sobre su propio peso combinado (0.70).
+    return round((
+      uncertainty * 0.2 + effectiveSample * 0.15 + coverage * 0.15 + confidence * 0.05 + lineStability * 0.1 + sensitivity * 0.05
+    ) / SETTLEMENT_FAVORABILITY_NEUTRAL_WEIGHT);
+  }
+  const probability = Number(candidate.preliminary_probability);
+  const probabilityBalance = clamp(100 - Math.abs(probability - 0.68) * 180);
   return round(probabilityBalance * 0.3 + uncertainty * 0.2 + effectiveSample * 0.15 + coverage * 0.15 + confidence * 0.05 + lineStability * 0.1 + sensitivity * 0.05);
 }
 
