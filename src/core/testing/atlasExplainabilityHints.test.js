@@ -30,7 +30,13 @@ test("Probabilidad estimada tiene ayuda estadística separada", async () => {
   const source = await readFile(clientPath, "utf8");
   assert.match(source, /Estimación de Atlas sobre la probabilidad de que ocurra esta selección\. Es una estimación estadística, no una garantía\./);
   assert.match(source, /<MetricLabel label="PROBABILIDAD ESTIMADA"/);
-  assert.match(source, /<MetricLabel label="Probabilidad estimada Atlas"/);
+  // DirectorResult/InitialAnalysisResult ya no usan el label literal
+  // "Probabilidad estimada Atlas" en JSX: usan candidateProbabilityDisplay(),
+  // que devuelve dinámicamente "Probabilidad Atlas" para candidatos clásicos
+  // (o "Favorabilidad Atlas" para asian_total_goals). Se verifica que ese
+  // label dinámico también tenga su propia ayuda estadística en METRIC_HINTS.
+  assert.match(source, /"Probabilidad Atlas": "Estimación de Atlas sobre la probabilidad de que ocurra esta selección\. Es una estimación estadística, no una garantía\."/);
+  assert.match(source, /<MetricLabel label=\{primaryProbabilityDisplay\.label\} \/>/);
 });
 
 test("Dirección Radar explica ALTA BAJA y NEUTRAL sin confundir BAJA con calidad", async () => {

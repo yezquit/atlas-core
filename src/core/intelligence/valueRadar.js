@@ -49,10 +49,23 @@ export function evaluateValueOpportunity({ candidate, quote, asianSettlementProf
   const asian = family === ASIAN_TOTAL_GOALS_FAMILY;
   const fairOdds = asian ? asianFairOdds(asianSettlementProfile) : 1 / probability;
   const expectedRoi = asian ? asianExpectedValue(asianSettlementProfile, odds) : probability * odds - 1;
-  const rawEdge = asian && asianSettlementProfile
-    ? (asianSettlementProfile.weighted_win_probability - implied) * 100
+  // Para asian_total_goals, raw_edge_pp/conservative_edge_pp NUNCA usan
+  // weighted_win_probability ni Favorabilidad Atlas (sports_favorability /
+  // uncertainty_low de Favorabilidad) — ambas magnitudes están sesgadas
+  // negativamente frente al precio justo real en cuanto existe masa de
+  // half_win/push/half_loss (demostrado algebraicamente: en el precio justo,
+  // weighted_win_probability - implied <= 0 salvo en líneas .5 puras).
+  // price_equivalent_probability (= 1/asianFairOdds, ver asianTotalGoals.js)
+  // es la única magnitud cuyo signo frente a implied coincide siempre con el
+  // signo del EV real, para las 5 combinaciones de settlement.
+  const priceEquivalentProbability = asian ? asianSettlementProfile?.price_equivalent_probability : null;
+  const priceEquivalentLow = asian ? asianSettlementProfile?.price_equivalent_probability_low : null;
+  const rawEdge = asian
+    ? (Number.isFinite(priceEquivalentProbability) ? (priceEquivalentProbability - implied) * 100 : null)
     : (probability - implied) * 100;
-  const conservativeEdge = Number.isFinite(uncertaintyLow) ? (uncertaintyLow - implied) * 100 : null;
+  const conservativeEdge = asian
+    ? (Number.isFinite(priceEquivalentLow) ? (priceEquivalentLow - implied) * 100 : null)
+    : (Number.isFinite(uncertaintyLow) ? (uncertaintyLow - implied) * 100 : null);
   const status = expectedRoi <= 0 ? VALUE_RADAR_STATUS.NO_VALUE
     : Number.isFinite(conservativeEdge) && conservativeEdge > 0 ? VALUE_RADAR_STATUS.INTERESTING
       : VALUE_RADAR_STATUS.WATCH;
@@ -66,7 +79,14 @@ export function evaluateValueOpportunity({ candidate, quote, asianSettlementProf
     status,
     implied_probability: round(implied),
     fair_odds_atlas: Number.isFinite(fairOdds) ? round(fairOdds) : null,
-    raw_edge_pp: round(rawEdge, 2),
+    // Probabilidad equivalente Atlas por precio — expuesta explícitamente
+    // (no solo derivable de fair_odds_atlas) para que consumidores como
+    // DirectorAtlas puedan citarla en texto sin recalcularla ni caer de
+    // vuelta en weighted_win_probability/Favorabilidad. NO es la
+    // probabilidad literal de ganar.
+    price_equivalent_probability: asian && Number.isFinite(priceEquivalentProbability) ? round(priceEquivalentProbability) : null,
+    price_equivalent_probability_low: asian && Number.isFinite(priceEquivalentLow) ? round(priceEquivalentLow) : null,
+    raw_edge_pp: Number.isFinite(rawEdge) ? round(rawEdge, 2) : null,
     conservative_edge_pp: Number.isFinite(conservativeEdge) ? round(conservativeEdge, 2) : null,
     expected_roi: Number.isFinite(expectedRoi) ? round(expectedRoi) : null,
     simple_message: simpleMessage,

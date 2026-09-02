@@ -107,11 +107,22 @@ test("G. la diferencia vs cuota se presenta en pp, nunca como EV/beneficio esper
   assert.ok(source.includes("function pointsDifference(estimated, implied) {"));
   assert.ok(source.includes("const rounded = Math.round((estimated - implied) * 1000) / 10;"));
   assert.ok(source.includes('return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1)} pp`;'));
-  assert.ok(source.includes('["Diferencia vs cuota", hasExactQuote ? (pointsDifference(estimatedProbability, impliedProbability) ?? "No disponible") : "No disponible"],'));
+  // EconomicsPanel renombró internamente su variable local de
+  // estimatedProbability a rawEstimatedProbability (derivada de candidate?.
+  // estimated_probability/preliminary_probability) al añadir la rama
+  // asian_total_goals; la fórmula y el comportamiento clásico no cambiaron.
+  assert.ok(source.includes('["Diferencia vs cuota", hasExactQuote ? (pointsDifference(rawEstimatedProbability, impliedProbability) ?? "No disponible") : "No disponible"],'));
 
   const economicsPanelBlock = functionBlock(source, "function EconomicsPanel(", "function RedTeamResult");
-  assert.doesNotMatch(economicsPanelBlock, /\bEV\b/);
-  assert.doesNotMatch(economicsPanelBlock, /beneficio esperado/i);
+  // La rama clásica (mercados binarios) sigue mostrando únicamente PP, nunca
+  // EV/beneficio esperado. La rama asian_total_goals SÍ muestra "EV técnico"
+  // deliberadamente (cambio autorizado en la corrección económica asiática:
+  // Fair Odds/EV se calculan sobre el perfil completo de liquidación, no
+  // sobre una comparación de PP) — se acota esta protección a la rama
+  // clásica para no invalidar esa decisión ya tomada.
+  const classicEconomicsBlock = economicsPanelBlock.slice(economicsPanelBlock.indexOf("const rawEstimatedProbability"));
+  assert.doesNotMatch(classicEconomicsBlock, /\bEV\b/);
+  assert.doesNotMatch(classicEconomicsBlock, /beneficio esperado/i);
   assert.match(economicsPanelBlock, /No representa una garantía de rentabilidad\./);
 
   // Comprobación del resultado esperado usando la fórmula ya confirmada.
@@ -133,7 +144,7 @@ test("H. sin cuota exacta: Cuota/Probabilidad implícita/Diferencia caen a No di
   assert.ok(probabilityRowMatch, "debe existir la fila de Probabilidad estimada Atlas");
   const probabilityRow = probabilityRowMatch[0];
   assert.doesNotMatch(probabilityRow, /hasExactQuote/);
-  assert.match(probabilityRow, /Number\.isFinite\(estimatedProbability\)/);
+  assert.match(probabilityRow, /Number\.isFinite\(rawEstimatedProbability\)/);
 });
 
 const FIXTURE_ID = 5_551_001;
@@ -217,7 +228,14 @@ test("I. findFixtureQuoteEntry nunca presenta como exacta una cuota de otra lín
   // fallback a otra línea/familia/fixture.
   const source = await readFile(clientPath, "utf8");
   assert.ok(source.includes('const exactQuote = operation?.quote_state === "current" ? operation.active_quote : null;'));
-  assert.ok(source.includes("<EconomicsPanel decimalOdds={exactQuote?.decimal_odds} bookmaker={exactQuote?.bookmaker_name} impliedProbability={exactQuote?.implied_probability} estimatedProbability={candidate.estimatedProbability} />"));
+  // EconomicsPanel cambió de contrato (candidate={{...}} en vez de
+  // estimatedProbability={...}) al añadir soporte para asian_total_goals,
+  // pero JourneyCandidateCard sigue construyendo ese objeto EXCLUSIVAMENTE
+  // desde los campos propios de candidate — sin otro origen ni fallback a
+  // otra línea/familia/fixture.
+  assert.ok(source.includes("candidate={{ estimated_probability: candidate.estimatedProbability, probability_percent: candidate.probabilityPercent, market_family: candidate.marketId || candidate.market }}"));
+  const journeyCardBlock = source.slice(source.indexOf("function JourneyCandidateCard"), source.indexOf("function ValueOpportunityCard"));
+  assert.match(journeyCardBlock, /<EconomicsPanel[\s\S]*?decimalOdds=\{exactQuote\?\.decimal_odds\}[\s\S]*?impliedProbability=\{exactQuote\?\.implied_probability\}[\s\S]*?\/>/);
 });
 
 test("J. Jornada consume candidate.radarAnalysis y el análisis individual consume analysis.primaryMarketOpportunityRadar; ninguno infiere familia por texto", async () => {

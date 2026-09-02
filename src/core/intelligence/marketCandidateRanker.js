@@ -97,10 +97,19 @@ function overallStatus(candidate, priceStatus, blocked) {
   return OVERALL_STATUS.SUITABLE;
 }
 
+// Capa exclusivamente textual/descriptiva: no participa en calculateSportsScore,
+// ranking, orden, thresholds, overallStatus ni el comparator — solo redacta el
+// texto de rank_reason. Para candidatos cuyo probability_semantics indica
+// Favorabilidad Atlas (settlement asiático, no probabilidad literal de ganar),
+// evita la palabra "probabilidad" y usa el lenguaje correcto.
 function rankReason(candidate) {
+  const isSettlementFavorability = candidate.probability_semantics === "settlement_favorability" || candidate.market_family === "asian_total_goals";
+  const probabilityLine = isSettlementFavorability
+    ? `Favorabilidad Atlas ${Math.round(candidate.preliminary_probability * 100)}/100 con intervalo ${round(candidate.uncertainty_low * 100)}–${round(candidate.uncertainty_high * 100)} (no es una probabilidad literal de ganar).`
+    : `Probabilidad preliminar ${round(candidate.preliminary_probability * 100)}% con intervalo ${round(candidate.uncertainty_low * 100)}%–${round(candidate.uncertainty_high * 100)}%.`;
   return [
     `Equilibrio deportivo ${candidate.sports_score}/100 sin usar la cuota.`,
-    `Probabilidad preliminar ${round(candidate.preliminary_probability * 100)}% con intervalo ${round(candidate.uncertainty_low * 100)}%–${round(candidate.uncertainty_high * 100)}%.`,
+    probabilityLine,
     candidate.contextual_only ? "La línea se conserva como contexto y recibe una penalización por relevancia." : "La línea está dentro del rango central de la distribución observada.",
   ];
 }

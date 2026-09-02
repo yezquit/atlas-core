@@ -64,9 +64,14 @@ test("UI 8. Home expone acciones principales y secundarias", async () => {
 test("UI 9. DirectorAtlas presenta resumen visual sin recalcular datos", async () => {
   const source = await readFile(path.join(appDirectory, "atlas-functional-client.js"), "utf8");
   assert.match(source, /className="p2-director-metrics"/);
+  // DirectorResult ya no lee probability_percent inline: delega en
+  // candidateProbabilityDisplay(analysis.marketSelection?.primary), que
+  // internamente sigue leyendo el mismo campo ya calculado por el core
+  // (source?.probability_percent), sin recalcularlo.
   assert.ok(
-    source.includes("analysis.marketSelection?.primary?.probability_percent")
+    source.includes("const primaryProbabilityDisplay = candidateProbabilityDisplay(analysis.marketSelection?.primary)")
   );
+  assert.match(source, /Number\.isFinite\(source\?\.probability_percent\)/);
   assert.doesNotMatch(source, /probability_percent\s*[+\*/-]=/);
 });
 

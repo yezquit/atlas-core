@@ -227,22 +227,32 @@ export function evaluateExactMarketLine({ marketFamily, direction, line, ...cont
     if (!distribution || !profile) {
       return { contract: "ExactMarketLineEvaluation", version: 1, status: "unavailable", exact_selection_ready: false, candidate: null, reason: "insufficient_distribution_data" };
     }
-    const point = profile.weighted_win_probability;
-    const n = Math.max(1, Number(profile.effective_sample_size));
-    const z = 1.645;
-    const denominator = 1 + z ** 2 / n;
-    const center = (point + z ** 2 / (2 * n)) / denominator;
-    const margin = z / denominator * Math.sqrt(point * (1 - point) / n + z ** 2 / (4 * n ** 2));
+    // point_estimate es Favorabilidad Atlas (sports_favorability), NO
+    // weighted_win_probability y NO una probabilidad literal de ganar: es la
+    // media ponderada del settlement de 5 estados (ver asianTotalGoals.js).
+    // La incertidumbre viene ya calculada en el propio perfil mediante una
+    // aproximación normal sobre la varianza ponderada real de esa media
+    // (weighted_settlement_mean_normal_approx), no mediante un Wilson
+    // binomial — ese Wilson sigue exactamente igual para goals/corners/
+    // cards/total_shots/shots_on_goal, sin ningún cambio en esta rama.
+    const point = profile.sports_favorability;
     const probability = {
       probability_status: "preliminary",
       point_estimate: point,
-      uncertainty_low: Math.max(0, center - margin),
-      uncertainty_high: Math.min(1, center + margin),
+      uncertainty_low: profile.sports_favorability_uncertainty_low,
+      uncertainty_high: profile.sports_favorability_uncertainty_high,
       sample_size_effective: profile.effective_sample_size,
       inputs_used: distribution.input_sources,
-      limitations: ["Distribución asiática derivada exclusivamente de la masa empírica canónica de goles.", "Los pushes y medias ganancias/pérdidas se conservan por separado."],
+      limitations: [
+        "Distribución asiática derivada exclusivamente de la masa empírica canónica de goles.",
+        "Los pushes y medias ganancias/pérdidas se conservan por separado.",
+        "point_estimate representa Favorabilidad Atlas (media ponderada del settlement), no una probabilidad literal de ganar.",
+      ],
       model_validation_status: "preliminary_unvalidated",
-      canonical_threshold_distribution: { market_family: marketFamily, line: Number(line), weighted_win_probability: point, fixture_ids: profile.fixture_ids },
+      probability_semantics: "settlement_favorability",
+      uncertainty_method: profile.sports_favorability_method,
+      uncertainty_status: profile.sports_favorability_uncertainty_status,
+      canonical_threshold_distribution: { market_family: marketFamily, line: Number(line), sports_favorability: point, fixture_ids: profile.fixture_ids },
     };
     const candidate = buildMarketLineCandidate({
       input: { ...context, marketFamily },
@@ -252,6 +262,11 @@ export function evaluateExactMarketLine({ marketFamily, direction, line, ...cont
       probability,
     });
     candidate.asian_settlement_profile = profile;
+    // Campos explícitos para que consumidores futuros no traten
+    // estimated_probability/preliminary_probability como una probabilidad
+    // literal de ganar para esta familia (ver ATLAS_DECISIONS_LOG.md).
+    candidate.sports_favorability = point;
+    candidate.probability_semantics = "settlement_favorability";
     candidate.selection = `${normalizedDirection === "over" ? "Over" : "Under"} ${Number(line)}`;
     candidate.candidate_id = `${marketFamily}:${normalizedDirection}:${Number(line)}`;
     return { contract: "ExactMarketLineEvaluation", version: 1, status: "ready_for_pricing", exact_selection_ready: true, candidate, reason: null };

@@ -964,8 +964,15 @@ export function buildOperationalDirectorVerdict({
       ? "La selección conserva respaldo deportivo, pero no es viable a esta cuota."
       : conditions[0] || priceMessage,
     parlay_eligibility: parlayEligibility,
+    // Solo texto/redacción: para settlement_favorability (asian_total_goals),
+    // esta oración nunca debe comparar Favorabilidad Atlas contra la
+    // probabilidad implícita como si fueran la misma magnitud — usa
+    // price_equivalent_probability (ya calculada en marketSuitability.js vía
+    // evaluateValueOpportunity), sin cambiar priceStatus/parlayEligibility.
     parlay_eligibility_reason: priceStatus === "unfavorable"
-      ? `La cuota ${oddsQuote?.decimal_odds} exige una probabilidad implícita del ${Number((Number(impliedProbability) * 100).toFixed(1))}%, superior a la estimación preliminar de Atlas del ${Number((Number(probability) * 100).toFixed(1))}%.`
+      ? (marketCandidate?.probability_semantics === "settlement_favorability" || marketCandidate?.market_family === "asian_total_goals")
+        ? `La cuota ${oddsQuote?.decimal_odds} exige una probabilidad implícita del ${Number((Number(impliedProbability) * 100).toFixed(1))}%, superior a la probabilidad equivalente Atlas por precio del ${Number.isFinite(priceEvaluation.price_equivalent_probability) ? Number((priceEvaluation.price_equivalent_probability * 100).toFixed(1)) : "?"}% (no es la probabilidad literal de ganar).`
+        : `La cuota ${oddsQuote?.decimal_odds} exige una probabilidad implícita del ${Number((Number(impliedProbability) * 100).toFixed(1))}%, superior a la estimación preliminar de Atlas del ${Number((Number(probability) * 100).toFixed(1))}%.`
       : parlayEligibility === "eligible_with_caution"
         ? "La estimación supera marginalmente la implícita, pero requiere revisión posterior por incertidumbre o contexto."
         : parlayEligibility === "eligible"

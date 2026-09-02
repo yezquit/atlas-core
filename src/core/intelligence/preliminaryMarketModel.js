@@ -77,7 +77,7 @@ function sample(profile, family, path) {
   return current?.event_samples?.[family]?.match_totals || [];
 }
 
-function wilsonInterval(probability, sampleSize, z = 1.645) {
+export function wilsonInterval(probability, sampleSize, z = 1.645) {
   const n = Math.max(1, sampleSize);
   const denominator = 1 + (z ** 2) / n;
   const center = (probability + (z ** 2) / (2 * n)) / denominator;

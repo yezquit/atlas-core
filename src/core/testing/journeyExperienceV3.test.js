@@ -196,9 +196,16 @@ test("11. las tarjetas simples usan probability_percent y probability_classifica
   const source = await readFile(clientPath, "utf8");
   assert.ok(source.includes("candidate.probabilityPercent"));
   assert.ok(source.includes("candidate.probabilityClassification"));
-  assert.ok(source.includes("analysis.marketSelection?.primary?.probability_percent"));
-  assert.ok(source.includes("analysis.marketSelection?.primary?.probability_classification"));
+  // DirectorResult ya no referencia probability_percent/probability_classification
+  // inline: delega en candidateProbabilityDisplay(analysis.marketSelection?.primary),
+  // cuyo branch clásico sigue leyendo esos mismos campos (source?.probability_percent
+  // / .probability_classification), nunca sports_score, como cifra principal.
+  assert.ok(source.includes("const primaryProbabilityDisplay = candidateProbabilityDisplay(analysis.marketSelection?.primary)"));
   const directorResultBlock = source.slice(source.indexOf("function DirectorResult"), source.indexOf("function MarketAssessment"));
+  assert.match(directorResultBlock, /primaryProbabilityDisplay\.formatted/);
+  assert.ok(directorResultBlock.includes("analysis.marketSelection?.primary?.probability_classification"));
+  const probabilityDisplayFn = source.slice(source.indexOf("function candidateProbabilityDisplay"), source.indexOf("const SETTLEMENT_OUTCOME_LABELS"));
+  assert.match(probabilityDisplayFn, /source\?\.probability_percent/);
   assert.equal(directorResultBlock.includes("sports_verdict?.sports_score"), false);
 });
 

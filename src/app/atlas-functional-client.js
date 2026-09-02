@@ -252,6 +252,75 @@ function pointsDifference(estimated, implied) {
   return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1)} pp`;
 }
 
+// Helper semántico de presentación: distingue candidatos cuyo campo genérico
+// de probabilidad (estimated_probability/preliminary_probability) transporta
+// en realidad Favorabilidad Atlas (media ponderada del settlement asiático,
+// NO una probabilidad literal de ganar) de los que transportan una
+// probabilidad deportiva real. No cambia ningún contrato core — solo lee los
+// campos ya expuestos por asianTotalGoals.js/candidateLineGenerator.js.
+//
+// Fallback (sección 10): si un registro no trae probability_semantics pero sí
+// market_family==="asian_total_goals" de forma inequívoca, se presenta igual
+// como Favorabilidad — nunca se reinterpreta ninguna otra familia.
+function isSettlementFavorabilitySource(source) {
+  if (!source) return false;
+  if (source.probability_semantics === "settlement_favorability") return true;
+  return source.market_family === "asian_total_goals";
+}
+
+function candidateProbabilityDisplay(source) {
+  if (isSettlementFavorabilitySource(source)) {
+    const raw = Number.isFinite(source.sports_favorability) ? source.sports_favorability
+      : Number.isFinite(source.estimated_probability) ? source.estimated_probability
+        : Number.isFinite(source.preliminary_probability) ? source.preliminary_probability
+          : null;
+    const value = Number.isFinite(raw) ? Math.round(raw * 100) : null;
+    return {
+      label: "Favorabilidad Atlas",
+      isLiteralProbability: false,
+      value,
+      formatted: value === null ? "No disponible" : `${value}/100`,
+    };
+  }
+  const raw = Number.isFinite(source?.estimated_probability) ? source.estimated_probability
+    : Number.isFinite(source?.preliminary_probability) ? source.preliminary_probability
+      : null;
+  const percentValue = Number.isFinite(source?.probability_percent) ? source.probability_percent
+    : Number.isFinite(raw) ? Number((raw * 100).toFixed(1)) : null;
+  return {
+    label: "Probabilidad Atlas",
+    isLiteralProbability: true,
+    value: percentValue,
+    formatted: percentValue === null ? "No disponible" : `${percentValue}%`,
+  };
+}
+
+const SETTLEMENT_OUTCOME_LABELS = Object.freeze([
+  ["full_win", "Gana completa"],
+  ["half_win", "Gana media"],
+  ["push", "Devolución"],
+  ["half_loss", "Pierde media"],
+  ["full_loss", "Pierde completa"],
+]);
+
+// Perfil de settlement asiático: información secundaria, visualmente
+// subordinada a Favorabilidad Atlas y Solidez Atlas (sección 3). No inventa
+// porcentajes — si falta algún campo del perfil, se omite esa fila.
+function AsianSettlementBreakdown({ profile }) {
+  const probabilities = profile?.probabilities;
+  if (!probabilities) return null;
+  const rows = SETTLEMENT_OUTCOME_LABELS
+    .filter(([key]) => Number.isFinite(probabilities[key]))
+    .map(([key, label]) => [label, percentage(probabilities[key])]);
+  if (!rows.length) return null;
+  return (
+    <details className="p2-source-details p2-asian-settlement-breakdown">
+      <summary>Ver perfil de liquidación</summary>
+      <DefinitionGrid entries={rows} />
+    </details>
+  );
+}
+
 const DIRECTOR_DECISION_ICONS = { yes: "✅", wait: "⏳", no: "⛔" };
 function directorDecisionIcon(decision) {
   return DIRECTOR_DECISION_ICONS[decision?.status] ?? null;
@@ -285,6 +354,9 @@ const METRIC_HINTS = Object.freeze({
     "Indica qué tan sólido y respaldado está técnicamente el análisis según calidad de muestra, incertidumbre, cobertura y estabilidad. No es la probabilidad de acertar.",
   "Probabilidad estimada Atlas": "Estimación de Atlas sobre la probabilidad de que ocurra esta selección. Es una estimación estadística, no una garantía.",
   "PROBABILIDAD ESTIMADA": "Estimación de Atlas sobre la probabilidad de que ocurra esta selección. Es una estimación estadística, no una garantía.",
+  "Probabilidad Atlas": "Estimación de Atlas sobre la probabilidad de que ocurra esta selección. Es una estimación estadística, no una garantía.",
+  "Favorabilidad Atlas": "Resume el balance entre ganar completa, ganar media, devolución, perder media y perder completa. No es una probabilidad literal.",
+  "Probabilidad equivalente Atlas por precio": "Es la probabilidad equivalente del precio justo de Atlas teniendo en cuenta ganancias medias, devoluciones y pérdidas medias. No es la probabilidad literal de ganar.",
   "Dirección Radar": "ALTA: las señales deportivas tienden hacia valores superiores respecto a la línea analizada. BAJA: tienden hacia valores inferiores. NEUTRAL: no existe una dirección suficientemente clara. BAJA describe dirección, no baja calidad ni baja probabilidad.",
   "Convergencia Radar": "Indica cuánto coinciden y qué tan consistentes son las señales deportivas consideradas por el Radar. No es una probabilidad.",
   "Contraevidencia": "Señales relevantes que contradicen la oportunidad detectada. Si son suficientemente fuertes, Atlas puede bloquear la oportunidad.",
@@ -498,10 +570,18 @@ function VersionComparison({ analysis, expert = false, active }) {
   if (!comparison && !reanalysis) return null;
   const changes = comparison?.changes;
   const timezone = analysis?.director?.fixture?.timezone || "America/Bogota";
+  // Para asian_total_goals, changes.preliminary_probability transporta
+  // Favorabilidad Atlas (no probabilidad literal) — se detecta por la
+  // familia actual del análisis, sin depender de un campo nuevo en el diff.
+  const isFavorabilityComparison = isSettlementFavorabilitySource(analysis?.marketSelection?.primary)
+    || analysis?.director?.market_evaluated?.family === "asian_total_goals";
+  const favorabilityCell = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}/100` : "No disponible";
   const rows = changes ? [
     ["Fecha y hora", formatDate(changes.analyzed_at?.previous, timezone), formatDate(changes.analyzed_at?.current, timezone)],
     ["Fase temporal", displayStatus(changes.phase?.previous), displayStatus(changes.phase?.current)],
-    ["Probabilidad preliminar", percentage(changes.preliminary_probability?.previous), percentage(changes.preliminary_probability?.current)],
+    isFavorabilityComparison
+      ? ["Favorabilidad Atlas", favorabilityCell(changes.preliminary_probability?.previous), favorabilityCell(changes.preliminary_probability?.current)]
+      : ["Probabilidad preliminar", percentage(changes.preliminary_probability?.previous), percentage(changes.preliminary_probability?.current)],
     ["Intervalo", `${percentage(changes.uncertainty_interval?.previous?.low)}–${percentage(changes.uncertainty_interval?.previous?.high)}`, `${percentage(changes.uncertainty_interval?.current?.low)}–${percentage(changes.uncertainty_interval?.current?.high)}`],
     ["Confianza", changes.analysis_confidence?.previous === null ? "No disponible" : `${changes.analysis_confidence?.previous}%`, changes.analysis_confidence?.current === null ? "No disponible" : `${changes.analysis_confidence?.current}%`],
     ["Mercado", formatValue(changes.market?.previous), formatValue(changes.market?.current)],
@@ -716,8 +796,49 @@ function RadarBadge({ radar }) {
   );
 }
 
-function EconomicsPanel({ decimalOdds, bookmaker, impliedProbability, estimatedProbability }) {
+// Para asian_total_goals, sports_favorability NO es comparable directamente
+// contra 1/cuota (probabilidad implícita) — mezclaría una media ponderada de
+// settlement con una probabilidad binaria. Por eso, para esta familia, el
+// panel económico prioriza lo que el core YA calcula correctamente sobre el
+// perfil completo (Fair Odds Atlas, EV) en vez de una brecha en puntos
+// porcentuales derivada de Favorabilidad. Ninguna fórmula económica cambia
+// aquí — solo qué campos ya existentes se muestran y cómo se etiquetan.
+function EconomicsPanel({ decimalOdds, bookmaker, impliedProbability, candidate, priceAssessment }) {
   const hasExactQuote = Number.isFinite(decimalOdds) && Number.isFinite(impliedProbability);
+  const isAsianFavorability = isSettlementFavorabilitySource(candidate);
+  const probabilityDisplay = candidateProbabilityDisplay(candidate);
+  if (isAsianFavorability) {
+    const fairOdds = priceAssessment?.fair_odds_atlas;
+    const expectedValue = priceAssessment?.expected_roi;
+    // Probabilidad equivalente Atlas por precio (NO Favorabilidad, NO
+    // weighted_win_probability): la única magnitud cuyo signo frente a la
+    // probabilidad implícita coincide siempre con el signo del EV real
+    // (ver ATLAS_DECISIONS_LOG.md). Brecha de precio/conservadora se derivan
+    // solo de esta magnitud y de su intervalo — nunca de Favorabilidad.
+    const priceEquivalentProbability = priceAssessment?.price_equivalent_probability;
+    const priceEquivalentLow = priceAssessment?.price_equivalent_probability_low;
+    const rawEdgePp = priceAssessment?.raw_edge_pp ?? priceAssessment?.price_gap_percentage_points;
+    const conservativeEdgePp = priceAssessment?.conservative_edge_pp;
+    return (
+      <section className="p2-economics-panel" aria-label="Información económica">
+        <p className="eyebrow">ECONOMÍA</p>
+        <DefinitionGrid entries={[
+          [<MetricLabel key="asian-favorability-label" label="Favorabilidad Atlas" />, probabilityDisplay.formatted],
+          ["Cuota", hasExactQuote ? `${decimalOdds}${bookmaker ? ` · ${bookmaker}` : ""}` : "Cuota no disponible"],
+          ["Cuota justa Atlas", Number.isFinite(fairOdds) ? fairOdds : "No disponible"],
+          [<MetricLabel key="asian-price-equivalent-label" label="Probabilidad equivalente Atlas por precio" />, Number.isFinite(priceEquivalentProbability) ? percentage(priceEquivalentProbability) : "No disponible"],
+          ["Probabilidad implícita del mercado", hasExactQuote ? percentage(impliedProbability) : "No disponible"],
+          ["Brecha de precio", hasExactQuote && Number.isFinite(rawEdgePp) ? `${rawEdgePp >= 0 ? "+" : ""}${rawEdgePp.toFixed(2)} pp` : "No disponible"],
+          ["Brecha conservadora", hasExactQuote && Number.isFinite(conservativeEdgePp) ? `${conservativeEdgePp >= 0 ? "+" : ""}${conservativeEdgePp.toFixed(2)} pp` : "No disponible"],
+          ["EV técnico", Number.isFinite(expectedValue) ? percentage(expectedValue) : "No disponible"],
+        ]} />
+        <small>La Probabilidad equivalente Atlas por precio es el precio neutral equivalente de Atlas considerando ganancias medias, devoluciones y pérdidas medias. No es la probabilidad literal de ganar. La brecha de precio nunca se calcula con Favorabilidad Atlas ni con Solidez.</small>
+      </section>
+    );
+  }
+  const rawEstimatedProbability = Number.isFinite(candidate?.estimated_probability)
+    ? candidate.estimated_probability
+    : Number.isFinite(candidate?.preliminary_probability) ? candidate.preliminary_probability : null;
   return (
     <section className="p2-economics-panel" aria-label="Información económica">
       <p className="eyebrow">ECONOMÍA</p>
@@ -726,8 +847,8 @@ function EconomicsPanel({ decimalOdds, bookmaker, impliedProbability, estimatedP
           ? `${decimalOdds}${bookmaker ? ` · ${bookmaker}` : ""}`
           : "Cuota no disponible"],
         ["Probabilidad implícita", hasExactQuote ? percentage(impliedProbability) : "No disponible"],
-        ["Probabilidad estimada Atlas", Number.isFinite(estimatedProbability) ? percentage(estimatedProbability) : "No disponible"],
-        ["Diferencia vs cuota", hasExactQuote ? (pointsDifference(estimatedProbability, impliedProbability) ?? "No disponible") : "No disponible"],
+        ["Probabilidad estimada Atlas", Number.isFinite(rawEstimatedProbability) ? percentage(rawEstimatedProbability) : "No disponible"],
+        ["Diferencia vs cuota", hasExactQuote ? (pointsDifference(rawEstimatedProbability, impliedProbability) ?? "No disponible") : "No disponible"],
       ]} />
       <small>Compara la estimación deportiva de Atlas con la probabilidad implícita de la cuota. No representa una garantía de rentabilidad.</small>
     </section>
@@ -802,28 +923,36 @@ function describeGapMagnitude(gapPoints) {
 // Todos los números vienen ya calculados (implied_probability, gap, sports_score);
 // esta función solo los redacta. NUNCA calcula edge a partir de Solidez —
 // Solidez y edge son dos métricas independientes y se muestran por separado.
-function buildNumbersExplanation({ label, decimalOdds, impliedProbability, estimatedProbability, gapPoints, sportsScore }) {
+function buildNumbersExplanation({ label, decimalOdds, impliedProbability, estimatedProbability, gapPoints, sportsScore, isPriceEquivalent = false }) {
   if (!Number.isFinite(decimalOdds) || !Number.isFinite(impliedProbability) || !Number.isFinite(estimatedProbability) || !Number.isFinite(gapPoints)) return null;
   const impliedPercent = Number((impliedProbability * 100).toFixed(1));
   const estimatedPercent = Number((estimatedProbability * 100).toFixed(1));
   const direction = gapPoints >= 0 ? "por encima" : "por debajo";
   return {
     demandParagraph: `Una cuota de ${decimalOdds} significa que ${label ? `"${label}"` : "esta selección"} necesita acertarse aproximadamente el ${impliedPercent}% de las veces para justificar matemáticamente ese precio.`,
-    atlasParagraph: `Atlas calcula aproximadamente un ${estimatedPercent}% de probabilidad para ${label || "esta selección"}.`,
-    differenceParagraph: `Atlas está ${Math.abs(gapPoints)} puntos porcentuales ${direction} de lo que exige la cuota.`,
-    simpleParagraph: `La casa exige aproximadamente ${impliedPercent}%, mientras Atlas estima ${estimatedPercent}%. ${describeGapMagnitude(gapPoints)}`,
+    atlasParagraph: isPriceEquivalent
+      ? `La probabilidad equivalente Atlas por precio para ${label || "esta selección"} es aproximadamente ${estimatedPercent}% (no es la probabilidad literal de ganar).`
+      : `Atlas calcula aproximadamente un ${estimatedPercent}% de probabilidad para ${label || "esta selección"}.`,
+    differenceParagraph: `${isPriceEquivalent ? "La probabilidad equivalente Atlas por precio está" : "Atlas está"} ${Math.abs(gapPoints)} puntos porcentuales ${direction} de lo que exige la cuota.`,
+    simpleParagraph: `La casa exige aproximadamente ${impliedPercent}%, mientras ${isPriceEquivalent ? "la probabilidad equivalente Atlas por precio es" : "Atlas estima"} ${estimatedPercent}%. ${describeGapMagnitude(gapPoints)}`,
     solidezParagraph: Number.isFinite(sportsScore) ? `Solidez Atlas: ${sportsScore}/100. La Solidez indica qué tan respaldado está el análisis por los datos disponibles; NO es una probabilidad.` : null,
   };
 }
 
 function NumbersExplanation({ label, priceAssessment, sportsScore, oppositeLabel, oppositeAssessment }) {
+  // Guard explícito: para asian_total_goals, esta explicación NUNCA debe
+  // comparar Favorabilidad Atlas contra implied_probability como si fueran
+  // la misma magnitud — usa price_equivalent_probability (y su brecha
+  // raw_edge_pp ya calculada correctamente en valueRadar.js) en su lugar.
+  const isAsianPrice = priceAssessment?.market_family === "asian_total_goals";
   const primary = buildNumbersExplanation({
     label,
     decimalOdds: priceAssessment?.decimal_odds,
     impliedProbability: priceAssessment?.implied_probability,
-    estimatedProbability: priceAssessment?.preliminary_probability,
-    gapPoints: priceAssessment?.price_gap_percentage_points,
+    estimatedProbability: isAsianPrice ? priceAssessment?.price_equivalent_probability : priceAssessment?.preliminary_probability,
+    gapPoints: isAsianPrice ? priceAssessment?.raw_edge_pp : priceAssessment?.price_gap_percentage_points,
     sportsScore,
+    isPriceEquivalent: isAsianPrice,
   });
   if (!primary) return null;
   const oppositeGap = oppositeAssessment?.price_gap_percentage_points;
@@ -914,6 +1043,7 @@ function DirectorResult({ analysis, headingRef, onShowExpert, onAddToManualParla
   const fixture = director.fixture || {};
   const sideComparison = director.side_comparison || analysis.marketSelection?.primary?.side_comparison || null;
   const marketAudit = analysis.marketSelection?.primary?.market_model_audit || null;
+  const primaryProbabilityDisplay = candidateProbabilityDisplay(analysis.marketSelection?.primary);
 
   return (
     <section className={`director-atlas-panel functional-director p2-director p2-simple-director p2-simple-director-${analysisDecision.status}`} aria-label="Dictamen del Director Atlas" aria-labelledby="director-atlas-title">
@@ -929,10 +1059,11 @@ function DirectorResult({ analysis, headingRef, onShowExpert, onAddToManualParla
       </section>
       <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(analysis.marketSelection?.primary?.sports_score) ? `${analysis.marketSelection.primary.sports_score}/100` : "No disponible"}</strong></p>
       <div className="p2-director-metrics" aria-label="Resumen del dictamen">
-        <span><small><MetricLabel label="Probabilidad estimada Atlas" /></small><strong>{Number.isFinite(analysis.marketSelection?.primary?.probability_percent) ? `${analysis.marketSelection.primary.probability_percent}%` : "No disponible"}</strong>{analysis.marketSelection?.primary?.probability_classification ? <small>{analysis.marketSelection.primary.probability_classification}</small> : null}</span>
+        <span><small><MetricLabel label={primaryProbabilityDisplay.label} /></small><strong>{primaryProbabilityDisplay.formatted}</strong>{primaryProbabilityDisplay.isLiteralProbability && analysis.marketSelection?.primary?.probability_classification ? <small>{analysis.marketSelection.primary.probability_classification}</small> : null}</span>
         <span><small>Precio</small><strong>{presentation.has_current_price ? `${price.bookmaker} @${price.decimal_odds}` : "Pendiente"}</strong></span>
         <span><small>Riesgo</small><strong>{simpleRisks.length ? "Con alertas" : "Sin alerta específica"}</strong></span>
       </div>
+      {!primaryProbabilityDisplay.isLiteralProbability ? <AsianSettlementBreakdown profile={analysis.marketSelection?.primary?.asian_settlement_profile} /> : null}
       <section aria-label="Radar de oportunidad">
         <RadarBadge radar={analysis.primaryMarketOpportunityRadar} />
         <p><small>El Radar aporta evidencia deportiva adicional y posible contraevidencia; no sustituye la decisión final de Atlas.</small></p>
@@ -941,7 +1072,8 @@ function DirectorResult({ analysis, headingRef, onShowExpert, onAddToManualParla
         decimalOdds={presentation.has_current_price ? price.decimal_odds : undefined}
         bookmaker={presentation.has_current_price ? price.bookmaker : undefined}
         impliedProbability={presentation.has_current_price ? price.implied_probability : undefined}
-        estimatedProbability={analysis.marketSelection?.primary?.estimated_probability}
+        candidate={analysis.marketSelection?.primary}
+        priceAssessment={price}
       />
       <SideComparisonReading sideComparison={sideComparison} oppositeMarket={director.opposite_market} conclusion={director.sports_price_conclusion} />
       <WhyAtlasReasoning candidate={analysis.marketSelection?.primary} marketLabel={director.market_evaluated?.label} />
@@ -968,7 +1100,10 @@ function DirectorResult({ analysis, headingRef, onShowExpert, onAddToManualParla
         return otherFamilies.length ? (
           <section aria-labelledby="director-other-families-title">
             <h3 id="director-other-families-title">Otras familias que Atlas comparó</h3>
-            <ul>{otherFamilies.map((item) => <li key={item.market_family}>{displaySelection(item.selection)} — {Number.isFinite(item.probability_percent) ? `${item.probability_percent}%` : "No disponible"} {item.probability_classification || ""}</li>)}</ul>
+            <ul>{otherFamilies.map((item) => {
+              const display = candidateProbabilityDisplay(item);
+              return <li key={item.market_family}>{displaySelection(item.selection)} — {display.formatted} {display.isLiteralProbability ? (item.probability_classification || "") : ""}</li>;
+            })}</ul>
           </section>
         ) : null;
       })()}
@@ -1130,13 +1265,19 @@ function ManualParlayPanel({ legs, onRemove, onSave, status }) {
     <section className="p2-stage-card p2-manual-parlay-panel" aria-labelledby="manual-parlay-title">
       <p className="eyebrow" id="manual-parlay-title">PARLAY MANUAL PENDIENTE ({legs.length}/4)</p>
       <ul>
-        {legs.map((leg, index) => (
-          <li key={`${leg.fixture_id}-${leg.market_family}`}>
-            <strong>{leg.home_team} vs {leg.away_team}</strong> — {displaySelection(leg.selection)}
-            <small> · {Number.isFinite(leg.preliminary_probability) ? `${(leg.preliminary_probability * 100).toFixed(1)}%` : "Probabilidad no disponible"} · Solidez {Number.isFinite(leg.sports_score) ? `${leg.sports_score}/100` : "No disponible"} · {leg.bookmaker ? `${leg.bookmaker} @${leg.decimal_odds}` : "Cuota no disponible"}</small>
-            <button type="button" className="secondary-button" onClick={() => onRemove(index)}>Quitar</button>
-          </li>
-        ))}
+        {legs.map((leg, index) => {
+          const isFavorability = isSettlementFavorabilitySource(leg);
+          const probabilityText = isFavorability
+            ? (Number.isFinite(leg.preliminary_probability) ? `Favorabilidad ${Math.round(leg.preliminary_probability * 100)}/100` : "Favorabilidad no disponible")
+            : (Number.isFinite(leg.preliminary_probability) ? `${(leg.preliminary_probability * 100).toFixed(1)}%` : "Probabilidad no disponible");
+          return (
+            <li key={`${leg.fixture_id}-${leg.market_family}`}>
+              <strong>{leg.home_team} vs {leg.away_team}</strong> — {displaySelection(leg.selection)}
+              <small> · {probabilityText} · Solidez {Number.isFinite(leg.sports_score) ? `${leg.sports_score}/100` : "No disponible"} · {leg.bookmaker ? `${leg.bookmaker} @${leg.decimal_odds}` : "Cuota no disponible"}</small>
+              <button type="button" className="secondary-button" onClick={() => onRemove(index)}>Quitar</button>
+            </li>
+          );
+        })}
       </ul>
       {!canSave ? <p><small>El Parlay manual necesita entre 2 y 4 selecciones para poder guardarse.</small></p> : null}
       <button type="button" className="primary-button" disabled={!canSave || status.status === "loading"} onClick={onSave}>
@@ -1189,7 +1330,12 @@ function ExpertResult({ analysis }) {
       <Accordion id="expert-director" title="Director Atlas y contratos internos" summary={displayStatus(director?.market_suitability)}>
         <DefinitionGrid entries={[
           ["Selección", displaySelection(director?.selection)],
-          ["Probabilidad", percentage(director.estimated_probability)],
+          (() => {
+            const isFavorability = isSettlementFavorabilitySource({ market_family: director?.market_evaluated?.family });
+            return isFavorability
+              ? ["Favorabilidad Atlas", Number.isFinite(director.estimated_probability) ? `${Math.round(director.estimated_probability * 100)}/100` : "No disponible"]
+              : ["Probabilidad", percentage(director.estimated_probability)];
+          })(),
           ["Intervalo", director.probability_status === "preliminary" ? `${percentage(director.probability_uncertainty_low)}–${percentage(director.probability_uncertainty_high)}` : "No disponible"],
           ["Aptitud individual", displayStatus(director?.individual_eligibility)],
           ["Elegibilidad para parlay", displayStatus(director?.parlay_eligibility)],
@@ -1832,11 +1978,12 @@ function InitialAnalysisResult({ analysis }) {
         <span>{analysis?.marketSelection?.exact_requested_line_unavailable ? "Línea exacta no disponible" : displaySelection(primary?.selection || director?.market_evaluated?.label)}</span>
       </div>
       <p className="p2-initial-probability">
-        <small><MetricLabel label="Probabilidad estimada Atlas" /></small>
-        <strong>{Number.isFinite(primary?.probability_percent) ? `${primary.probability_percent}%` : "No disponible"}</strong>
-        {primary?.probability_classification ? <span>{primary.probability_classification}</span> : null}
+        <small><MetricLabel label={candidateProbabilityDisplay(primary).label} /></small>
+        <strong>{candidateProbabilityDisplay(primary).formatted}</strong>
+        {candidateProbabilityDisplay(primary).isLiteralProbability && primary?.probability_classification ? <span>{primary.probability_classification}</span> : null}
       </p>
       <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(primary?.sports_score) ? `${primary.sports_score}/100` : "No disponible"}</strong></p>
+      {!candidateProbabilityDisplay(primary).isLiteralProbability ? <AsianSettlementBreakdown profile={primary?.asian_settlement_profile} /> : null}
       <SideComparisonReading sideComparison={director?.side_comparison} oppositeMarket={director?.opposite_market} conclusion={director?.sports_price_conclusion} />
       <WhyAtlasReasoning candidate={primary} marketLabel={director?.market_evaluated?.label} />
       <NumbersExplanation
@@ -1849,7 +1996,10 @@ function InitialAnalysisResult({ analysis }) {
       {otherFamilies.length ? (
         <section aria-labelledby="initial-other-families-title">
           <h3 id="initial-other-families-title">Otras familias que Atlas comparó</h3>
-          <ul>{otherFamilies.map((item) => <li key={item.market_family}>{displaySelection(item.selection)} — {Number.isFinite(item.probability_percent) ? `${item.probability_percent}%` : "No disponible"} {item.probability_classification || ""}</li>)}</ul>
+          <ul>{otherFamilies.map((item) => {
+            const display = candidateProbabilityDisplay(item);
+            return <li key={item.market_family}>{displaySelection(item.selection)} — {display.formatted} {display.isLiteralProbability ? (item.probability_classification || "") : ""}</li>;
+          })}</ul>
         </section>
       ) : null}
       {director?.price_assessment && director.price_assessment.status !== "unavailable" ? (
@@ -1951,7 +2101,12 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone, qu
       <RadarBadge radar={candidate.radarAnalysis} />
       {candidate.atlasRecommendation ? <p><strong>Motivo deportivo de inclusión:</strong> {candidate.atlasRecommendation.reason}<br /><small>{candidate.atlasRecommendation.frontier_note}</small><br /><small><MetricLabel label="Soporte" /> {candidate.atlasRecommendation.support}/100 · <MetricLabel label="Incertidumbre" /> {Number((candidate.atlasRecommendation.uncertainty_width * 100).toFixed(1))}%</small></p> : null}
       <p>{reason}</p>
-      <EconomicsPanel decimalOdds={exactQuote?.decimal_odds} bookmaker={exactQuote?.bookmaker_name} impliedProbability={exactQuote?.implied_probability} estimatedProbability={candidate.estimatedProbability} />
+      <EconomicsPanel
+        decimalOdds={exactQuote?.decimal_odds}
+        bookmaker={exactQuote?.bookmaker_name}
+        impliedProbability={exactQuote?.implied_probability}
+        candidate={{ estimated_probability: candidate.estimatedProbability, probability_percent: candidate.probabilityPercent, market_family: candidate.marketId || candidate.market }}
+      />
       <small>{formatDate(candidate.kickoff, candidate.timezone || timezone)}</small>
       <button type="button" className="primary-button" onClick={() => onOpen(candidate)}>Analizar esta opción</button>
     </article>
@@ -1975,9 +2130,10 @@ function ValueOpportunityCard({ opportunity, onOpen, timezone }) {
       <details>
         <summary>Ver detalle técnico</summary>
         <DefinitionGrid entries={[
-          ["Probabilidad Atlas", percentage(opportunity.estimated_probability)],
+          [candidateProbabilityDisplay(opportunity).label, candidateProbabilityDisplay(opportunity).formatted],
           ["Cuota ofrecida", opportunity.decimal_odds],
           ["Cuota justa Atlas", Number.isFinite(opportunity.fair_odds_atlas) ? opportunity.fair_odds_atlas.toFixed(4) : "No disponible"],
+          ...(asian ? [[<MetricLabel key="value-opportunity-price-equivalent-label" label="Probabilidad equivalente Atlas por precio" />, Number.isFinite(opportunity.price_equivalent_probability) ? percentage(opportunity.price_equivalent_probability) : "No disponible"]] : []),
           ["Probabilidad implícita", percentage(opportunity.implied_probability)],
           ["Raw edge", Number.isFinite(opportunity.raw_edge_pp) ? `${opportunity.raw_edge_pp.toFixed(2)} pp` : "No disponible"],
           ["Edge conservador", Number.isFinite(opportunity.conservative_edge_pp) ? `${opportunity.conservative_edge_pp.toFixed(2)} pp` : "No disponible"],
@@ -1985,7 +2141,7 @@ function ValueOpportunityCard({ opportunity, onOpen, timezone }) {
           ["SOLIDEZ ATLAS", Number.isFinite(opportunity.sports_score) ? `${opportunity.sports_score}/100` : "No disponible"],
           ["Identidad exacta", `${opportunity.fixture_id}:${opportunity.market_family}:${opportunity.direction}:${opportunity.line}`],
         ]} />
-        {opportunity.asian_settlement_profile ? <pre>{JSON.stringify(opportunity.asian_settlement_profile.probabilities, null, 2)}</pre> : null}
+        <AsianSettlementBreakdown profile={opportunity.asian_settlement_profile} />
         <p><strong>PP:</strong> Puntos porcentuales. 48% frente a 42% = 6 pp.</p>
         <p><strong>EDGE:</strong> Diferencia entre la probabilidad que Atlas estima y lo que exige el precio.</p>
         <p><strong>CUOTA JUSTA:</strong> Precio aproximadamente equilibrado según el riesgo que Atlas calcula.</p>
@@ -2979,7 +3135,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
                         <button type="button" className="secondary-button" onClick={() => chooseAlternativeAsExact(alt)} disabled={analysisState.status === "loading"}>
                           Usar {displaySelection(alt.selection)} como selección exacta
                         </button>
-                        <small> {Number.isFinite(alt.probability_percent) ? `${alt.probability_percent}%` : "No disponible"} {alt.probability_classification || ""} <em>(alternativa, no la línea pedida)</em></small>
+                        <small> {(() => { const display = candidateProbabilityDisplay(alt); return `${display.formatted} ${display.isLiteralProbability ? (alt.probability_classification || "") : ""}`; })()} <em>(alternativa, no la línea pedida)</em></small>
                       </li>
                     ))}
                   </ul>
