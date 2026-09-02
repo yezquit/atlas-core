@@ -1,4 +1,5 @@
 import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
+import { ASIAN_TOTAL_GOALS_FAMILY, settleAsianTotalGoals } from "./asianTotalGoals.js";
 
 export const CALIBRATION_MINIMUM_RESOLVED = 200;
 
@@ -9,7 +10,7 @@ function normalize(value) {
     .toLowerCase();
 }
 
-export function resultForLine({ selection, line, actualTotal } = {}) {
+export function resultForLine({ selection, line, actualTotal, market_family } = {}) {
   const numericLine = Number(String(line ?? selection ?? "").replace(",", ".").match(/-?\d+(?:\.\d+)?/)?.[0]);
   const actual = Number(actualTotal);
   const candidate = normalize(selection);
@@ -21,6 +22,19 @@ export function resultForLine({ selection, line, actualTotal } = {}) {
   if (!direction || !Number.isFinite(numericLine) || !Number.isFinite(actual)) {
     return { status: "unresolved", direction, exact_line: Number.isFinite(numericLine) ? numericLine : null, actual_total: Number.isFinite(actual) ? actual : null };
   }
+  if (market_family === ASIAN_TOTAL_GOALS_FAMILY) {
+    // Reutiliza el mismo settlement de 5 estados que ya usa
+    // resolveOfficialPrediction (officialPrediction.js) en vez de un umbral
+    // binario simple: full_win/half_win -> hit, push -> void, half_loss/
+    // full_loss -> miss. No introduce una métrica parcial de 0.5 — sigue
+    // siendo la misma reducción a hit/miss/void ya usada aquí.
+    const settlement = settleAsianTotalGoals({ totalGoals: actual, line: numericLine, direction });
+    const status = settlement.status === "not_evaluable" ? "unresolved"
+      : settlement.status === "push" ? "void"
+        : (settlement.status === "full_win" || settlement.status === "half_win") ? "hit"
+          : "miss";
+    return { status, direction, exact_line: numericLine, actual_total: actual };
+  }
   if (actual === numericLine) return { status: "void", direction, exact_line: numericLine, actual_total: actual };
   const hit = direction === "over" ? actual > numericLine : actual < numericLine;
   return { status: hit ? "hit" : "miss", direction, exact_line: numericLine, actual_total: actual };
@@ -28,16 +42,17 @@ export function resultForLine({ selection, line, actualTotal } = {}) {
 
 export function buildPredictionResult({ analysis, actualTotal = null, source = "manual_user_input", recordedAt = new Date().toISOString() } = {}) {
   if (!analysis?.analysis_id || !analysis?.fixture_id) throw new TypeError("El resultado requiere una versión de análisis existente.");
+  const marketFamily = analysis.director?.market_evaluated?.family || null;
   const outcome = actualTotal === null
     ? { status: "unresolved", direction: null, exact_line: Number(analysis.director?.line) || null, actual_total: null }
-    : resultForLine({ selection: analysis.director?.selection, line: analysis.director?.line, actualTotal });
+    : resultForLine({ selection: analysis.director?.selection, line: analysis.director?.line, actualTotal, market_family: marketFamily });
   return Object.freeze({
     contract: "PredictionResult",
     version: 1,
     analysis_id: analysis.analysis_id,
     fixture_id: analysis.fixture_id,
     competition: analysis.director?.fixture?.competition || null,
-    market_family: analysis.director?.market_evaluated?.family || null,
+    market_family: marketFamily,
     selection: analysis.director?.selection || null,
     line: analysis.director?.line ?? null,
     decimal_odds: analysis.director?.odds ?? null,
