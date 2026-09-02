@@ -2720,8 +2720,14 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
   function addToManualParlay(targetAnalysis, presentation) {
     const leg = buildManualParlayLeg(targetAnalysis, presentation);
     if (!leg) return { ok: false, message: "No se pudo preparar esta selección para el Parlay." };
-    const asianQuarter = leg.market_family === "asian_total_goals" && [0.25, 0.75].includes(((Number(leg.line) % 1) + 1) % 1);
-    if (asianQuarter) return { ok: false, message: "Las líneas asiáticas .25/.75 se registran únicamente como apuestas individuales en esta versión." };
+    // Ningún mercado asiático (Total de goles ni Hándicap por equipo) puede
+    // combinarse todavía en Parlay manual, en NINGUNA línea (entera, media o
+    // de cuarto) — el motor combinado no soporta settlement parcial de 5
+    // estados. Antes solo se bloqueaban las líneas .25/.75 de
+    // asian_total_goals, dejando pasar sus líneas enteras/medias y la
+    // familia team_asian_handicap completa.
+    const blockedAsianFamily = leg.market_family === "asian_total_goals" || leg.market_family === "team_asian_handicap";
+    if (blockedAsianFamily) return { ok: false, message: "Los mercados asiáticos (Total de goles y Hándicap por equipo) aún no se pueden combinar en Parlay; se registran únicamente como apuestas individuales en esta versión." };
     if (manualParlayLegs.length >= 4) return { ok: false, message: "El Parlay manual admite máximo 4 selecciones." };
     if (manualParlayLegs.some((item) => item.fixture_id === leg.fixture_id && item.market_family === leg.market_family)) {
       return { ok: false, message: "Ya existe una selección de este partido y esta familia en el Parlay." };

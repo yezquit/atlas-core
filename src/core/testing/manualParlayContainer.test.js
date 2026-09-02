@@ -194,11 +194,19 @@ test("8. el resultado del Parlay no modifica el resultado individual de cada pro
   assert.doesNotMatch(calibrationSource, /combination|parlay|dream/i);
 });
 
-test("9. una línea de cuarto asiática (.25/.75) queda explícitamente bloqueada del Parlay manual, no aproximada en silencio", async () => {
+// ACTUALIZADO: el bloqueo original solo cubría líneas de cuarto (.25/.75) de
+// asian_total_goals, dejando pasar sus líneas enteras/medias y toda la
+// familia team_asian_handicap — un hueco real (el motor combinado no
+// soporta settlement parcial de 5 estados para NINGUNA línea de estas
+// familias, no solo las de cuarto). Esta prueba protege el contrato
+// correcto: ambas familias asiáticas quedan bloqueadas del Parlay manual en
+// cualquier línea, con un mensaje explícito y comprensible.
+test("9. ningún mercado asiático (asian_total_goals ni team_asian_handicap), en ninguna línea, entra al Parlay manual — bloqueo explícito, no aproximado en silencio", async () => {
   const source = await readFile(clientPath, "utf8");
   const block = source.match(/function addToManualParlay[\s\S]*?\n  \}\n/)?.[0];
   assert.ok(block, "debe existir addToManualParlay");
   assert.match(block, /asian_total_goals/);
-  assert.match(block, /0\.25,\s*0\.75/);
+  assert.match(block, /team_asian_handicap/);
+  assert.doesNotMatch(block, /0\.25,\s*0\.75/, "el bloqueo ya no debe depender de si la línea es de cuarto");
   assert.match(block, /únicamente como apuestas individuales/);
 });

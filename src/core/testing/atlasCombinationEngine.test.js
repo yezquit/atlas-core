@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   COMBINATION_MODE,
   COMBINATION_PRODUCT,
+  addCombinationSelection,
   assessCombinationCorrelation,
   buildAtlasCombination,
   classifyCombinationSize,
@@ -11,6 +12,7 @@ import {
   inspectCombinationCandidate,
   mergeJourneyExplorations,
   removeCombinationSelection,
+  updateCombinationSelection,
   validateCombinationRequest,
 } from "../intelligence/atlasCombinationEngine.js";
 import { buildDreamParlays } from "../intelligence/dreamParlayEngine.js";
@@ -564,4 +566,204 @@ test("quitar una pata conserva exactamente el orden relativo restante", () => {
   assert.deepEqual(edited.selections.map((item) => item.selection_key), originalKeys.filter((_, index) => index !== 1));
   assert.equal(edited.mode, "automatic");
   assert.equal(edited.requested_selections, 4);
+});
+
+// ---------------------------------------------------------------------------
+// Política segura Asian: asian_total_goals y team_asian_handicap NUNCA deben
+// entrar en combinationCandidates/Parlay/Soñadora mientras el motor
+// combinado no soporte settlement parcial (5 estados). El servidor
+// (sportsIntelligenceService.js) ya filtra ambas familias antes de exponer
+// combinationCandidates, pero el motor de combinaciones en sí NO tenía
+// ningún guardia propio: un candidato asian_total_goals con
+// ranking_eligible=true (posible si algún caller futuro no pre-filtra, o si
+// el fallback journey.candidates de la UI se activa) se aceptaba como
+// elegible y podía entrar en una combinación automática, usando
+// estimated_probability (que para estas familias es Favorabilidad Atlas, no
+// una probabilidad literal) en el comparador económico. Estas pruebas fijan
+// el contrato correcto: bloqueo explícito y comprensible, con el mismo
+// patrón (sports_eligible=false + reasons) que ya usa el resto del motor.
+// ---------------------------------------------------------------------------
+
+function asianTotalGoalsCandidate(overrides = {}) {
+  return {
+    fixtureId: 5001, fixture: "Asian A vs Asian B", localCalendarDate: "2026-08-19",
+    marketId: "asian_total_goals", market: "asian_total_goals", direction: "over", line: 2.25,
+    selection: "Over 2.25", sportsScore: 95, probability: 0.6, uncertaintyLow: 0.48, uncertaintyHigh: 0.72,
+    sampleSize: 24, generalRank: 1, familyRank: 1, status: "sports_candidate_pending_price",
+    ranking_eligible: true, estimated_probability: 0.55, probability_semantics: "settlement_favorability",
+    active_quote: null, price_status: "favorable_preliminary",
+    ...overrides,
+  };
+}
+
+function teamAsianHandicapCandidate(overrides = {}) {
+  return {
+    fixtureId: 5002, fixture: "Team AH A vs Team AH B", localCalendarDate: "2026-08-19",
+    marketId: "team_asian_handicap", market: "team_asian_handicap", direction: "home", side: "home", team_id: 10, line: -0.75,
+    selection: "Local -0.75", sportsScore: 92, probability: 0.55, uncertaintyLow: 0.4, uncertaintyHigh: 0.68,
+    sampleSize: 24, generalRank: 1, familyRank: 1, status: "sports_candidate_pending_price",
+    ranking_eligible: true, estimated_probability: 0.5, probability_semantics: "settlement_favorability",
+    active_quote: null, price_status: "favorable_preliminary",
+    ...overrides,
+  };
+}
+
+test("asian_total_goals nunca es elegible para combinaciones, aunque ranking_eligible sea true", () => {
+  const inspection = inspectCombinationCandidate(asianTotalGoalsCandidate());
+  assert.equal(inspection.sports_eligible, false);
+  assert.ok(inspection.reasons.some((reason) => reason.includes("asian")), `reasons debería explicar el bloqueo: ${inspection.reasons.join(", ")}`);
+});
+
+test("team_asian_handicap nunca es elegible para combinaciones, aunque ranking_eligible sea true", () => {
+  const inspection = inspectCombinationCandidate(teamAsianHandicapCandidate());
+  assert.equal(inspection.sports_eligible, false);
+  assert.ok(inspection.reasons.some((reason) => reason.includes("asian")), `reasons debería explicar el bloqueo: ${inspection.reasons.join(", ")}`);
+});
+
+test("intentar añadir manualmente una pierna asian_total_goals a una combinación existente se bloquea", () => {
+  const base = buildAtlasCombination({ candidates: [candidate(1), candidate(2)], product: "parlay", mode: "automatic", selections: 2 });
+  assert.equal(base.status, "ready");
+  const withAsian = addCombinationSelection(base, asianTotalGoalsCandidate());
+  assert.equal(withAsian.selections.length, 2, "la pierna Asian no debe agregarse");
+  assert.deepEqual(withAsian.selections.map((item) => item.selection_key), base.selections.map((item) => item.selection_key));
+});
+
+test("intentar añadir manualmente una pierna team_asian_handicap a una combinación existente se bloquea", () => {
+  const base = buildAtlasCombination({ candidates: [candidate(1), candidate(2)], product: "parlay", mode: "automatic", selections: 2 });
+  const withTeamAh = addCombinationSelection(base, teamAsianHandicapCandidate());
+  assert.equal(withTeamAh.selections.length, 2, "la pierna Team AH no debe agregarse");
+});
+
+test("updateCombinationSelection nunca deja entrar una pierna Asian: exige sports_eligible incluso al reemplazar por identidad coincidente", () => {
+  // updateCombinationSelection solo actúa cuando la clave de selección del
+  // candidato ENTRANTE coincide con una pierna ya presente en la
+  // combinación. Como la clave incluye market_family, un candidato Asian
+  // nunca puede coincidir con la clave de una pierna clásica ya elegida —
+  // así que la única forma realista de ejercitar el guardia de elegibilidad
+  // aquí es que la propia pierna objetivo YA sea de esa familia. Se
+  // construye ese escenario de forma sintética (bypassando
+  // addCombinationSelection, que ya lo impediría en producción) para
+  // verificar que updateCombinationSelection también exige sports_eligible
+  // por sí mismo, no solo por delegación.
+  const asianLeg = inspectCombinationCandidate(asianTotalGoalsCandidate()).candidate;
+  const syntheticCombination = { product: "parlay", mode: "automatic", requested_selections: 2, selections: [asianLeg, candidate(1)] };
+  const stillAsian = updateCombinationSelection(syntheticCombination, asianTotalGoalsCandidate({ sportsScore: 99 }));
+  assert.deepEqual(stillAsian, syntheticCombination, "sin cambios: el guardia de elegibilidad debe rechazar la actualización");
+});
+
+test("automático nunca incluye asian_total_goals ni team_asian_handicap aunque sean el mejor score disponible", () => {
+  const result = buildAtlasCombination({
+    candidates: [asianTotalGoalsCandidate(), teamAsianHandicapCandidate(), candidate(1), candidate(2), candidate(3)],
+    product: "parlay",
+    mode: "automatic",
+    selections: 3,
+  });
+  assert.equal(result.status, "ready");
+  assert.ok(result.selections.every((item) => item.market_family !== "asian_total_goals" && item.market_family !== "team_asian_handicap"));
+  assert.equal(result.selections.length, 3);
+});
+
+test("modo manual con una clave Asian fijada nunca produce una combinación lista (Asian no tiene selection_key válido en el motor)", () => {
+  const asian = asianTotalGoalsCandidate();
+  const classics = [candidate(1), candidate(2)];
+  // asian_total_goals sí produce un selection_key sintácticamente válido
+  // (direction=over/under es real ahí), a diferencia de team_asian_handicap
+  // — por eso es el caso más peligroso de probar en modo manual/mixto.
+  const asianKey = combinationSelectionKey(asian);
+  assert.ok(asianKey, "el key sintáctico de asian_total_goals existe (esto es lo que hace peligroso no bloquearlo explícitamente)");
+  const manual = buildAtlasCombination({
+    candidates: [asian, ...classics],
+    product: "parlay",
+    mode: "manual",
+    selections: 2,
+    selectedKeys: [asianKey, combinationSelectionKey(classics[0])],
+  });
+  assert.equal(manual.status, "insufficient_candidates");
+  assert.ok(!manual.selections.some((item) => item.market_family === "asian_total_goals"));
+});
+
+test("Soñadora automática excluye Asian y sigue completando con clásicos diversos", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      asianTotalGoalsCandidate(),
+      teamAsianHandicapCandidate(),
+      candidate(1, { marketId: "goals" }),
+      candidate(2, { marketId: "corners", line: 8.5 }),
+      candidate(3, { marketId: "cards", line: 3.5 }),
+      candidate(4, { marketId: "total_shots", line: 24.5 }),
+      candidate(5, { marketId: "shots_on_goal", line: 9.5 }),
+    ],
+    product: "dream",
+    mode: "automatic",
+    selections: 5,
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.selections.length, 5);
+  assert.ok(result.selections.every((item) => item.market_family !== "asian_total_goals" && item.market_family !== "team_asian_handicap"));
+});
+
+// ---------------------------------------------------------------------------
+// Regresión explícita del bug histórico "solo goles": con candidatos
+// elegibles reales de las 5 familias clásicas, ni Parlay ni Soñadora deben
+// sesgarse artificialmente a goals cuando hay alternativas de soporte
+// comparable en otras familias.
+// ---------------------------------------------------------------------------
+
+test("regresión: Parlay de 4 con candidatos de las 5 familias clásicas no colapsa en solo goles", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { fixtureId: 201, marketId: "goals", sportsScore: 88, estimated_probability: 0.62 }),
+      candidate(2, { fixtureId: 202, marketId: "corners", line: 8.5, sportsScore: 87, estimated_probability: 0.61 }),
+      candidate(3, { fixtureId: 203, marketId: "cards", line: 3.5, sportsScore: 86, estimated_probability: 0.6 }),
+      candidate(4, { fixtureId: 204, marketId: "total_shots", line: 24.5, sportsScore: 85, estimated_probability: 0.59 }),
+      candidate(5, { fixtureId: 205, marketId: "shots_on_goal", line: 9.5, sportsScore: 84, estimated_probability: 0.58 }),
+    ],
+    product: "parlay",
+    mode: "automatic",
+    selections: 4,
+  });
+  assert.equal(result.status, "ready");
+  const families = new Set(result.selections.map((item) => item.market_family));
+  assert.ok(families.size > 1, `no debe colapsar en una sola familia: ${[...families].join(", ")}`);
+  assert.ok(!result.selections.every((item) => item.market_family === "goals"), "no debe ser exclusivamente goals cuando hay alternativas comparables");
+});
+
+test("regresión: Soñadora de 5 con candidatos de las 5 familias clásicas produce diversidad real, no solo goles", () => {
+  const result = buildAtlasCombination({
+    candidates: [
+      candidate(1, { fixtureId: 301, marketId: "goals", sportsScore: 88, estimated_probability: 0.62 }),
+      candidate(2, { fixtureId: 302, marketId: "corners", line: 8.5, sportsScore: 87, estimated_probability: 0.61 }),
+      candidate(3, { fixtureId: 303, marketId: "cards", line: 3.5, sportsScore: 86, estimated_probability: 0.6 }),
+      candidate(4, { fixtureId: 304, marketId: "total_shots", line: 24.5, sportsScore: 85, estimated_probability: 0.59 }),
+      candidate(5, { fixtureId: 305, marketId: "shots_on_goal", line: 9.5, sportsScore: 84, estimated_probability: 0.58 }),
+    ],
+    product: "dream",
+    mode: "automatic",
+    selections: 5,
+  });
+  assert.equal(result.status, "ready");
+  const families = new Set(result.selections.map((item) => item.market_family));
+  assert.equal(families.size, 5, "con exactamente un candidato elegible por familia, las 5 deben usarse");
+});
+
+// ---------------------------------------------------------------------------
+// Disponibilidad honesta: sin candidatos elegibles suficientes, Atlas nunca
+// completa con opciones débiles/inventadas.
+// ---------------------------------------------------------------------------
+
+test("Soñadora con menos de 5 candidatos elegibles no inventa una combinación", () => {
+  const result = buildAtlasCombination({ candidates: [candidate(1), candidate(2), candidate(3)], product: "dream", mode: "automatic", selections: 5 });
+  assert.equal(result.status, "insufficient_candidates");
+  assert.equal(result.selections.length, 3);
+});
+
+test("Soñadora con solo candidatos Asian elegibles (ninguno clásico) no inventa una combinación", () => {
+  const result = buildAtlasCombination({
+    candidates: [asianTotalGoalsCandidate({ fixtureId: 401 }), asianTotalGoalsCandidate({ fixtureId: 402 }), teamAsianHandicapCandidate({ fixtureId: 403 }), teamAsianHandicapCandidate({ fixtureId: 404 }), asianTotalGoalsCandidate({ fixtureId: 405 })],
+    product: "dream",
+    mode: "automatic",
+    selections: 5,
+  });
+  assert.equal(result.status, "insufficient_candidates");
+  assert.equal(result.selections.length, 0);
 });

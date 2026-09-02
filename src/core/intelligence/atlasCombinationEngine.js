@@ -1,6 +1,7 @@
 import { combinedDecimalOdds } from "./parlayPolicy.js";
 import { buildDirectorCombinationMessage } from "./directorParlayIntegration.js";
 import { buildDecisionFrontier } from "./decisionFrontier.js";
+import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
 
 export const COMBINATION_PRODUCT = Object.freeze({
   PARLAY: "parlay",
@@ -159,6 +160,23 @@ export function inspectCombinationCandidate(candidate = {}) {
   const price = economicPriceAssessment(candidate, quote);
   const reasons = [];
 
+  // asian_total_goals y team_asian_handicap NUNCA son elegibles para
+  // combinaciones mientras el motor combinado no soporte settlement parcial
+  // (5 estados: full_win/half_win/push/half_loss/full_loss). team_asian_handicap
+  // ya queda excluido indirectamente (su direction=home|away nunca produce un
+  // selection_key válido), pero asian_total_goals SÍ produce uno sintácticamente
+  // válido (direction=over/under real) — sin este guardia explícito quedaría
+  // elegible si algún caller no pre-filtra settlement_favorability (el
+  // servidor ya lo hace para combinationCandidates, pero este motor no debe
+  // depender solo de eso). Reutiliza el mismo predicado central que ya usa
+  // el resto de Atlas (probabilityClassification.js) — nunca reinterpreta
+  // sports_favorability como probability aquí.
+  if (isSettlementFavorabilityCandidate({
+    market_family: candidate.market_family ?? candidate.marketId ?? candidate.market,
+    probability_semantics: candidate.probability_semantics ?? candidate.probabilitySemantics,
+  })) {
+    reasons.push("asian_settlement_not_supported_in_combinations");
+  }
   if (!key) reasons.push("invalid_identity");
   if (!rankingEligible) reasons.push(status ? `sports_status_${status}` : "sports_not_ranking_eligible");
 
