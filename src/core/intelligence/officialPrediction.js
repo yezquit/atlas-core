@@ -5,6 +5,7 @@ import {
   belongsToPersonalOwner,
 } from "../auth/personalIdentity.js";
 import { ASIAN_TOTAL_GOALS_FAMILY, settleAsianTotalGoals } from "./asianTotalGoals.js";
+import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
 
 export const OFFICIAL_PREDICTION_STATUS = Object.freeze({
   PENDING: "pending",
@@ -430,9 +431,13 @@ export function calculateOfficialPredictionCalibration(predictions = [], filters
     }));
   const base = calculateCalibration(records);
   const bands = base.bands.map((band) => {
+    // Mismo criterio de exclusión que calculateCalibration/summary
+    // (resultCalibration.js): sin esto, average_predicted_probability
+    // quedaría calculado sobre un conjunto distinto (sin excluir Favorabilidad
+    // Atlas) que el hit_rate/brier_score ya excluidos de `base`.
     const sourceBand = records.filter((item) => {
       const match = band.label.match(/(\d+).+?(\d+)/);
-      if (!match || !Number.isFinite(item.preliminary_probability)) return false;
+      if (!match || !Number.isFinite(item.preliminary_probability) || isSettlementFavorabilityCandidate(item)) return false;
       return item.preliminary_probability >= Number(match[1]) / 100 && item.preliminary_probability <= (Number(match[2]) + 0.999) / 100;
     });
     const average = sourceBand.length

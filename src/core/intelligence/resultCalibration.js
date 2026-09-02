@@ -1,3 +1,5 @@
+import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
+
 export const CALIBRATION_MINIMUM_RESOLVED = 200;
 
 function normalize(value) {
@@ -58,7 +60,15 @@ function group(records, key) {
 }
 
 function summary(records, includeGroups = true) {
-  const resolved = records.filter((item) => ["hit", "miss"].includes(item.outcome) && Number.isFinite(item.preliminary_probability));
+  // preliminary_probability puede representar Favorabilidad Atlas
+  // (settlement_favorability, p.ej. asian_total_goals) en vez de una
+  // probabilidad literal calibrable. Ese valor pondera full/half win/push/
+  // half/full loss de forma distinta a como este módulo reduce el mismo
+  // settlement a hit/miss — comparar ambos en un Brier/hit-rate Bernoulli
+  // produciría una lectura estadísticamente inválida. Se excluye del
+  // agregado clásico sin borrar el registro del dataset bruto (prediction_count
+  // lo sigue contando) ni alterar su resolution/outcome histórico.
+  const resolved = records.filter((item) => ["hit", "miss"].includes(item.outcome) && Number.isFinite(item.preliminary_probability) && !isSettlementFavorabilityCandidate(item));
   const hits = resolved.filter((item) => item.outcome === "hit").length;
   const brier = resolved.length
     ? resolved.reduce((sum, item) => sum + (item.preliminary_probability - (item.outcome === "hit" ? 1 : 0)) ** 2, 0) / resolved.length
