@@ -188,10 +188,14 @@ function isIneligibleForRanking(overallStatusValue) {
 // para settlement asiático es Favorabilidad Atlas. Nunca se usa en economía
 // ni para comparar ambos grupos entre sí.
 function sportsAttractiveness(candidate) {
-  const raw = isSettlementFavorabilityCandidate(candidate)
-    ? candidate.sports_favorability ?? candidate.estimated_probability ?? candidate.preliminary_probability
-    : candidate.estimated_probability ?? candidate.preliminary_probability;
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : -1;
+  if (!isSettlementFavorabilityCandidate(candidate)) {
+    return isValidProbability(candidate.estimated_probability) ? candidate.estimated_probability : -1;
+  }
+  if (candidate.sports_favorability !== null && candidate.sports_favorability !== undefined) {
+    return isValidProbability(candidate.sports_favorability) ? candidate.sports_favorability : -1;
+  }
+  if (isValidProbability(candidate.estimated_probability)) return candidate.estimated_probability;
+  return isValidProbability(candidate.preliminary_probability) ? candidate.preliminary_probability : -1;
 }
 
 function compareCandidatesWithinSemantics(left, right) {

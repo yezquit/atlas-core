@@ -2080,23 +2080,41 @@ function JourneyCandidateCard({ candidate, primary = false, onOpen, timezone, qu
   const reason = fixtureEvidence?.reasons?.[0] || candidate.whyMarketWon?.replaceAll("sports_score", "análisis deportivo") || "Atlas encontró señales deportivas relevantes para revisar esta opción.";
   const operation = findFixtureQuoteEntry(quoteLedgers?.[String(candidate.fixtureId)], candidate);
   const exactQuote = operation?.quote_state === "current" ? operation.active_quote : null;
+  const probabilityDisplay = candidateProbabilityDisplay({
+    market_family: candidate.marketId || candidate.market,
+    probability_semantics: candidate.probabilitySemantics,
+    sports_favorability: candidate.sportsFavorability,
+    estimated_probability: candidate.estimatedProbability,
+    preliminary_probability: candidate.probability,
+    probability_percent: candidate.probabilityPercent,
+  });
   return (
     <article className="p2-candidate-card p2-simple-candidate-card">
       <p className="eyebrow">{candidate.competition}</p>
       <p className="p2-simple-preselection">Opciones encontradas por Atlas</p>
-      {primary ? <span className="p2-chip p2-chip-candidate">Mejor opción inicial</span> : null}
+      {primary ? <span className="p2-chip p2-chip-candidate">{probabilityDisplay.isLiteralProbability ? "Mejor opción inicial" : "Mayor Favorabilidad Atlas"}</span> : null}
       <h3>{candidate.fixture}</h3>
       <p className="p2-simple-selection"><strong>{displaySelection(candidate.selection)}</strong><span>{displayMarket(candidate.marketId || candidate.market)} · línea {candidate.line}</span></p>
       <p className="p2-solidez-atlas"><small><MetricLabel label="SOLIDEZ ATLAS" /></small> <strong>{Number.isFinite(candidate.sportsScore) ? `${candidate.sportsScore}/100` : "No disponible"}</strong></p>
       <p className="p2-simple-probability">
-        <small><MetricLabel label="PROBABILIDAD ESTIMADA" /></small>
-        {Number.isFinite(candidate.probabilityPercent) ? (
+        {probabilityDisplay.isLiteralProbability ? (
           <>
-            <strong>{candidate.probabilityPercent}%</strong>
-            <span>{candidate.probabilityClassification}</span>
+            <small><MetricLabel label="PROBABILIDAD ESTIMADA" /></small>
+            {Number.isFinite(candidate.probabilityPercent) ? (
+              <>
+                <strong>{candidate.probabilityPercent}%</strong>
+                <span>{candidate.probabilityClassification}</span>
+              </>
+            ) : (
+              <span>Probabilidad no disponible</span>
+            )}
           </>
         ) : (
-          <span>Probabilidad no disponible</span>
+          <>
+            <small><MetricLabel label={probabilityDisplay.label} /></small>
+            <strong>{probabilityDisplay.formatted}</strong>
+            <span>Qué tan atractiva ve Atlas esta línea deportivamente.</span>
+          </>
         )}
       </p>
       <RadarBadge radar={candidate.radarAnalysis} />
@@ -2997,6 +3015,15 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
               <div className="p2-candidate-grid">
                 {(journey.recommendedCandidates || []).map((candidate, index) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} primary={index === 0} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}
               </div>
+              {(journey.asianRecommendedCandidates || []).length ? (
+                <section className="p2-asian-journey-section" aria-labelledby="journey-asian-title">
+                  <h3 id="journey-asian-title">OPCIONES ASIAN TOTAL</h3>
+                  <p>Ordenadas por Favorabilidad Atlas y Solidez. Esta shortlist es independiente del ranking probabilístico de las recomendaciones clásicas.</p>
+                  <div className="p2-candidate-grid">
+                    {(journey.asianRecommendedCandidates || []).map((candidate, index) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} primary={index === 0} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}
+                  </div>
+                </section>
+              ) : null}
               <details className="p2-source-details"><summary>OTRAS OPCIONES ANALIZADAS — {Math.max(0, (journey.candidates || []).length - (journey.recommendedCandidates || []).length)}</summary><div className="p2-candidate-grid">{(journey.candidates || []).filter((candidate) => !(journey.recommendedCandidates || []).some((recommended) => recommended.fixtureId === candidate.fixtureId && recommended.marketId === candidate.marketId && recommended.direction === candidate.direction && recommended.line === candidate.line)).map((candidate) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}</div></details>
              <JourneyMatchesReviewed journey={journey} />
              <JourneyTechnicalDetails journey={journey} quoteLedgers={fixtureQuoteLedgers} operationalRanking={journeyOperationalRanking} quoteCoverage={journeyQuoteCoverage} technicalLabel="Respaldo deportivo" />
