@@ -1,4 +1,12 @@
 import { wilsonInterval } from "./preliminaryMarketModel.js";
+import {
+  combineSettlementParts,
+  settlementExpectedValue,
+  settlementFairOdds,
+  settlementFavorability,
+  settlementPriceEquivalentProbability,
+  splitQuarterStepLine,
+} from "./settlementMath.js";
 
 export const ASIAN_TOTAL_GOALS_FAMILY = "asian_total_goals";
 export const ASIAN_TOTAL_GOALS_LABEL = "Asiático (Más/Menos) — Total de goles";
@@ -13,17 +21,19 @@ function validDirection(direction) {
   return ["over", "under"].includes(String(direction || "").toLowerCase());
 }
 
+// Composición delgada sobre splitQuarterStepLine (settlementMath.js): esta
+// familia añade la validación de no-negatividad y el empaquetado con
+// direction/stake_fraction que le son propios; la aritmética de partición en
+// sí (misma para cualquier familia con líneas de cuarto) vive en el helper
+// genérico y no se duplica aquí.
 export function splitAsianTotalLine(line, direction) {
   const numericLine = Number(line);
   const normalizedDirection = String(direction || "").toLowerCase();
   if (!Number.isFinite(numericLine) || numericLine < 0 || !validDirection(normalizedDirection)) return null;
-  const quarter = Math.round(numericLine * 4);
-  if (Math.abs(numericLine * 4 - quarter) > 1e-8) return null;
-  const normalizedLine = quarter / 4;
-  const fraction = ((quarter % 4) + 4) % 4;
-  if (fraction === 1) return [normalizedLine - 0.25, normalizedLine + 0.25].map((partLine) => ({ direction: normalizedDirection, line: partLine, stake_fraction: 0.5 }));
-  if (fraction === 3) return [normalizedLine - 0.25, normalizedLine + 0.25].map((partLine) => ({ direction: normalizedDirection, line: partLine, stake_fraction: 0.5 }));
-  return [{ direction: normalizedDirection, line: normalizedLine, stake_fraction: 1 }];
+  const halves = splitQuarterStepLine(numericLine);
+  if (!halves) return null;
+  const stakeFraction = halves.length === 2 ? 0.5 : 1;
+  return halves.map((partLine) => ({ direction: normalizedDirection, line: partLine, stake_fraction: stakeFraction }));
 }
 
 // Contrato de línea válida para asian_total_goals: cualquier número finito,
@@ -49,13 +59,7 @@ export function settleAsianTotalGoals({ totalGoals, line, direction } = {}) {
   const parts = splitAsianTotalLine(line, direction);
   if (!Number.isFinite(total) || !parts) return { status: "not_evaluable", parts: [] };
   const settledParts = parts.map((part) => ({ ...part, result: settlePart(total, part) }));
-  const wins = settledParts.filter((part) => part.result === "win").reduce((sum, part) => sum + part.stake_fraction, 0);
-  const losses = settledParts.filter((part) => part.result === "loss").reduce((sum, part) => sum + part.stake_fraction, 0);
-  const status = wins === 1 ? "full_win"
-    : losses === 1 ? "full_loss"
-      : wins === 0.5 ? "half_win"
-        : losses === 0.5 ? "half_loss"
-          : "push";
+  const status = combineSettlementParts(settledParts);
   return { status, parts: settledParts };
 }
 
@@ -109,11 +113,7 @@ const MIN_EFFECTIVE_SAMPLE_FOR_INTERVAL = 2;
  * exactamente a P(full_win) cuando el mercado solo tiene full_win/full_loss.
  */
 export function asianSportsFavorability(probabilities = {}) {
-  const fullWin = Number(probabilities.full_win) || 0;
-  const halfWin = Number(probabilities.half_win) || 0;
-  const push = Number(probabilities.push) || 0;
-  const halfLoss = Number(probabilities.half_loss) || 0;
-  return fullWin + 0.75 * halfWin + 0.5 * push + 0.25 * halfLoss;
+  return settlementFavorability(probabilities);
 }
 
 // Incertidumbre de Favorabilidad Atlas: aproximación normal para la media
@@ -158,10 +158,7 @@ const MIN_DECISIVE_SAMPLE_FOR_INTERVAL = 2;
  * mercado sobre la MISMA selección y línea exactas.
  */
 export function asianPriceEquivalentProbability({ weighted_win_probability, weighted_loss_probability } = {}) {
-  const w = Number(weighted_win_probability);
-  const l = Number(weighted_loss_probability);
-  if (!Number.isFinite(w) || !Number.isFinite(l) || w + l <= 0) return null;
-  return w / (w + l);
+  return settlementPriceEquivalentProbability({ weighted_win_probability, weighted_loss_probability });
 }
 
 // Intervalo aproximado de Probabilidad equivalente de precio — NO un
@@ -269,16 +266,11 @@ export function buildAsianSettlementProfile({ canonicalObservations, line, direc
 }
 
 export function asianExpectedValue(profile, decimalOdds) {
-  const odds = Number(decimalOdds);
-  const p = profile?.probabilities;
-  if (!p || !Number.isFinite(odds) || odds <= 1) return null;
-  return round(p.full_win * (odds - 1) + p.half_win * (odds - 1) / 2 - p.half_loss * 0.5 - p.full_loss);
+  return settlementExpectedValue(profile, decimalOdds);
 }
 
 export function asianFairOdds(profile) {
-  const weightedWin = Number(profile?.weighted_win_probability);
-  const weightedLoss = Number(profile?.weighted_loss_probability);
-  return weightedWin > 0 && Number.isFinite(weightedLoss) ? round(1 + weightedLoss / weightedWin) : null;
+  return settlementFairOdds(profile);
 }
 
 export function asianPayoutForStake({ outcome, stake, decimalOdds } = {}) {
