@@ -1,3 +1,6 @@
+import { asianExpectedValue } from "./asianTotalGoals.js";
+import { isSettlementFavorabilityCandidate } from "./probabilityClassification.js";
+
 // Decision Frontier V3 is a selection layer, not a predictive model. It
 // keeps the complete sports catalogue intact and explains why one supported
 // line is more useful operationally than another line from the same family.
@@ -37,19 +40,35 @@ function sameExactQuote(candidate, quote) {
 
 export function calculateDecisionEconomics(candidate = {}) {
   const quote = candidate.price_quote ?? candidate.active_quote ?? candidate.activeQuote ?? null;
-  const probability = number(candidate.estimated_probability ?? candidate.preliminary_probability);
   const odds = number(quote?.decimal_odds ?? quote?.decimalOdds ?? candidate.decimal_odds);
   const current = CURRENT_PRICE_STATUSES.has(candidate.price_status ?? candidate.priceStatus)
     || candidate.price_usable === true;
+  // sports_favorability/estimated_probability para settlement_favorability
+  // (asian_total_goals) es un atractivo deportivo, no una probabilidad
+  // literal comparable contra implied_probability (ver ATLAS_DECISIONS_LOG.md,
+  // decisión 62). La magnitud económica correcta ya está calculada en el
+  // perfil de settlement adjunto al candidato: price_equivalent_probability.
+  // Sin fallback a Favorabilidad si esa magnitud no está disponible — la
+  // economía queda "unavailable", nunca un edge fabricado.
+  const settlementFavorability = isSettlementFavorabilityCandidate(candidate);
+  const probability = settlementFavorability
+    ? number(candidate.asian_settlement_profile?.price_equivalent_probability)
+    : number(candidate.estimated_probability ?? candidate.preliminary_probability);
   if (!current || !sameExactQuote(candidate, quote) || probability === null || odds === null || odds <= 1) {
     return { status: "unavailable", implied_probability: null, edge: null, expected_value: null, quote_exact: false };
   }
   const implied = 1 / odds;
+  // EV asiático respeta el settlement completo (full/half win, push,
+  // half/full loss) en vez de la fórmula binaria `probability*odds-1`, que no
+  // es válida cuando existe masa de settlement parcial (ver asianTotalGoals.js).
+  const expectedValue = settlementFavorability
+    ? asianExpectedValue(candidate.asian_settlement_profile, odds)
+    : probability * odds - 1;
   return {
     status: "available",
     implied_probability: round(implied, 4),
     edge: round(probability - implied, 4),
-    expected_value: round(probability * odds - 1, 4),
+    expected_value: Number.isFinite(expectedValue) ? round(expectedValue, 4) : null,
     quote_exact: true,
   };
 }
