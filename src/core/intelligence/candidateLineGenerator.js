@@ -2,7 +2,11 @@ import { estimatePreliminaryMarketProbability } from "./preliminaryMarketModel.j
 import { contextShiftForMarket } from "./geminiImpactMapper.js";
 import { buildCanonicalObservations } from "./canonicalObservations.js";
 import { buildMarketComponents } from "./marketComponentAdapter.js";
-import { ASIAN_TOTAL_GOALS_FAMILY, buildAsianSettlementProfile } from "./asianTotalGoals.js";
+import {
+  ASIAN_TOTAL_GOALS_FAMILY,
+  buildAsianSettlementProfile,
+  generateAsianTotalGoalLines,
+} from "./asianTotalGoals.js";
 import {
   ESTIMATED_PROBABILITY_REPRESENTS,
   classifyProbability,
@@ -195,6 +199,36 @@ export function isValidCandidateLine(marketFamily, line, distribution = null, { 
 }
 
 export function generateCandidateLines(input = {}) {
+  if (input.marketFamily === ASIAN_TOTAL_GOALS_FAMILY) {
+    const sportsContext = {
+      leagueProfile: input.leagueProfile,
+      homeTeamProfile: input.homeTeamProfile,
+      awayTeamProfile: input.awayTeamProfile,
+      refereeProfile: input.refereeProfile,
+      contextItems: input.contextItems || [],
+      contextImpacts: input.contextImpacts || [],
+    };
+    const distribution = buildAsianTotalGoalDistribution(sportsContext);
+    if (!distribution) {
+      return { market_family: input.marketFamily, distribution: null, candidates: [], reason: "insufficient_distribution_data" };
+    }
+    const lines = generateAsianTotalGoalLines(distribution);
+    const candidates = lines.flatMap((line) => ["over", "under"].flatMap((direction) => {
+      const exact = evaluateExactMarketLine({
+        marketFamily: ASIAN_TOTAL_GOALS_FAMILY,
+        direction,
+        line,
+        ...sportsContext,
+      });
+      return exact.candidate ? [exact.candidate] : [];
+    }));
+    return {
+      market_family: input.marketFamily,
+      distribution: { ...distribution, market_family: input.marketFamily },
+      candidates,
+      reason: candidates.length ? null : "insufficient_compatible_samples",
+    };
+  }
   const distribution = buildMarketDistribution(input);
   if (!distribution) return { market_family: input.marketFamily, distribution: null, candidates: [], reason: "insufficient_distribution_data" };
   const requestedLine = Number(input.exactLine);

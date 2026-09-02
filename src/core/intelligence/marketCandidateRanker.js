@@ -183,9 +183,64 @@ function isIneligibleForRanking(overallStatusValue) {
     || overallStatusValue === OVERALL_STATUS.INSUFFICIENT;
 }
 
+// Magnitud monotónica usada exclusivamente para ordenar candidatos que ya
+// comparten la misma semántica deportiva. Para clásicos es probabilidad;
+// para settlement asiático es Favorabilidad Atlas. Nunca se usa en economía
+// ni para comparar ambos grupos entre sí.
+function sportsAttractiveness(candidate) {
+  const raw = isSettlementFavorabilityCandidate(candidate)
+    ? candidate.sports_favorability ?? candidate.estimated_probability ?? candidate.preliminary_probability
+    : candidate.estimated_probability ?? candidate.preliminary_probability;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : -1;
+}
+
+function compareCandidatesWithinSemantics(left, right) {
+  const leftIneligible = isIneligibleForRanking(left.overall_status) ? 1 : 0;
+  const rightIneligible = isIneligibleForRanking(right.overall_status) ? 1 : 0;
+  if (leftIneligible !== rightIneligible) return leftIneligible - rightIneligible;
+
+  const attractivenessDifference = sportsAttractiveness(right) - sportsAttractiveness(left);
+  if (attractivenessDifference) return attractivenessDifference;
+
+  const leftWidth = Number.isFinite(left.uncertainty_high) && Number.isFinite(left.uncertainty_low)
+    ? left.uncertainty_high - left.uncertainty_low : Infinity;
+  const rightWidth = Number.isFinite(right.uncertainty_high) && Number.isFinite(right.uncertainty_low)
+    ? right.uncertainty_high - right.uncertainty_low : Infinity;
+  if (leftWidth !== rightWidth) return leftWidth - rightWidth;
+
+  const leftSample = Number.isFinite(left.sample_size_effective) ? left.sample_size_effective : -1;
+  const rightSample = Number.isFinite(right.sample_size_effective) ? right.sample_size_effective : -1;
+  if (rightSample !== leftSample) return rightSample - leftSample;
+
+  const leftSupport = Number.isFinite(left.technical_support_score) ? left.technical_support_score : -1;
+  const rightSupport = Number.isFinite(right.technical_support_score) ? right.technical_support_score : -1;
+  if (rightSupport !== leftSupport) return rightSupport - leftSupport;
+
+  const familyOrder = left.market_family.localeCompare(right.market_family);
+  if (familyOrder) return familyOrder;
+  if (left.line !== right.line) return left.line - right.line;
+  return left.direction.localeCompare(right.direction);
+}
+
+function sortCandidatesWithoutCrossSemanticComparison(candidates) {
+  const semanticOrder = [];
+  const grouped = new Map();
+  for (const candidate of candidates) {
+    const semantics = isSettlementFavorabilityCandidate(candidate)
+      ? "settlement_favorability"
+      : "event_probability";
+    if (!grouped.has(semantics)) {
+      grouped.set(semantics, []);
+      semanticOrder.push(semantics);
+    }
+    grouped.get(semantics).push(candidate);
+  }
+  return semanticOrder.flatMap((semantics) => grouped.get(semantics).sort(compareCandidatesWithinSemantics));
+}
+
 export function rankMarketCandidates(candidates = [], { quotes = [], preferredQuote = null, marketAssessments = [], confidenceScore = null, blocked = false, homeTeamProfile = null, awayTeamProfile = null } = {}) {
   const assessmentByFamily = new Map(marketAssessments.map((item) => [item.market_family, item]));
-  const sorted = candidates.map((candidate) => {
+  const enrichedCandidates = candidates.map((candidate) => {
     const marketAssessment = assessmentByFamily.get(candidate.market_family) || null;
     const sportsScore = calculateSportsScore(candidate, { marketAssessment, confidenceScore });
     const price = selectCandidateQuote(candidate, quotes, preferredQuote);
@@ -214,34 +269,8 @@ export function rankMarketCandidates(candidates = [], { quotes = [], preferredQu
       simple_sports_reasons: buildSimpleSportsReasons(enriched, { homeTeamProfile, awayTeamProfile }),
       ranker_version: MARKET_CANDIDATE_RANKER_VERSION,
     };
-  }).sort((left, right) => {
-    const leftIneligible = isIneligibleForRanking(left.overall_status) ? 1 : 0;
-    const rightIneligible = isIneligibleForRanking(right.overall_status) ? 1 : 0;
-    if (leftIneligible !== rightIneligible) return leftIneligible - rightIneligible;
-
-    const leftProbability = isValidProbability(left.estimated_probability) ? left.estimated_probability : -1;
-    const rightProbability = isValidProbability(right.estimated_probability) ? right.estimated_probability : -1;
-    if (rightProbability !== leftProbability) return rightProbability - leftProbability;
-
-    const leftWidth = Number.isFinite(left.uncertainty_high) && Number.isFinite(left.uncertainty_low)
-      ? left.uncertainty_high - left.uncertainty_low : Infinity;
-    const rightWidth = Number.isFinite(right.uncertainty_high) && Number.isFinite(right.uncertainty_low)
-      ? right.uncertainty_high - right.uncertainty_low : Infinity;
-    if (leftWidth !== rightWidth) return leftWidth - rightWidth;
-
-    const leftSample = Number.isFinite(left.sample_size_effective) ? left.sample_size_effective : -1;
-    const rightSample = Number.isFinite(right.sample_size_effective) ? right.sample_size_effective : -1;
-    if (rightSample !== leftSample) return rightSample - leftSample;
-
-    const leftSupport = Number.isFinite(left.technical_support_score) ? left.technical_support_score : -1;
-    const rightSupport = Number.isFinite(right.technical_support_score) ? right.technical_support_score : -1;
-    if (rightSupport !== leftSupport) return rightSupport - leftSupport;
-
-    const familyOrder = left.market_family.localeCompare(right.market_family);
-    if (familyOrder) return familyOrder;
-    if (left.line !== right.line) return left.line - right.line;
-    return left.direction.localeCompare(right.direction);
   });
+  const sorted = sortCandidatesWithoutCrossSemanticComparison(enrichedCandidates);
   const familyRanks = new Map();
   return sorted.map((candidate, index) => {
     const familyRank = (familyRanks.get(candidate.market_family) || 0) + 1;

@@ -25,6 +25,8 @@ import { buildVenueWeatherContext } from "../intelligence/venueWeatherContext.js
 import { buildCompetitiveContext } from "../intelligence/competitiveContext.js";
 import { isModelLimitation } from "../intelligence/redTeamAtlas.js";
 import { assessPrematchEligibility, filterPrematchFixtures } from "../intelligence/prematchEligibility.js";
+import { ASIAN_TOTAL_GOALS_FAMILY } from "../intelligence/asianTotalGoals.js";
+import { isSettlementFavorabilityCandidate } from "../intelligence/probabilityClassification.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
 import { normalizeTimeZone } from "../intelligence/dateTimeContext.js";
@@ -347,9 +349,12 @@ export async function analyzeSportsFixture(input, gateway) {
     line: input.line || null,
     odds: input.odds || null,
   });
-  if (input.marketId === "asian_total_goals") {
+  if (
+    input.marketId === ASIAN_TOTAL_GOALS_FAMILY ||
+    (Array.isArray(input.marketIds) && input.marketIds.includes(ASIAN_TOTAL_GOALS_FAMILY))
+  ) {
     marketAssessments.push(evaluateSportsMarket({
-      marketId: "asian_total_goals",
+      marketId: ASIAN_TOTAL_GOALS_FAMILY,
       leagueProfile,
       homeTeamProfile,
       awayTeamProfile,
@@ -449,6 +454,8 @@ export function toJourneyCandidate({ analysis, candidate, comparison }) {
     line: candidate.line,
     probability: candidate.preliminary_probability,
     estimatedProbability: candidate.estimated_probability,
+    probabilitySemantics: candidate.probability_semantics || null,
+    sportsFavorability: candidate.sports_favorability ?? null,
     probabilityPercent: candidate.probability_percent,
     probabilityClassification: candidate.probability_classification,
     rankingEligible: candidate.ranking_eligible === true,
@@ -466,6 +473,7 @@ export function toJourneyCandidate({ analysis, candidate, comparison }) {
     generalRank: candidate.rank,
     familyRank: candidate.family_rank,
     sportsScore: candidate.sports_score,
+    asianSettlementProfile: candidate.asian_settlement_profile || null,
     radarContext: candidate.radar_context ?? null,
     radarAnalysis: candidate.radar_analysis ?? null,
     selectionQuality: candidate.selection_quality ?? null,
@@ -483,6 +491,8 @@ export function toJourneyCandidate({ analysis, candidate, comparison }) {
       line: candidate.line,
       selection: candidate.selection,
       preliminary_probability: candidate.preliminary_probability,
+      probability_semantics: candidate.probability_semantics || null,
+      sports_favorability: candidate.sports_favorability ?? null,
       uncertainty: { low: candidate.uncertainty_low, high: candidate.uncertainty_high },
       sports_score: candidate.sports_score,
       technical_support_score: candidate.technical_support_score,
@@ -495,6 +505,7 @@ export function toJourneyCandidate({ analysis, candidate, comparison }) {
       reasons: candidate.simple_sports_reasons,
       risks,
       methodology_version: candidate.methodology_version,
+      asian_settlement_profile: candidate.asian_settlement_profile || null,
     },
     fixtureEvidence,
     reasons: fixtureEvidence.reasons,
@@ -550,7 +561,10 @@ export async function recoverJourneyCandidateOdds(candidates, gateway, now, odds
 
 export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
   const groups = new Map();
-  const eligible = entries.filter((entry) => entry.candidate?.ranking_eligible === true);
+  const eligible = entries.filter((entry) =>
+    entry.candidate?.ranking_eligible === true &&
+    !isSettlementFavorabilityCandidate(entry.candidate)
+  );
   const sorted = rankJourneyCandidatesByDecision(eligible, { product: "parlay" });
   for (const entry of sorted) {
     const key = Number(entry.analysis.fixture.fixtureId);
@@ -576,7 +590,7 @@ export function selectCombinationJourneyCandidates(entries = [], maximum = 50) {
 
 // Presentation-only shortlist: the complete Journey catalogue is retained.
 export function buildJourneyRecommendationShortlist(candidates = [], maximum = 10) {
-  return (candidates || []).map((candidate) => {
+  return (candidates || []).filter((candidate) => !isJourneySettlementFavorabilityCandidate(candidate)).map((candidate) => {
     const support = Number(candidate.technicalSupport ?? candidate.sportsScore ?? candidate.confidence);
     const width = Number(candidate.uncertaintyHigh) - Number(candidate.uncertaintyLow);
     const frontier = candidate.decisionFrontier || {};
@@ -624,6 +638,35 @@ export function buildJourneyRecommendationShortlist(candidates = [], maximum = 1
       const rightProbability = Number.isFinite(right.estimatedProbability) ? right.estimatedProbability : -Infinity;
       return rightProbability - leftProbability;
     })
+    .slice(0, Math.max(0, maximum));
+}
+
+function isJourneySettlementFavorabilityCandidate(candidate) {
+  return isSettlementFavorabilityCandidate({
+    probability_semantics: candidate?.probabilitySemantics ?? candidate?.probability_semantics,
+    market_family: candidate?.marketId ?? candidate?.market_family,
+  });
+}
+
+function journeySportsFavorability(candidate) {
+  const raw = candidate?.sportsFavorability ?? candidate?.sports_favorability
+    ?? candidate?.estimatedProbability ?? candidate?.estimated_probability;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : -Infinity;
+}
+
+// Shortlist paralela: no comparte thresholds probabilísticos ni posición con
+// recommendedCandidates. El cap 10 reutiliza el límite de presentación ya
+// establecido para la shortlist clásica; el catálogo completo sigue intacto.
+export function buildJourneyAsianRecommendationShortlist(candidates = [], maximum = 10) {
+  return (candidates || [])
+    .filter(isJourneySettlementFavorabilityCandidate)
+    .filter((candidate) => candidate.rankingEligible !== false && candidate.ranking_eligible !== false)
+    .sort((left, right) =>
+      journeySportsFavorability(right) - journeySportsFavorability(left) ||
+      Number(right.sportsScore ?? right.sports_score ?? -Infinity) - Number(left.sportsScore ?? left.sports_score ?? -Infinity) ||
+      Number(left.fixtureId ?? left.fixture_id ?? Infinity) - Number(right.fixtureId ?? right.fixture_id ?? Infinity) ||
+      String(left.candidateId ?? left.candidate_id ?? `${left.direction}:${left.line}`).localeCompare(String(right.candidateId ?? right.candidate_id ?? `${right.direction}:${right.line}`))
+    )
     .slice(0, Math.max(0, maximum));
 }
 
@@ -762,6 +805,10 @@ export async function scanSportsJourney(input, gateway) {
     const radarContextEnrichedCandidates = attachRadarContextByFamily(selection.ranked_candidates || [], marketOpportunityRadar);
     const radarEnrichedCandidates = attachRadarAnalysisByFamily(radarContextEnrichedCandidates, marketOpportunityRadar);
 
+    const candidateCountByFamily = new Map();
+    for (const candidate of radarEnrichedCandidates) {
+      candidateCountByFamily.set(candidate.market_family, (candidateCountByFamily.get(candidate.market_family) || 0) + 1);
+    }
     analysisDiagnostics.push({
       competition: analysis?.competition?.localName || "Desconocida",
       fixtureId: analysis?.fixture?.fixtureId || null,
@@ -775,6 +822,8 @@ export async function scanSportsJourney(input, gateway) {
         marketFamily: item.market_family,
         status: item.quality_status || item.status || null,
         candidate: item.candidate ?? null,
+        candidateCount: candidateCountByFamily.get(item.market_family) || 0,
+        evaluationStatus: (candidateCountByFamily.get(item.market_family) || 0) > 0 ? "evaluated" : "not_evaluable",
       })),
     });
 
@@ -786,7 +835,7 @@ export async function scanSportsJourney(input, gateway) {
       candidate,
       comparison: buildJourneyFamilyComparison(selection, analysis.marketAssessments, candidate),
     }));
-    combinationEntries.push(...entries);
+    combinationEntries.push(...entries.filter((entry) => !isSettlementFavorabilityCandidate(entry.candidate)));
     return entries;
   });
   const candidateDiagnosticsByCompetition = Object.fromEntries(
@@ -838,7 +887,8 @@ export async function scanSportsJourney(input, gateway) {
   const highlighted = highlightedSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
   const combinationCandidates = combinationSports.map((candidate) => pricedByIdentity.get(`${candidate.fixtureId}:${candidate.marketId}:${candidate.direction}:${candidate.line}`) || candidate);
   const recommendedCandidates = buildJourneyRecommendationShortlist(highlighted);
-  const valueRadar = await buildJourneyValueRadar({ classicCandidates: highlighted, analyses: reviewed, gateway, now: referenceNow, oddsByFixture: journeyOddsCache });
+  const asianRecommendedCandidates = buildJourneyAsianRecommendationShortlist(highlighted);
+  const valueRadar = await buildJourneyValueRadar({ classicCandidates: highlighted.filter((candidate) => !isJourneySettlementFavorabilityCandidate(candidate)), analyses: reviewed, gateway, now: referenceNow, oddsByFixture: journeyOddsCache });
   const fixturesByCompetition = Object.fromEntries(
     [...fixtures.reduce((map, item) => {
       const name = item.competition.localName;
@@ -878,6 +928,7 @@ export async function scanSportsJourney(input, gateway) {
     analysisDiagnostics,
     candidates: highlighted,
     recommendedCandidates,
+    asianRecommendedCandidates,
     combinationCandidates,
     valueRadar,
     competitionProfilesApplied: competitionProfiles.length,
@@ -935,7 +986,7 @@ export function rankJourneyCandidatesByProbability(entries = []) {
 // Keeps the probability ranking available for the catalogue and legacy views,
 // while the Journey recommendation uses the same explicit frontier as a single
 // analysis. A fixture id is supplied so distinct fixtures remain independent.
-export function rankJourneyCandidatesByDecision(entries = [], { product = "individual" } = {}) {
+function rankJourneyCandidatesWithinSemantics(entries, product) {
   const candidateIdentity = (candidate = {}) => `${Number(candidate.fixture_id)}:${candidate.candidate_id}`;
   const candidates = entries.map((entry) => ({
     ...entry.candidate,
@@ -953,20 +1004,40 @@ export function rankJourneyCandidatesByDecision(entries = [], { product = "indiv
       candidate: byIdentity.get(candidateIdentity(candidate)) || entry.candidate,
     };
   }).sort((left, right) => {
-    // No hay prioridad fija por market_family (goals/total_shots/etc.): el
-    // universo visible (Jornada y el que alimenta Parlay/Soñadora) se ordena
-    // exclusivamente por estimated_probability descendente. Empates conservan
-    // el orden estable de entrada (Array#sort es estable en Node >=20); un
-    // candidato sin probabilidad finita nunca adelanta a uno con probabilidad
-    // válida y queda al final.
-    const leftProbability = Number.isFinite(left.candidate?.estimated_probability)
-      ? left.candidate.estimated_probability
-      : -Infinity;
-    const rightProbability = Number.isFinite(right.candidate?.estimated_probability)
-      ? right.candidate.estimated_probability
-      : -Infinity;
-    return rightProbability - leftProbability;
+    const settlement = isSettlementFavorabilityCandidate(left.candidate);
+    const leftAttractiveness = settlement
+      ? left.candidate?.sports_favorability ?? left.candidate?.estimated_probability
+      : left.candidate?.estimated_probability;
+    const rightAttractiveness = settlement
+      ? right.candidate?.sports_favorability ?? right.candidate?.estimated_probability
+      : right.candidate?.estimated_probability;
+    const difference = (Number.isFinite(rightAttractiveness) ? rightAttractiveness : -Infinity)
+      - (Number.isFinite(leftAttractiveness) ? leftAttractiveness : -Infinity);
+    if (difference) return difference;
+    if (!settlement) return 0;
+    return Number(right.candidate?.sports_score ?? -Infinity) - Number(left.candidate?.sports_score ?? -Infinity)
+      || Number(left.analysis?.fixture?.fixtureId ?? Infinity) - Number(right.analysis?.fixture?.fixtureId ?? Infinity)
+      || String(left.candidate?.candidate_id || "").localeCompare(String(right.candidate?.candidate_id || ""));
   });
+}
+
+export function rankJourneyCandidatesByDecision(entries = [], { product = "individual" } = {}) {
+  const semanticOrder = [];
+  const grouped = new Map();
+  for (const entry of entries) {
+    const semantics = isSettlementFavorabilityCandidate(entry.candidate)
+      ? "settlement_favorability"
+      : "event_probability";
+    if (!grouped.has(semantics)) {
+      grouped.set(semantics, []);
+      semanticOrder.push(semantics);
+    }
+    grouped.get(semantics).push(entry);
+  }
+  // Los grupos conservan el orden estable en que aparecen en el catálogo.
+  // Solo se ordena DENTRO de cada semántica; nunca se decide que una
+  // Favorabilidad Asian supera o pierde frente a una probabilidad clásica.
+  return semanticOrder.flatMap((semantics) => rankJourneyCandidatesWithinSemantics(grouped.get(semantics), product));
 }
 
 export function selectDiverseJourneyCandidates(entries = [], maximum = 5, comparableGap = 4) {
