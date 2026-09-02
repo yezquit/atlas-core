@@ -7,38 +7,43 @@
 ## Git
 
 - Rama: `audit/atlas-engine-v3`
-- HEAD: `24591184448ff83a493dca90b90697e90bce2e4f` (`2459118`)
-- Tag local sobre HEAD: `v3.0.1-stable`
-- Working tree: limpio (verificado en esta sesión, `git status --porcelain` vacío)
+- HEAD: `459e776579ac510aff8684e320431c6d103c1ad6` (`459e776`)
+- Últimos commits relevantes:
+  - `459e776` — `feat(atlas): improve asian totals modeling and value economics`
+  - `02d6cbf` — `docs: add canonical Atlas recovery context`
+- Estado remoto: sincronizado con `origin/audit/atlas-engine-v3` — **0 ahead / 0 behind**, verificado tras `git push` (no por suposición).
+- Working tree: **limpio**.
+- **No hubo deploy a Railway** en esta fase. **No se creó ningún tag nuevo.**
+- El tag local histórico `v3.0.1-stable` sigue apuntando a `2459118` — **no debe reinterpretarse** como si apuntara a `459e776`. `459e776` es el HEAD actual de la rama, sin tag propio.
 
 ## Runtime
 
-- Next.js `16.2.12` (verificado contra `package.json` en esta sesión)
-- React `19.2.4` / react-dom `19.2.4` (verificado contra `package.json` en esta sesión)
+- Next.js `16.2.12` (verificado contra `package.json` y contra la salida real de `npm run build` en esta sesión).
+- React `19.2.4` / react-dom `19.2.4` (verificado contra `package.json`).
 
-## Último estado automático conocido (no verificado en esta tarea documental)
+## Último estado automático — VERIFICADO en esta sesión (no reportado de fuera)
 
-- lint aprobado
-- 1.207 tests aprobados, 0 fallos
-- build aprobado
-- `git diff --check` aprobado
+- `npm test`: **1295 tests, 1295 pass, 0 fail**.
+- `npm run lint`: **PASS — 0 errores, 0 warnings**.
+- `npm run build`: **PASS** (Next.js 16.2.12, Turbopack; compilación, TypeScript y generación de páginas estáticas sin errores).
+- `git diff --check` / `git diff --cached --check`: **PASS** en ambos casos, antes y en el momento del commit.
 
-**Nota obligatoria:** estas cuatro verificaciones corresponden al **estado previamente confirmado** reportado fuera de esta sesión. Esta tarea es exclusivamente documental — no se ejecutaron `npm run lint`, `npm test` ni `npm run build` en esta sesión para producir estos números; se registran tal como fueron comunicados, no como resultado propio de este diagnóstico.
+A diferencia de la entrada anterior de este documento (que citaba cifras reportadas fuera de sesión), estas cuatro verificaciones se **ejecutaron directamente** como parte del pipeline de esta fase, inmediatamente antes del commit `459e776`.
 
 ## Railway
 
-- Último commit **explícitamente confirmado históricamente** en Railway: `ba20d1e`.
-- `bbb4534`: estado en Railway **no confirmado**.
-- `2459118`: estado en Railway **no confirmado**.
-- **No asumir** que el deployment actual de Railway corresponde a HEAD.
+Sin cambios respecto a la entrada anterior — no se tocó Railway en esta fase:
 
-**Nota de procedencia:** esta información sobre Railway proviene de contexto reportado por el usuario, no de evidencia verificable dentro de este repositorio — un diagnóstico de código previo (ver referencia en `ATLAS_DECISIONS_LOG.md`) confirmó que el repositorio no contiene ninguna configuración, script ni documentación de Railway (`railway.json`, `Procfile`, `nixpacks.toml`, workflows `.github/`), por lo que el estado real de despliegue no puede verificarse localmente sin consultar el servicio.
+- Último commit **explícitamente confirmado históricamente** en Railway: `ba20d1e`.
+- `bbb4534`, `2459118`, `02d6cbf`, `459e776`: estado en Railway **no confirmado**.
+- **No asumir** que el deployment actual de Railway corresponde al HEAD actual.
+- El repositorio sigue sin contener configuración, script ni documentación de Railway (`railway.json`, `Procfile`, `nixpacks.toml`, workflows `.github/`) — el estado real de despliegue no puede verificarse localmente.
 
 ## Estado actual de mercados
 
 ### Cinco familias clásicas
 
-Actualmente integradas en Jornada clásica (seleccionables desde la UI, generan candidatos automáticamente, entran a ranking, pueden aparecer en `recommendedCandidates` y `candidates`):
+Sin cambio funcional en esta fase — siguen integradas en Jornada clásica exactamente igual que antes:
 
 - `goals`
 - `corners`
@@ -46,41 +51,34 @@ Actualmente integradas en Jornada clásica (seleccionables desde la UI, generan 
 - `total_shots`
 - `shots_on_goal`
 
-### `asian_total_goals`
+### `asian_total_goals` — modelado deportivo y económico completado; integración a Jornada sigue pendiente
 
-Estado actual verificado por diagnóstico de código:
+**Nuevo en esta fase (commit `459e776`):**
 
-- **Análisis individual: SÍ** — seleccionable en el dropdown de familia (`SPECIFIC_SPORTS_MARKETS`, `src/core/intelligence/marketEngine.js:11-14`), aunque requiere línea manual exacta (sin catálogo automático de líneas).
-- **Radar de Valor: SÍ**, mediante un pipeline especial — se construye en `buildJourneyValueRadar` (`src/core/services/valueRadarService.js:75-129`) con una llamada directa a `gateway.loadFixtureOdds`, separada de la construcción de candidatos clásicos.
-- **Jornada clásica normal: NO** — el checkbox de "Mercados de interés" de Jornada usa `SPORTS_MARKETS` (5 familias, sin asian); el loop automático `evaluateSportsMarkets` tampoco la evalúa.
+- **Favorabilidad Atlas** (`sports_favorability`, escala `/100`) reemplaza `weighted_win_probability` como métrica deportiva principal del candidato — NO es una probabilidad literal de ganar. Fórmula: `FW + 0.75·HW + 0.5·Push + 0.25·HL`.
+- Generación autónoma de líneas asiáticas (`generateAsianTotalGoalLines`), soportando matemáticamente cualquier línea no negativa en pasos de `0.25` (`.0/.25/.5/.75/...`), sin catálogo rígido como requisito.
+- **`price_equivalent_probability`** (`= W/(W+L) = 1/asianFairOdds`) como magnitud económica nueva, comparable en puntos porcentuales contra la probabilidad implícita de una cuota — verificado matemáticamente (signo siempre coherente con el signo del EV).
+- `raw_edge_pp` corregido: ya no usa `weighted_win_probability − implied` (podía dar edge negativo exactamente en el precio justo); ahora usa `price_equivalent_probability − implied`.
+- `conservative_edge_pp` corregido: ya no usa el intervalo de Favorabilidad; usa un intervalo económico propio (`price_equivalent_probability_low/high`, aproximación Wilson sobre la masa económica decisiva `W+L`).
+- `asianFairOdds`/`asianExpectedValue` auditados y confirmados matemáticamente correctos — **sin cambios de fórmula**.
+- Clasificación del Radar (`INTERESTING`/`WATCH`/`NO_VALUE`) y `DirectorAtlas` (`parlay_eligibility_reason`) actualizados para usar las magnitudes económicas correctas en vez de Favorabilidad.
 
-**Esto es un GAP frente al objetivo funcional confirmado** (ver catálogo de siete familias en `ATLAS_CONTEXT_MASTER.md`), no un comportamiento deseado.
+**Sin cambio (persiste igual que antes de esta fase):**
+
+- **Análisis individual: SÍ** — seleccionable en el dropdown de familia (`SPECIFIC_SPORTS_MARKETS`, `src/core/intelligence/marketEngine.js:11-14`).
+- **Radar de Valor: SÍ**, mediante el pipeline especial (`buildJourneyValueRadar`, `src/core/services/valueRadarService.js:75-129`), ahora con la economía corregida.
+- **Jornada clásica normal: NO** — el checkbox de "Mercados de interés" sigue usando `SPORTS_MARKETS` (5 familias, sin asian); el loop automático `evaluateSportsMarkets` tampoco la evalúa.
+
+**Esto sigue siendo un GAP frente al objetivo funcional confirmado** (catálogo de siete familias en `ATLAS_CONTEXT_MASTER.md`) — la integración a Jornada **no** se realizó en esta fase y no debe afirmarse como completada.
 
 ### `team_asian_handicap`
 
-Estado actual, confirmado por búsqueda exhaustiva en tres diagnósticos separados de esta sesión:
+**Sin cambios — sigue sin implementarse.** Confirmado nuevamente: sin contratos/tipos, sin UI, sin Radar, sin Jornada, sin análisis individual. Sigue **APROBADO PARA DISEÑO/DESARROLLO FUTURO** (ver `ATLAS_DECISIONS_LOG.md`), con identidad propuesta `fixture_id + market_family + team_id + line` (+ `side: home|away`, sin reutilizar `direction=over|under`) y soporte requerido para líneas firmadas en pasos de cuarto (`...,-0.25, 0, +0.25,...`).
 
-- **NO implementado.**
-- **NO** contratos/tipos.
-- **NO** UI.
-- **NO** Radar.
-- **NO** Jornada.
-- **NO** análisis individual.
+## Hallazgo de arquitectura: catálogos de familias (sin cambios en esta fase)
 
-Está **APROBADO PARA DISEÑO/DESARROLLO FUTURO** (ver `ATLAS_DECISIONS_LOG.md`).
+Se mantienen los **~16 catálogos/listas** independientes de familias de mercado ya documentados. No se tocó ese drift en esta fase (fuera de alcance). `src/app/atlas-live.js` (`MARKET_LABELS`) sigue sin incluir `asian_total_goals`.
 
-## Hallazgo de arquitectura: catálogos de familias
+## Hallazgo operativo: 174 candidatos / 0 cuotas exactas (sin cambios en esta fase)
 
-Se localizaron **aproximadamente 16 catálogos/listas** independientes o parcialmente duplicados relacionados con familias de mercado en el código (constantes, arrays, reglas, selectores UI, schemas). No existe hoy una única fuente de verdad completa — `src/core/intelligence/marketEngine.js` (`SPORTS_MARKETS`/`SPECIFIC_SPORTS_MARKETS`) es la más canónica, pero al menos 12 módulos mantienen listas manuales propias.
-
-Existe **drift confirmado**: `src/app/atlas-live.js` (`MARKET_LABELS`, línea 6) **no contiene `asian_total_goals`** — nunca se actualizó cuando esa familia se añadió al resto del sistema.
-
-**No corregir esto en esta tarea** — queda documentado como pendiente (ver `ATLAS_DECISIONS_LOG.md`).
-
-## Hallazgo operativo: 174 candidatos / 0 cuotas exactas
-
-Una prueba manual del usuario mostró el mensaje "Atlas encontró 174 candidatos deportivos, pero ninguno tiene una cuota exacta disponible para evaluar valor en este momento." El mecanismo de código que produce este mensaje está identificado con precisión (`src/core/services/valueRadarService.js:~138-149`), pero **la causa operacional exacta de ese run específico no fue demostrada** — requeriría la respuesta cruda de API-Football de esa sesión, no disponible en el repositorio. Ver `ATLAS_DECISIONS_LOG.md` y `ATLAS_MANUAL_TESTS.md`.
-
-## Servidor local
-
-`npm run dev` puede seguir activo en `http://localhost:3000` (Next.js 16.2.12, Turbopack) desde una acción previa de esta sesión de trabajo; no es parte del estado versionado del repositorio.
+Sigue documentado igual que antes — mecanismo de código identificado, causa operacional exacta de ese run no demostrada. No relacionado con la corrección económica de esta fase (esa corrección afecta `raw_edge_pp`/`conservative_edge_pp` una vez que SÍ existe una cuota exacta, no la disponibilidad de la cuota en sí).

@@ -103,10 +103,42 @@ Además:
 
 ## PP y cuota justa en mercados asiáticos (añadido 2026-09-01)
 
-> Ninguno de estos ítems debe marcarse `[x]` hasta que exista implementación y evidencia observada directamente.
+> Ninguno de estos ítems debe marcarse `[x]` hasta que exista implementación y evidencia observada directamente **en la UI real**. Varios de ellos ya tienen cobertura automatizada desde el commit `459e776` (ver sección "Favorabilidad Atlas y economía asiática" más abajo) — se anota explícitamente en cada caso para no generar una lectura confusa (automatizado ≠ verificado manualmente en UI).
 
-- [ ] PP directo correcto en mercado binario (`P_Atlas − P_market`, con `P_market` bruto o no-vig según disponibilidad)
-- [ ] Prohibición verificada de PP ingenuo en líneas `.25`/`.75` (nunca `P(full_win)` ni `P(full_win+half_win)` contra `1/cuota` directamente)
-- [ ] Fair odds asiática calculada correctamente: `1 + [0.5×P(HL)+P(FL)] / [P(FW)+0.5×P(HW)]`
-- [ ] Si se presenta, la "probabilidad económica equivalente" (`1/FairOdds`) se distingue visualmente en UI de una probabilidad deportiva literal
-- [ ] Coherencia entre fair odds, EV y precio ofrecido para una misma selección/línea exacta (los tres deben ser consistentes entre sí, no calculados con distintas fuentes de probabilidad)
+- [ ] PP directo correcto en mercado binario (`P_Atlas − P_market`, con `P_market` bruto o no-vig según disponibilidad) — sin cobertura automatizada específica todavía, sigue pendiente en ambos sentidos.
+- [ ] Prohibición verificada de PP ingenuo en líneas `.25`/`.75` (nunca `P(full_win)` ni `P(full_win+half_win)` contra `1/cuota` directamente) — **ya confirmado por test automatizado** (`asianPriceEquivalent.test.js`, caso E: la fórmula vieja daría −11.25pp donde la actual da ≈0); pendiente solo la verificación visual en UI real.
+- [ ] Fair odds asiática calculada correctamente: `1 + [0.5×P(HL)+P(FL)] / [P(FW)+0.5×P(HW)]` — **ya confirmado por test automatizado** (`asianPriceEquivalent.test.js`); pendiente solo la verificación visual en UI real.
+- [ ] Si se presenta, la "probabilidad económica equivalente" (`1/FairOdds`, ahora `price_equivalent_probability` / "Probabilidad equivalente Atlas por precio") se distingue visualmente en UI de una probabilidad deportiva literal — **el código fuente ya lo implementa** (`asianPriceEquivalentPresentation.test.js` verifica la etiqueta, el hint y la separación por código); pendiente la verificación visual real en pantalla.
+- [ ] Coherencia entre fair odds, EV y precio ofrecido para una misma selección/línea exacta (los tres deben ser consistentes entre sí, no calculados con distintas fuentes de probabilidad) — **ya confirmado matemáticamente por test automatizado** (`asianPriceEquivalent.test.js`, propiedades B y C); pendiente solo la verificación visual en UI real.
+
+## Favorabilidad Atlas y economía asiática — commit `459e776` (añadido 2026-09-01)
+
+> Regla del checklist: no marcar como probado manualmente algo que solo fue verificado por test automatizado. Los ítems de la subsección "Confirmado automáticamente" describen lo que la suite ya cubre — se listan en `[x]` porque están genuinamente verificados por `npm test`/`npm run lint`/`npm run build` reales de esta sesión, no por inferencia. Los de "Pendiente manual" permanecen en `[ ]` hasta que alguien los pruebe en la UI real.
+
+### Confirmado automáticamente (npm test 1295/1295, lint 0/0, build PASS — esta sesión)
+
+- [x] Equivalencia `price_equivalent_probability ≈ 1/asianFairOdds` para líneas `.0/.25/.5/.75` (`asianPriceEquivalent.test.js`)
+- [x] `expected_roi ≈ 0` y `raw_edge_pp ≈ 0` cuando la cuota = Fair Odds, para `.0/.25/.5/.75` (`asianPriceEquivalent.test.js`)
+- [x] Signo de `raw_edge_pp` coincide con el signo de `expected_roi` (cuota > Fair Odds → ambos positivos; cuota < Fair Odds → ambos negativos) (`asianPriceEquivalent.test.js`)
+- [x] Favorabilidad Atlas presentada en escala `/100`, nunca como probabilidad literal ni con signo `%` (`asianFavorabilityPresentation.test.js`, `asianSportsFavorability.test.js`)
+- [x] Separación de capa económica (Fair Odds/EV/PP) frente a Favorabilidad/Solidez, por código fuente (`asianPriceEquivalentPresentation.test.js`)
+- [x] Regresión clásica: `goals/corners/cards/total_shots/shots_on_goal` sin cambio de fórmula en `raw_edge_pp`/`conservative_edge_pp` (`asianPriceEquivalent.test.js`, `manualExactLineEvaluation.test.js`, `uxCoherencePatch.test.js`)
+- [x] `npm test` global 1295/1295, `npm run lint` 0 errores/0 warnings, `npm run build` PASS — verificados directamente antes del commit `459e776`
+
+### Pendiente manual (NO probado en UI real todavía)
+
+- [ ] Análisis individual completo en la UI real con `asian_total_goals` de principio a fin
+- [ ] Ingresar una cuota exacta manual para una línea asiática y observar el resultado
+- [ ] Verificar visualmente "Favorabilidad Atlas: X/100" en pantalla
+- [ ] Verificar visualmente "Probabilidad equivalente Atlas por precio: XX.X %" en pantalla
+- [ ] Verificar visualmente la "Brecha de precio"/"Brecha conservadora" en pantalla
+- [ ] Verificar visualmente "EV técnico" en pantalla
+- [ ] Verificar el veredicto de DirectorAtlas para un análisis individual asiático real
+- [ ] Verificar la experiencia visual completa (sin solapes, sin texto engañoso, sin regresión visual clásica)
+- [ ] Confirmar en Jornada clásica real que nada cambió visualmente para las 5 familias clásicas
+- [ ] Parlay — confirmar que el bloqueo de líneas `.25`/`.75` de `asian_total_goals` sigue funcionando en la UI real
+- [ ] Soñadora — misma verificación que Parlay
+- [ ] LIVE — sin relación directa con esta fase, pero pendiente de una pasada de regresión visual general
+- [ ] Memoria — resolución real de una predicción `asian_total_goals` end-to-end
+- [ ] Bet Tracker — liquidación real de una apuesta `asian_total_goals` con media ganancia/pérdida
+- [ ] Futura integración de `asian_total_goals` a Jornada clásica (no implementada todavía; no aplica hasta esa fase)

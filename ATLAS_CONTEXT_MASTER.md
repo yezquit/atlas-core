@@ -159,7 +159,7 @@ La cuota exacta puede provenir de (1) API-Football, si existe, o (2) entrada man
 
 ## 24. Métricas económicas — principios matemáticos (añadido 2026-09-01)
 
-Estos son principios matemáticos documentados como referencia estable. **No implican que el código actual ya los calcule así** — verificar contra el código antes de asumir que una fórmula está implementada.
+Estos son principios matemáticos documentados como referencia estable. **Actualización (459e776):** para `asian_total_goals`, la sección 24.5 (fair odds/EV asiático) ya está implementada y verificada por tests — ver sección 26 más abajo para el contrato exacto. El resto de esta sección (24.1-24.4) sigue siendo un principio de referencia sin implementación específica confirmada — verificar contra el código antes de asumir que una fórmula está implementada en un caso concreto.
 
 ### 24.1 Brecha en puntos porcentuales (PP) — tiene DOS tratamientos según el tipo de settlement (aclarado 2026-09-01)
 
@@ -239,3 +239,44 @@ Esto es un principio matemático documentado — no se ha modificado código en 
 ## 25. Universo de exploración del Radar (pendiente)
 
 El Radar actual recibe, para las cinco familias clásicas, candidatos ya filtrados por `ranking_eligible` de Jornada clásica. Sigue pendiente de investigación si ese universo es suficientemente amplio para detectar oportunidades de valor que no quedarían destacadas por la Jornada clásica. No se ha modificado esa lógica. Ver `ATLAS_DECISIONS_LOG.md` para el registro formal de este pendiente.
+
+## 26. Favorabilidad Atlas y economía de `asian_total_goals` — IMPLEMENTADO (commit `459e776`)
+
+A diferencia de las secciones 22-25 (principios arquitectónicos sin implementación confirmada), este contrato **sí está implementado** en `src/core/intelligence/asianTotalGoals.js`/`valueRadar.js`/`candidateLineGenerator.js`/`directorAtlas.js` y verificado por tests dedicados.
+
+**Métrica deportiva — Favorabilidad Atlas:**
+```
+sports_favorability = FW + 0.75·HW + 0.5·Push + 0.25·HL   (escala /100 en UI)
+```
+No es probabilidad literal de ganar, no es comparable con `1/cuota`, no es edge económico. Solidez Atlas permanece independiente. `probability_semantics: "settlement_favorability"` marca este contrato en el candidato.
+
+**Métrica económica — Probabilidad equivalente Atlas por precio:**
+```
+W = P(full_win) + 0.5·P(half_win)
+L = P(full_loss) + 0.5·P(half_loss)
+FairOdds = 1 + L/W                    (auditada y confirmada correcta, sin cambios)
+price_equivalent_probability = W/(W+L) = 1/FairOdds
+```
+Esta magnitud **sí** vive en el espacio apropiado para compararse contra la probabilidad implícita de una cuota — su signo frente a `implied` coincide siempre con el signo del EV real (propiedad demostrada algebraicamente y confirmada por tests para líneas `.0/.25/.5/.75`). Sigue sin ser la probabilidad literal de ganar.
+
+**Brecha económica corregida:**
+```
+raw_edge_pp = (price_equivalent_probability − implied_probability) × 100
+```
+Reemplaza la fórmula antigua (`weighted_win_probability − implied`), que podía dar edge negativo exactamente en el precio justo cuando existía masa de `half_win`/`push`/`half_loss`.
+
+**Intervalo económico (no el de Favorabilidad):**
+```
+decisive_weight = W + L
+n_decisive = effective_sample_size × decisive_weight
+p = W/(W+L)
+[price_equivalent_probability_low, price_equivalent_probability_high] = aproximación Wilson(p, n_decisive)
+conservative_edge_pp = (price_equivalent_probability_low − implied_probability) × 100   (o null si no hay límite válido)
+```
+Es una **aproximación estadística**, no una calibración empírica validada.
+
+**Clasificación del Radar:** `expected_roi ≤ 0 → NO_VALUE`; `expected_roi > 0` y `conservative_edge_pp > 0 → INTERESTING`; `expected_roi > 0` y (`conservative_edge_pp ≤ 0` o `null`) → `WATCH`.
+
+**Presentación:** DEPORTIVO (`Favorabilidad Atlas: X/100`, `Solidez Atlas: X/100`, nunca con signo `%`) separado de ECONÓMICO (`Cuota justa Atlas`, `Probabilidad equivalente Atlas por precio`, `Probabilidad implícita del mercado`, `Brecha de precio`, `Brecha conservadora`, `EV técnico`), más el perfil de settlement (`Gana completa/Gana media/Devolución/Pierde media/Pierde completa`) cuando esté disponible.
+
+Detalle completo de decisiones: `ATLAS_DECISIONS_LOG.md`, entrada "Implementado en commit `459e776`" (decisiones 33-45).
