@@ -2565,10 +2565,28 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
     const effectiveSelection = selectionOverride !== null ? selectionOverride : selection;
     const requestedLine = effectiveLine.trim() || currentAnalysis?.marketSelection?.primary?.line || transferredCandidate?.line || (reanalysis ? currentAnalysis?.director?.line : null);
     const reportedDirection = effectiveSelection.trim() || currentAnalysis?.marketSelection?.primary?.direction || transferredCandidate?.direction || currentAnalysis?.director?.sports_verdict?.direction || "";
-    const reportedSelection = reportedDirection && requestedLine
-      ? `${reportedDirection === "under" ? "Menos de" : "Más de"} ${requestedLine}`
-      : reportedDirection;
     const manualMarketFamily = currentAnalysis?.marketSelection?.primary?.market_family || transferredCandidate?.market_family || (analysisMode === "specific" ? marketId : currentAnalysis?.director?.market_evaluated?.family);
+    // team_asian_handicap identifica el lado por equipo (home/away), nunca
+    // por "Más de"/"Menos de" — ese envoltorio de texto es exclusivo del
+    // vocabulario over/under de los mercados clásicos/asian_total_goals.
+    const reportedSelection = manualMarketFamily === "team_asian_handicap"
+      ? reportedDirection
+      : reportedDirection && requestedLine
+        ? `${reportedDirection === "under" ? "Menos de" : "Más de"} ${requestedLine}`
+        : reportedDirection;
+    // team_asian_handicap necesita el team_id real del fixture para que la
+    // cuota manual quede vinculada exactamente a ese equipo. La fuente más
+    // fiable es el análisis deportivo ya calculado (marketSelection.primary
+    // / director.sports_verdict); si no está disponible aún, se resuelve
+    // desde el fixture cargado o desde el candidato transferido de Jornada.
+    const resolvedTeamId = manualMarketFamily === "team_asian_handicap"
+      ? (currentAnalysis?.marketSelection?.primary?.team_id ??
+        currentAnalysis?.director?.sports_verdict?.team_id ??
+        transferredCandidate?.team_id ??
+        (reportedDirection === "home" ? selectedFixture?.teams?.home?.id
+          : reportedDirection === "away" ? selectedFixture?.teams?.away?.id
+            : null))
+      : null;
     const currentLine = currentAnalysis?.director?.line;
     const currentDirection = currentAnalysis?.director?.sports_verdict?.direction;
     const sameCurrentOption = Number(requestedLine) === Number(currentLine) && reportedDirection === currentDirection;
@@ -2608,6 +2626,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
             bookmaker: bookmaker.trim(),
             marketFamily: manualMarketFamily,
             direction: reportedDirection,
+            teamId: resolvedTeamId,
             selection: reportedSelection,
             line: requestedLine,
             decimalOdds: odds.trim(),
@@ -2844,6 +2863,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
       analysis_mode: "specific",
       market_family: candidate.marketId,
       direction: candidate.direction,
+      team_id: candidate.teamId ?? null,
+      side: candidate.side ?? null,
       line: candidate.line,
       selection: candidate.selection,
       preliminary_probability: candidate.probability,
@@ -2993,13 +3014,13 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
           <div className="p2-filter-grid">
             <fieldset className="p2-market-filters">
               <legend>3 · Mercados de interés</legend>
-              {markets.map((market) => (
+              {specificMarkets.map((market) => (
                 <label key={market.id}>
                   <input type={journeyAnalysisMode === "specific" ? "radio" : "checkbox"} name={journeyAnalysisMode === "specific" ? "journey-specific-market" : undefined} checked={journeyMarketIds.includes(market.id)} onChange={() => journeyAnalysisMode === "specific" ? (setJourneyMarketIds([market.id]), invalidateJourney()) : toggleJourneyMarket(market.id)} />
                   {market.label}
                 </label>
               ))}
-              <small>Todos están seleccionados inicialmente. Scout no utiliza cuotas.</small>
+              <small>Los mercados clásicos están seleccionados inicialmente. Los mercados asiáticos (Total y Hándicap por equipo) son opcionales — actívalos aquí si los quieres incluir. Scout no utiliza cuotas.</small>
             </fieldset>
           </div>
 
@@ -3017,8 +3038,8 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
               </div>
               {(journey.asianRecommendedCandidates || []).length ? (
                 <section className="p2-asian-journey-section" aria-labelledby="journey-asian-title">
-                  <h3 id="journey-asian-title">OPCIONES ASIAN TOTAL</h3>
-                  <p>Ordenadas por Favorabilidad Atlas y Solidez. Esta shortlist es independiente del ranking probabilístico de las recomendaciones clásicas.</p>
+                  <h3 id="journey-asian-title">OPCIONES ASIÁTICAS</h3>
+                  <p>Incluye Asiático (Más/Menos) — Total de goles y Asiático — Hándicap por equipo, cada tarjeta indica de cuál se trata. Ordenadas por Favorabilidad Atlas y Solidez. Esta shortlist es independiente del ranking probabilístico de las recomendaciones clásicas.</p>
                   <div className="p2-candidate-grid">
                     {(journey.asianRecommendedCandidates || []).map((candidate, index) => <JourneyCandidateCard key={`${candidate.fixtureId}-${candidate.marketId}-${candidate.direction}-${candidate.line}`} candidate={candidate} primary={index === 0} onOpen={openCandidate} timezone={defaultTimezone} quoteLedgers={fixtureQuoteLedgers} />)}
                   </div>
@@ -3057,7 +3078,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
           {transferredCandidate ? (
             <section className="p2-transferred-candidate" aria-labelledby="transferred-candidate-title">
               <p className="eyebrow">Candidato transferido desde la jornada</p>
-              <h3 id="transferred-candidate-title">{specificMarkets.find((item) => item.id === transferredCandidate.market_family)?.label || transferredCandidate.market_family} · {transferredCandidate.direction === "over" ? "Más de" : "Menos de"} {transferredCandidate.line}</h3>
+              <h3 id="transferred-candidate-title">{specificMarkets.find((item) => item.id === transferredCandidate.market_family)?.label || transferredCandidate.market_family} · {displaySelection(transferredCandidate.selection)}</h3>
               <p>Atlas conservará exactamente esta selección durante la investigación.</p>
               <details className="p2-source-details"><summary>Ver datos técnicos de la preselección</summary><DefinitionGrid entries={[
                 ["Probabilidad preliminar", percentage(transferredCandidate.preliminary_probability)],
@@ -3119,10 +3140,14 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
                     {specificMarkets.map((market) => <option key={market.id} value={market.id}>{market.label}</option>)}
                   </select>
                 </label>
-                <p>Con la familia es suficiente: Atlas determinará automáticamente la dirección y la línea.</p>
-                <label><span>Dirección (opcional)</span><select value={selection} onChange={(event) => { setSelection(event.target.value); invalidateAnalysis(); }}><option value="">Atlas la determinará</option><option value="over">Más de</option><option value="under">Menos de</option></select></label>
-                <label><span>Línea (opcional)</span><input inputMode="decimal" value={line} onChange={(event) => { setLine(event.target.value); invalidateAnalysis(); }} placeholder="Atlas la determinará" /></label>
-                <small>{hasDirection !== hasLine ? "Para forzar una selección exacta debes completar Dirección y Línea." : "Si quieres forzar una selección exacta, completa Dirección y Línea."}</small>
+                <p>Con la familia es suficiente: Atlas determinará automáticamente {marketId === "team_asian_handicap" ? "el equipo y la línea" : "la dirección y la línea"}.</p>
+                {marketId === "team_asian_handicap" ? (
+                  <label><span>Equipo (opcional)</span><select value={selection} onChange={(event) => { setSelection(event.target.value); invalidateAnalysis(); }}><option value="">Atlas lo determinará</option><option value="home">Local</option><option value="away">Visitante</option></select></label>
+                ) : (
+                  <label><span>Dirección (opcional)</span><select value={selection} onChange={(event) => { setSelection(event.target.value); invalidateAnalysis(); }}><option value="">Atlas la determinará</option><option value="over">Más de</option><option value="under">Menos de</option></select></label>
+                )}
+                <label><span>Línea (opcional){marketId === "team_asian_handicap" ? <small> — con signo: negativa favorece al equipo elegido (p. ej. -1.5), positiva le da ventaja (p. ej. +1.5)</small> : null}</span><input inputMode="decimal" value={line} onChange={(event) => { setLine(event.target.value); invalidateAnalysis(); }} placeholder="Atlas la determinará" /></label>
+                <small>{hasDirection !== hasLine ? `Para forzar una selección exacta debes completar ${marketId === "team_asian_handicap" ? "Equipo" : "Dirección"} y Línea.` : `Si quieres forzar una selección exacta, completa ${marketId === "team_asian_handicap" ? "Equipo" : "Dirección"} y Línea.`}</small>
               </section>
             ) : (
               <section className="p2-entry-panel p2-atlas-forecast" aria-labelledby="atlas-forecast-form-title">
@@ -3172,7 +3197,7 @@ export default function AtlasFunctionalClient({ competitionGroups, markets, spec
             ) : null}
             <>
                 <p>{staleAnalysisQuote ? "La cuota anterior venció. Introduce un precio actual para volver a decidir." : analysisCompleted ? "Puedes actualizar la cuota si cambió desde la última consulta." : "Con el análisis deportivo listo, introduce la cuota para evaluar el precio; Gemini es un paso posterior."}</p>
-                <DefinitionGrid entries={[["Mercado", analysis?.director?.market_evaluated?.label || quoteTarget?.market_family || marketId], ["Dirección", displaySelection(quoteTarget?.selection || selection)], ["Línea", quoteTarget?.line ?? line]].filter(([, value]) => value !== null && value !== undefined && value !== "")} />
+                <DefinitionGrid entries={[["Mercado", analysis?.director?.market_evaluated?.label || quoteTarget?.market_family || marketId], [marketId === "team_asian_handicap" ? "Equipo y línea" : "Dirección", displaySelection(quoteTarget?.selection || selection)], ["Línea", quoteTarget?.line ?? line]].filter(([, value]) => value !== null && value !== undefined && value !== "")} />
                 <label><span>Casa de apuestas</span><input value={bookmaker} onChange={(event) => setBookmaker(event.target.value)} placeholder="Ej. Betano" /></label>
                 <label><span>Cuota decimal actual</span><input inputMode="decimal" value={odds} onChange={(event) => setOdds(event.target.value)} placeholder="Ej. 1.95" /></label>
                 <label><span>Hora de consulta (opcional)</span><input type="datetime-local" value={oddsConsultedAt} onChange={(event) => setOddsConsultedAt(event.target.value)} /><small>{defaultTimezone === "America/Bogota" ? "Hora de Colombia" : defaultTimezone}</small></label>

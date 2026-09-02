@@ -6,6 +6,7 @@ import { buildAnalysisVersion, compareAnalysisVersions } from "../intelligence/a
 import { buildGeminiCleanupPrompt, buildGeminiResearchPrompt, extractSupplementaryRefereeEvidence, parseGeminiResponse, selectGeminiItems } from "../intelligence/geminiManualContext.js";
 import { mapGeminiImpacts } from "../intelligence/geminiImpactMapper.js";
 import { evaluateExactMarketLine } from "../intelligence/candidateLineGenerator.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY, evaluateTeamAsianHandicapExactLine } from "../intelligence/teamAsianHandicap.js";
 import { buildRankedMarketSelection, rankMarketCandidates } from "../intelligence/marketCandidateRanker.js";
 import { buildOperationalRanking, buildScoutAtlas } from "../intelligence/scoutAtlas.js";
 import { buildAtlasPreflight, buildRedTeamAtlas } from "../intelligence/redTeamAtlas.js";
@@ -142,12 +143,38 @@ function normalizedDirection(value) {
   return null;
 }
 
+// team_asian_handicap identifica el lado apostado por equipo explícito
+// (side: home|away), nunca por direction=over|under (ver
+// ATLAS_DECISIONS_LOG.md, decisión 13; teamAsianHandicap.js). Acepta tanto
+// el vocabulario interno (home/away) como el texto en español que ya usa la
+// UI para describir un equipo (local/visitante).
+function normalizedTeamSide(value) {
+  const candidate = String(value || "").toLowerCase();
+  if (/^home$|local/.test(candidate)) return "home";
+  if (/^away$|visitante/.test(candidate)) return "away";
+  return null;
+}
+
+// team_asian_handicap se identifica por team_id (nunca direction=over|under
+// — decisión 13, teamAsianHandicap.js): si el candidato lleva team_id, la
+// cuota debe coincidir exactamente en ese equipo. Para el resto de familias
+// (que nunca llevan team_id) cae exactamente en la misma comparación por
+// direction ya existente — sin cambio de comportamiento. Mismo patrón
+// aditivo ya usado en exactIdentity (valueRadar.js).
+function sameCandidateSelection(quote, candidate) {
+  const candidateTeamId = candidate?.team_id ?? candidate?.teamId;
+  if (candidateTeamId !== undefined && candidateTeamId !== null) {
+    return Number(candidateTeamId) === Number(quote?.team_id ?? quote?.teamId);
+  }
+  return normalizedDirection(quote?.direction || quote?.selection) === candidate?.direction;
+}
+
 function isExactCurrentQuoteForCandidate(quote, { fixtureId, candidate } = {}) {
   return Boolean(
     isCurrentOddsQuote(quote) &&
     Number(quote.fixture_id) === Number(fixtureId) &&
     quote.market_family === candidate?.market_family &&
-    normalizedDirection(quote.direction || quote.selection) === candidate?.direction &&
+    sameCandidateSelection(quote, candidate) &&
     Number(quote.line) === Number(candidate?.line)
   );
 }
@@ -467,11 +494,99 @@ export function selectExactRequestedCandidate(marketSelection, { marketFamily, r
   };
 }
 
+// team_asian_handicap no tiene concepto de over/under ni de snapshot previo
+// reutilizable por dirección (recoverExactSnapshotCandidate está indexado
+// por direction, no por team_id): recalcula siempre desde
+// evaluateTeamAsianHandicapExactLine. Si el recálculo falla, declara
+// explícitamente la indisponibilidad en vez de fingir un snapshot — mismo
+// principio de "no sustituir en silencio" que el resto de esta función.
+function resolveTeamAsianHandicapManualExactSelection({
+  marketSelection,
+  requestedLine,
+  requestedSelection,
+  requestedTeamId,
+  lineOrigin,
+  marketAssessments,
+  leagueProfile,
+  homeTeamProfile,
+  awayTeamProfile,
+  refereeProfile,
+  contextItems,
+  contextImpacts,
+  quotes,
+  preferredQuote,
+  fixtureId,
+}) {
+  const side = normalizedTeamSide(requestedSelection);
+  const teamLabel = side === "home" ? "Local" : side === "away" ? "Visitante" : requestedSelection;
+  if (!side || requestedTeamId === null || requestedTeamId === undefined) {
+    return {
+      ...marketSelection,
+      primary: null,
+      alternatives: [],
+      exact_requested_line_unavailable: true,
+      exact_line_available: false,
+      ready_for_pricing: false,
+      requested_line: Number(requestedLine),
+      requested_direction: side,
+      explanation: `Atlas necesita un equipo (Local/Visitante) válido para evaluar Team Asian Handicap ${requestedLine}.`,
+    };
+  }
+  const evaluation = evaluateTeamAsianHandicapExactLine({
+    fixtureId,
+    teamId: requestedTeamId,
+    side,
+    line: requestedLine,
+    leagueProfile,
+    homeTeamProfile,
+    awayTeamProfile,
+    refereeProfile,
+    contextItems,
+    contextImpacts,
+  });
+  if (!evaluation.exact_selection_ready) {
+    return {
+      ...marketSelection,
+      primary: null,
+      alternatives: [],
+      exact_requested_line_unavailable: true,
+      exact_line_available: false,
+      ready_for_pricing: false,
+      requested_line: Number(requestedLine),
+      requested_direction: side,
+      unavailable_reason: evaluation.reason,
+      explanation: `Atlas no pudo calcular exactamente ${teamLabel} ${requestedLine}: ${evaluation.reason}. No se sustituye por otra línea.`,
+    };
+  }
+  const rankedCandidate = rankMarketCandidates([evaluation.candidate], {
+    quotes,
+    preferredQuote,
+    marketAssessments,
+    homeTeamProfile,
+    awayTeamProfile,
+  })[0];
+  const primary = { ...rankedCandidate, exact_line_available: true, ready_for_pricing: true };
+  return {
+    ...marketSelection,
+    primary,
+    ranked_candidates: [primary],
+    catalog_candidates: [primary],
+    alternatives: [],
+    exact_requested_line_unavailable: false,
+    requested_line: Number(requestedLine),
+    requested_direction: side,
+    exact_line_available: true,
+    ready_for_pricing: true,
+    explanation: exactLineExplanation(primary.selection, { lineOrigin }),
+  };
+}
+
 export function resolveManualExactSelection({
   marketSelection,
   marketFamily,
   requestedLine,
   requestedSelection,
+  requestedTeamId = null,
   lineOrigin,
   marketAssessments = [],
   leagueProfile,
@@ -488,6 +603,25 @@ export function resolveManualExactSelection({
 } = {}) {
   if (!marketSelection || requestedLine === null || requestedLine === undefined || !marketFamily || !requestedSelection) {
     return marketSelection;
+  }
+  if (marketFamily === TEAM_ASIAN_HANDICAP_FAMILY) {
+    return resolveTeamAsianHandicapManualExactSelection({
+      marketSelection,
+      requestedLine,
+      requestedSelection,
+      requestedTeamId,
+      lineOrigin,
+      marketAssessments,
+      leagueProfile,
+      homeTeamProfile,
+      awayTeamProfile,
+      refereeProfile,
+      contextItems,
+      contextImpacts,
+      quotes,
+      preferredQuote,
+      fixtureId,
+    });
   }
   const direction = normalizedDirection(requestedSelection);
   if (!direction) return selectExactRequestedCandidate(marketSelection, { marketFamily, requestedLine, requestedSelection, lineOrigin });
@@ -722,6 +856,16 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     lineOrigin,
   });
   const manualMarketFamily = input.manualOdds?.marketFamily || reusableActiveQuote?.market_family || (analysisMode === "specific" ? input.marketId : initialSelection.primary?.market_family);
+  // Team Asian Handicap identifica el equipo por team_id real del fixture
+  // (base.fixture.teams.home/away.id), nunca por un id que la UI tenga que
+  // conocer de antemano: el usuario solo elige Local/Visitante.
+  const requestedTeamId = manualMarketFamily === TEAM_ASIAN_HANDICAP_FAMILY
+    ? (input.teamId ?? (
+      normalizedTeamSide(requestedSelection) === "home" ? base.fixture.teams?.home?.id
+        : normalizedTeamSide(requestedSelection) === "away" ? base.fixture.teams?.away?.id
+          : null
+    ))
+    : null;
   const manualQuote = input.manualOdds ? createManualOdds({
     fixtureId: base.fixture.fixtureId,
     bookmaker: input.manualOdds.bookmaker,
@@ -729,6 +873,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     marketName: base.marketAssessments.find((item) => item.market_family === manualMarketFamily)?.market_label,
     selection: requestedSelection,
     direction: input.manualOdds.direction,
+    teamId: input.manualOdds.teamId ?? requestedTeamId,
     line: requestedLine,
     decimalOdds: input.manualOdds.decimalOdds,
     receivedAt: input.manualOdds.consultedAt,
@@ -744,6 +889,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
     marketName: base.marketAssessments.find((item) => item.market_family === candidateOdds.marketFamily)?.market_label,
     selection: candidateOdds.selection,
     direction: candidateOdds.direction,
+    teamId: candidateOdds.teamId,
     line: candidateOdds.line,
     decimalOdds: candidateOdds.decimalOdds,
     receivedAt: candidateOdds.consultedAt,
@@ -791,6 +937,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
       marketFamily: manualMarketFamily,
       requestedLine,
       requestedSelection,
+      requestedTeamId,
       lineOrigin,
       marketAssessments: base.marketAssessments,
       leagueProfile: base.leagueProfile,
@@ -896,7 +1043,7 @@ export async function analyzeOperationalFixture(input, gateway, { now = () => ne
   const compatibleHistoricalOdds = (oddsResult.quotes || []).filter((quote) =>
     !isCurrentOddsQuote(quote) &&
     quote.market_family === primaryCandidate?.market_family &&
-    normalizedDirection(quote.direction || quote.selection) === primaryCandidate?.direction &&
+    sameCandidateSelection(quote, primaryCandidate) &&
     Number(quote.line) === Number(primaryCandidate?.line)
   ).sort((left, right) => Number(left.age_minutes ?? Infinity) - Number(right.age_minutes ?? Infinity));
   const historicalQuote = compatibleHistoricalOdds[0] || null;

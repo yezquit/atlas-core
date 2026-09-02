@@ -27,7 +27,10 @@ test("A. Jornada clásica conserva recommendedCandidates y su presentación hist
 });
 
 test("B-G. Jornada consume la shortlist Asian en sección propia y respeta el orden backend", () => {
-  assert.match(journeyResultBlock, /OPCIONES ASIAN TOTAL/);
+  // La shortlist ahora mezcla asian_total_goals y team_asian_handicap: el
+  // título se generalizó a "OPCIONES ASIÁTICAS" (cada tarjeta ya distingue
+  // cuál de las dos familias es vía displayMarket(candidate.marketId)).
+  assert.match(journeyResultBlock, /OPCIONES ASIÁTICAS/);
   assert.match(journeyResultBlock, /\(journey\.asianRecommendedCandidates \|\| \[\]\)\.map/);
   assert.match(journeyResultBlock, /<JourneyCandidateCard[^>]+candidate=\{candidate\}/);
 });
@@ -45,7 +48,7 @@ test("C-F. una tarjeta Asian muestra Favorabilidad /100 y Solidez, nunca la etiq
 
 test("H. shortlist Asian ausente o vacía no inventa candidatos ni 0%", () => {
   assert.match(journeyResultBlock, /\(journey\.asianRecommendedCandidates \|\| \[\]\)\.length/);
-  const asianSection = journeyResultBlock.slice(journeyResultBlock.indexOf("OPCIONES ASIAN TOTAL"));
+  const asianSection = journeyResultBlock.slice(journeyResultBlock.indexOf("OPCIONES ASIÁTICAS"));
   assert.doesNotMatch(asianSection, /0%/);
 });
 

@@ -4,6 +4,15 @@ import {
   PRICE_EVALUATION_STATUS,
 } from "../contracts/operationalContracts.js";
 import { evaluateValueOpportunity, VALUE_RADAR_STATUS } from "./valueRadar.js";
+import { ASIAN_TOTAL_GOALS_FAMILY } from "./asianTotalGoals.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY } from "./teamAsianHandicap.js";
+
+// Familias con settlement de 5 estados: evaluateMarketPrice NUNCA debe
+// tratar su preliminaryProbability.point_estimate (Favorabilidad Atlas)
+// como una probabilidad implícita comparable — solo evaluateValueOpportunity
+// (price_equivalent_probability) puede compararse contra la cuota. Mismo
+// Set que SETTLEMENT_AWARE_FAMILIES en valueRadar.js.
+const SETTLEMENT_AWARE_FAMILIES = new Set([ASIAN_TOTAL_GOALS_FAMILY, TEAM_ASIAN_HANDICAP_FAMILY]);
 
 function round(value, decimals = 4) {
   return Number(Number(value).toFixed(decimals));
@@ -24,7 +33,7 @@ export function evaluateMarketPrice({
   marketFamily = null,
   asianSettlementProfile = null,
 } = {}) {
-  if (marketFamily === "asian_total_goals") {
+  if (SETTLEMENT_AWARE_FAMILIES.has(marketFamily)) {
     const value = evaluateValueOpportunity({
       candidate: {
         fixture_id: oddsQuote?.fixture_id,

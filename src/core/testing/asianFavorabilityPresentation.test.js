@@ -157,10 +157,13 @@ test("E. ValueOpportunityCard usa el helper para su etiqueta y conserva las fór
 // probability - implied sin cambios.
 test("valueRadar.js: raw_edge_pp asiático usa price_equivalent_probability, no weighted_win_probability ni Favorabilidad; la rama clásica no cambió", async () => {
   const valueRadarSource = await readFile(path.resolve("src/core/intelligence/valueRadar.js"), "utf8");
-  assert.match(valueRadarSource, /const priceEquivalentProbability = asian \? asianSettlementProfile\?\.price_equivalent_probability : null;/);
+  // settlementAware generaliza el antiguo booleano `asian` a toda familia de
+  // settlement de 5 estados (hoy: asian_total_goals, team_asian_handicap) —
+  // mismo comportamiento para asian_total_goals, sin cambio de fórmula.
+  assert.match(valueRadarSource, /const priceEquivalentProbability = settlementAware \? asianSettlementProfile\?\.price_equivalent_probability : null;/);
   assert.match(
     valueRadarSource,
-    /const rawEdge = asian\s*\n\s*\? \(Number\.isFinite\(priceEquivalentProbability\) \? \(priceEquivalentProbability - implied\) \* 100 : null\)\s*\n\s*: \(probability - implied\) \* 100;/,
+    /const rawEdge = settlementAware\s*\n\s*\? \(Number\.isFinite\(priceEquivalentProbability\) \? \(priceEquivalentProbability - implied\) \* 100 : null\)\s*\n\s*: \(probability - implied\) \* 100;/,
   );
   assert.doesNotMatch(valueRadarSource, /asianSettlementProfile\.weighted_win_probability - implied/);
   assert.doesNotMatch(valueRadarSource, /sports_favorability - implied/);

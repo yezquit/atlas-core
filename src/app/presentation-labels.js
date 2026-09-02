@@ -33,6 +33,7 @@ const MARKET_LABELS = Object.freeze({
   shots_on_goal: "Remates a puerta",
   total_shots: "Remates totales",
   asian_total_goals: "Asiático (Más/Menos) — Total de goles",
+  team_asian_handicap: "Asiático — Hándicap por equipo",
 });
 
 const PROVIDER_STATUS_LABELS = Object.freeze({

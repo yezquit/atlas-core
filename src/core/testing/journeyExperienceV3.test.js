@@ -283,7 +283,11 @@ test("16. specificOptionReady solo exige familia sola o el refinamiento completo
   assert.ok(source.includes(
     'const specificOptionReady = analysisMode !== "specific" || Boolean(marketId && marketId !== "open" && exactRefinementComplete);'
   ));
-  assert.ok(source.includes("Para forzar una selección exacta debes completar Dirección y Línea."));
+  // El texto ahora es dinámico (team_asian_handicap dice "Equipo" en vez de
+  // "Dirección"); se protege la plantilla en vez del literal fijo.
+  assert.ok(source.includes(
+    "Para forzar una selección exacta debes completar ${marketId === \"team_asian_handicap\" ? \"Equipo\" : \"Dirección\"} y Línea."
+  ));
 
   // Misma fórmula ya confirmada arriba en el código real, evaluada aquí como
   // tabla de verdad para las 4 combinaciones posibles.

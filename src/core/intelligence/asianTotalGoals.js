@@ -1,10 +1,12 @@
-import { wilsonInterval } from "./preliminaryMarketModel.js";
 import {
   combineSettlementParts,
+  generateQuarterStepLines,
   settlementExpectedValue,
   settlementFairOdds,
   settlementFavorability,
+  settlementPriceEquivalentInterval,
   settlementPriceEquivalentProbability,
+  settlementUncertainty,
   splitQuarterStepLine,
 } from "./settlementMath.js";
 
@@ -123,18 +125,11 @@ export function asianSportsFavorability(probabilities = {}) {
 // unbiasedVariance = weightedPopulationVariance × n_eff/(n_eff-1).
 // No es una garantía exacta de cobertura para muestras pequeñas.
 function asianSettlementUncertainty({ mean, weightedPopulationVariance, effectiveSampleSize }) {
-  if (!(effectiveSampleSize > MIN_EFFECTIVE_SAMPLE_FOR_INTERVAL)) {
-    return { status: "insufficient_effective_sample", method: null, uncertainty_low: 0, uncertainty_high: 1 };
-  }
-  const unbiasedVariance = weightedPopulationVariance * (effectiveSampleSize / (effectiveSampleSize - 1));
-  const standardError = Math.sqrt(Math.max(0, unbiasedVariance) / effectiveSampleSize);
-  const margin = SPORTS_FAVORABILITY_Z * standardError;
-  return {
-    status: "estimated",
-    method: "weighted_settlement_mean_normal_approx",
-    uncertainty_low: Math.max(0, Math.min(1, mean - margin)),
-    uncertainty_high: Math.max(0, Math.min(1, mean + margin)),
-  };
+  return settlementUncertainty({
+    mean, weightedPopulationVariance, effectiveSampleSize,
+    z: SPORTS_FAVORABILITY_Z,
+    minimumEffectiveSample: MIN_EFFECTIVE_SAMPLE_FOR_INTERVAL,
+  });
 }
 
 // Aproximación normal al 95% (distinto del 90% que ya usa Favorabilidad
@@ -169,13 +164,11 @@ export function asianPriceEquivalentProbability({ weighted_win_probability, weig
 // muestra fraccionales en el resto del proyecto — no se inventa un método
 // estadístico nuevo.
 function asianPriceEquivalentInterval({ weightedWinProbability, weightedLossProbability, effectiveSampleSize }) {
-  const decisiveWeight = Number(weightedWinProbability) + Number(weightedLossProbability);
-  if (!(decisiveWeight > 0)) return { low: null, high: null, method: null };
-  const nDecisive = Number(effectiveSampleSize) * decisiveWeight;
-  if (!(nDecisive > MIN_DECISIVE_SAMPLE_FOR_INTERVAL)) return { low: null, high: null, method: null };
-  const p = Number(weightedWinProbability) / decisiveWeight;
-  const [low, high] = wilsonInterval(p, nDecisive, PRICE_EQUIVALENT_PROBABILITY_Z);
-  return { low, high, method: "decisive_mass_wilson_95_percent" };
+  return settlementPriceEquivalentInterval({
+    weightedWinProbability, weightedLossProbability, effectiveSampleSize,
+    z: PRICE_EQUIVALENT_PROBABILITY_Z,
+    minimumDecisiveSample: MIN_DECISIVE_SAMPLE_FOR_INTERVAL,
+  });
 }
 
 export function buildAsianSettlementProfile({ canonicalObservations, line, direction } = {}) {
@@ -300,19 +293,11 @@ export function asianPayoutForStake({ outcome, stake, decimalOdds } = {}) {
 
 export const ASIAN_LINE_STEP = 0.25;
 
-// Techo de líneas por fixture: 2×6+1 = 13. Elegido para reflejar, en pasos de
-// 0.25, el mismo radio máximo (6) que dynamicHalfLines ya usa en
-// candidateLineGenerator.js para total_shots/shots_on_goal en pasos de 1 —
-// mismo principio de "cota razonable derivada del diseño existente", no un
-// número arbitrario nuevo ni un catálogo global.
+// Techo de líneas por fixture: 2×6+1 = 13 (ver generateQuarterStepLines,
+// settlementMath.js, radio máximo 6 cuartos = 1.5 goles). Mismo principio de
+// "cota razonable derivada del diseño existente", no un número arbitrario
+// nuevo ni un catálogo global.
 export const DEFAULT_ASIAN_LINE_GENERATION_MAX_LINES = 13;
-
-const MIN_ASIAN_LINE_RADIUS_QUARTERS = 3; // 0.75 goles como radio mínimo
-const MAX_ASIAN_LINE_RADIUS_QUARTERS = 6; // 1.5 goles como radio máximo (ver comentario de arriba)
-
-function clampInt(value, low, high) {
-  return Math.min(high, Math.max(low, value));
-}
 
 /**
  * Genera un conjunto finito, determinista, ordenado y sin duplicados de
@@ -322,56 +307,13 @@ function clampInt(value, low, high) {
  * de mercado externas — el rango nace enteramente de la distribución
  * deportiva de ESE fixture, nunca de una constante global.
  *
+ * Composición delgada sobre generateQuarterStepLines (settlementMath.js,
+ * allowNegative:false) — sin cambio de comportamiento tras la extracción.
+ *
  * @param {{projected_mean:number, percentile_10?:number, percentile_90?:number, dispersion?:number}} distribution
  * @param {{maxLines?:number}} [options]
  * @returns {number[]}
  */
 export function generateAsianTotalGoalLines(distribution = {}, { maxLines = DEFAULT_ASIAN_LINE_GENERATION_MAX_LINES } = {}) {
-  const projectedMean = Number(distribution.projected_mean);
-  if (!Number.isFinite(projectedMean)) return [];
-  const dispersion = Math.max(0.75, Number(distribution.dispersion) || 0.75);
-  const percentile10 = Number(distribution.percentile_10);
-  const percentile90 = Number(distribution.percentile_90);
-
-  // Centro: la media proyectada, redondeada al cuarto de gol más cercano.
-  const centerQuarters = Math.round(projectedMean * 4);
-
-  // Radio derivado de la dispersión (más dispersión → rango más ancho),
-  // acotado entre 0.75 y 1.5 goles (ver constantes de arriba).
-  const dispersionRadiusQuarters = clampInt(
-    Math.round(dispersion * 2),
-    MIN_ASIAN_LINE_RADIUS_QUARTERS,
-    MAX_ASIAN_LINE_RADIUS_QUARTERS,
-  );
-
-  // Si el usuario/histórico sitúa el percentil 10-90 más lejos del centro que
-  // el radio por dispersión, se ensancha (nunca se reduce) hasta ese punto,
-  // sin superar el techo máximo — así el rango cubre la masa observada
-  // relevante del fixture concreto, no un radio arbitrario fijo.
-  const percentileRadiusQuarters = Number.isFinite(percentile10) && Number.isFinite(percentile90)
-    ? Math.max(
-      Math.abs(centerQuarters - Math.round(percentile10 * 4)),
-      Math.abs(Math.round(percentile90 * 4) - centerQuarters),
-    )
-    : 0;
-
-  const radiusQuarters = Math.min(
-    MAX_ASIAN_LINE_RADIUS_QUARTERS,
-    Math.max(dispersionRadiusQuarters, percentileRadiusQuarters),
-  );
-
-  const lines = [];
-  for (let quarter = centerQuarters - radiusQuarters; quarter <= centerQuarters + radiusQuarters; quarter += 1) {
-    const line = quarter / 4;
-    if (line >= 0) lines.push(line);
-  }
-
-  if (lines.length <= maxLines) return lines;
-
-  // Salvaguarda adicional si un maxLines más estricto se pasa explícitamente:
-  // conserva las líneas más cercanas a la media proyectada, reordenadas.
-  return [...lines]
-    .sort((left, right) => Math.abs(left - projectedMean) - Math.abs(right - projectedMean))
-    .slice(0, maxLines)
-    .sort((left, right) => left - right);
+  return generateQuarterStepLines(distribution, { maxLines, allowNegative: false });
 }

@@ -800,6 +800,10 @@ export function buildOperationalDirectorVerdict({
     market_family: marketCandidate.market_family,
     selection: marketCandidate.selection,
     direction: marketCandidate.direction,
+    // Identidad explícita por equipo para team_asian_handicap (nunca
+    // direction=over|under — decisión 13); null para el resto de familias,
+    // campo puramente aditivo.
+    team_id: marketCandidate.team_id ?? null,
     line: marketCandidate.line,
     preliminary_probability: probabilityAvailable ? probability : null,
     uncertainty_low: probabilityAvailable ? uncertaintyLow : null,

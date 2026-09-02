@@ -11,11 +11,19 @@ export const SPORTS_MARKETS = Object.freeze([
 export const SPECIFIC_SPORTS_MARKETS = Object.freeze([
   ...SPORTS_MARKETS,
   { id: "asian_total_goals", label: "Asiático (Más/Menos) — Total de goles" },
+  { id: "team_asian_handicap", label: "Asiático — Hándicap por equipo" },
 ]);
 
 const MARKET_RULES = Object.freeze({
   asian_total_goals: {
     label: "Asiático (Más/Menos) — Total de goles",
+    leagueMetric: "goals_per_match",
+    teamMetric: "goals_for_per_match",
+    requiresReferee: false,
+    weatherRisks: ["heavy_rain", "strong_wind", "extreme_heat", "extreme_cold"],
+  },
+  team_asian_handicap: {
+    label: "Asiático — Hándicap por equipo",
     leagueMetric: "goals_per_match",
     teamMetric: "goals_for_per_match",
     requiresReferee: false,

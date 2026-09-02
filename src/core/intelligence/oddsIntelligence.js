@@ -2,6 +2,7 @@ import {
   ODDS_VERIFICATION_STATUS,
   OPERATIONAL_SCHEMA_VERSION,
 } from "../contracts/operationalContracts.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY, isValidTeamAsianHandicapSide } from "./teamAsianHandicap.js";
 
 const MARKET_NAME_RULES = Object.freeze([
   ["asian_total_goals", ["asian total goals", "asian goals over/under", "asian goals", "total goals asian", "asiatico total de goles", "total asiatico de goles"]],
@@ -11,7 +12,12 @@ const MARKET_NAME_RULES = Object.freeze([
   ["corners", ["corners", "córners", "corners kicks"]],
   ["goals", ["goals over/under", "total goals", "goals", "goles"]],
 ]);
-const MANUAL_MARKET_FAMILIES = new Set(MARKET_NAME_RULES.map(([family]) => family));
+// team_asian_handicap se admite como entrada MANUAL, pero deliberadamente
+// NO se agrega a MARKET_NAME_RULES: esa lista también alimenta
+// mapProviderMarket (mapeo automático desde el proveedor API-Football), que
+// esta fase explícitamente NO debe activar para Team AH (bet types del
+// proveedor aún sin mapear — ver ATLAS_DECISIONS_LOG.md).
+const MANUAL_MARKET_FAMILIES = new Set([...MARKET_NAME_RULES.map(([family]) => family), TEAM_ASIAN_HANDICAP_FAMILY]);
 
 function text(value) {
   return value === null || value === undefined ? null : String(value).trim() || null;
@@ -86,10 +92,18 @@ export function validateManualOddsInput(input = {}) {
   const line = numericToken(input.line);
   const selectionLine = numericToken(input.selection);
   const consultedAt = Date.parse(input.consultedAt);
+  const isTeamAsianHandicap = text(input.marketFamily) === TEAM_ASIAN_HANDICAP_FAMILY;
   const errors = [];
   if (!Number.isInteger(Number(input.fixtureId)) || Number(input.fixtureId) <= 0) errors.push("invalid_fixture_id");
   if (!MANUAL_MARKET_FAMILIES.has(text(input.marketFamily))) errors.push("invalid_market_family");
-  if (!/^(over|under)(\b|$)/.test(direction)) errors.push("invalid_direction");
+  // team_asian_handicap identifica el lado por equipo (side: home|away +
+  // team_id), nunca por direction=over|under — decisión 13. La línea sigue
+  // siendo obligatoria y puede ser negativa (signed quarter-step), a
+  // diferencia de las familias clásicas.
+  if (isTeamAsianHandicap) {
+    if (!isValidTeamAsianHandicapSide(input.side || input.direction || input.selection)) errors.push("invalid_side");
+    if (!Number.isInteger(Number(input.teamId)) || Number(input.teamId) <= 0) errors.push("invalid_team_id");
+  } else if (!/^(over|under)(\b|$)/.test(direction)) errors.push("invalid_direction");
   if (!Number.isFinite(line)) errors.push("invalid_line");
   if (selectionLine !== null && Number.isFinite(line) && selectionLine !== line) errors.push("selection_line_mismatch");
   if (parseDecimalOdds(input.decimalOdds) === null) errors.push("invalid_decimal_odds");
@@ -266,17 +280,31 @@ export function normalizeProviderOdds({
   };
 }
 
-export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketName, selection, direction = null, line, decimalOdds, receivedAt = new Date().toISOString(), analyzedAt = new Date().toISOString(), kickoff = null, timezone = null, analysisVersion = null }) {
+export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketName, selection, direction = null, teamId = null, line, decimalOdds, receivedAt = new Date().toISOString(), analyzedAt = new Date().toISOString(), kickoff = null, timezone = null, analysisVersion = null }) {
   const parsedOdds = parseDecimalOdds(decimalOdds);
   if (!fixtureId || !text(selection) || parsedOdds === null) return null;
   const policy = oddsFreshnessPolicy({ kickoff, now: analyzedAt, source: "manual_user_input" });
   const freshnessResult = freshnessFor(receivedAt, analyzedAt, policy.limit_minutes);
-  const resolvedDirection = /^(under|menos)/i.test(direction || selection) ? "under" : /^(over|más|mas)/i.test(direction || selection) ? "over" : null;
+  const isTeamAsianHandicap = text(marketFamily) === TEAM_ASIAN_HANDICAP_FAMILY;
   const normalizedLine = text(line);
-  const canonicalSelection = resolvedDirection && normalizedLine
-    ? `${resolvedDirection === "over" ? "Over" : "Under"} ${normalizedLine}`
-    : text(selection);
-  const requestKey = quoteId([fixtureId, "manual", bookmaker, marketFamily, resolvedDirection, normalizedLine, parsedOdds, receivedAt, timezone, analysisVersion]);
+  // team_asian_handicap identifica el lado por equipo (home|away), nunca
+  // por direction=over|under (decisión 13, teamAsianHandicap.js) — la
+  // rama clásica de dirección/canonicalSelection queda intacta para el
+  // resto de familias.
+  const resolvedSide = isTeamAsianHandicap
+    ? (/^home$/i.test(direction || selection) ? "home" : /^away$/i.test(direction || selection) ? "away" : null)
+    : null;
+  const resolvedDirection = isTeamAsianHandicap
+    ? resolvedSide
+    : /^(under|menos)/i.test(direction || selection) ? "under" : /^(over|más|mas)/i.test(direction || selection) ? "over" : null;
+  const numericTeamId = Number.isInteger(Number(teamId)) && Number(teamId) > 0 ? Number(teamId) : null;
+  const signedLine = Number.isFinite(Number(normalizedLine)) && Number(normalizedLine) >= 0 ? `+${normalizedLine}` : normalizedLine;
+  const canonicalSelection = isTeamAsianHandicap && resolvedSide && normalizedLine
+    ? `${resolvedSide === "home" ? "Local" : "Visitante"} ${signedLine}`
+    : resolvedDirection && normalizedLine
+      ? `${resolvedDirection === "over" ? "Over" : "Under"} ${normalizedLine}`
+      : text(selection);
+  const requestKey = quoteId([fixtureId, "manual", bookmaker, marketFamily, resolvedDirection, numericTeamId, normalizedLine, parsedOdds, receivedAt, timezone, analysisVersion]);
   return {
     contract: "OddsQuote",
     schema_version: OPERATIONAL_SCHEMA_VERSION,
@@ -289,6 +317,7 @@ export function createManualOdds({ fixtureId, bookmaker, marketFamily, marketNam
     market_name: text(marketName) || text(marketFamily) || "Mercado manual",
     selection: canonicalSelection,
     direction: resolvedDirection,
+    team_id: numericTeamId,
     line: normalizedLine,
     decimal_odds: parsedOdds,
     implied_probability: impliedProbability(parsedOdds),

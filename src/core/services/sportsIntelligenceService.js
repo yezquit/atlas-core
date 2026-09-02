@@ -11,7 +11,7 @@ import {
   evaluateSportsMarkets,
   selectBestSupportedMarket,
 } from "../intelligence/marketEngine.js";
-import { buildRankedMarketSelection, selectCandidateQuote } from "../intelligence/marketCandidateRanker.js";
+import { buildRankedMarketSelection, rankMarketCandidates, selectCandidateQuote } from "../intelligence/marketCandidateRanker.js";
 import { buildMarketOpportunityRadar, attachRadarContext } from "../intelligence/marketOpportunityRadar.js";
 import { buildDecisionFrontier } from "../intelligence/decisionFrontier.js";
 import { normalizeProviderOdds } from "../intelligence/oddsIntelligence.js";
@@ -26,6 +26,7 @@ import { buildCompetitiveContext } from "../intelligence/competitiveContext.js";
 import { isModelLimitation } from "../intelligence/redTeamAtlas.js";
 import { assessPrematchEligibility, filterPrematchFixtures } from "../intelligence/prematchEligibility.js";
 import { ASIAN_TOTAL_GOALS_FAMILY } from "../intelligence/asianTotalGoals.js";
+import { TEAM_ASIAN_HANDICAP_FAMILY, generateTeamAsianHandicapCandidates } from "../intelligence/teamAsianHandicap.js";
 import { isSettlementFavorabilityCandidate } from "../intelligence/probabilityClassification.js";
 import { buildPhaseTwoDirectorVerdict } from "../modules/directorAtlas.js";
 import { isValidIsoDate, validateFixtureId } from "./apiFootballService.js";
@@ -451,6 +452,12 @@ export function toJourneyCandidate({ analysis, candidate, comparison }) {
     analysisMode: "specific",
     selection: candidate.selection,
     direction: candidate.direction,
+    // Identidad explícita para team_asian_handicap (fixture_id+market_family+
+    // team_id+line, nunca over/under — ver ATLAS_DECISIONS_LOG.md, decisión
+    // 13). null para familias sin equipo (clásicas/asian_total_goals) —
+    // campo puramente aditivo, no reemplaza direction.
+    teamId: candidate.team_id ?? null,
+    side: candidate.side ?? null,
     line: candidate.line,
     probability: candidate.preliminary_probability,
     estimatedProbability: candidate.estimated_probability,
@@ -803,7 +810,32 @@ export async function scanSportsJourney(input, gateway) {
       buildMarketOpportunityRadar({ generatedLines: generatedLinesForFamily, contextItems: [], contextImpacts: [] })
     );
     const radarContextEnrichedCandidates = attachRadarContextByFamily(selection.ranked_candidates || [], marketOpportunityRadar);
-    const radarEnrichedCandidates = attachRadarAnalysisByFamily(radarContextEnrichedCandidates, marketOpportunityRadar);
+    const radarEnrichedCandidatesBase = attachRadarAnalysisByFamily(radarContextEnrichedCandidates, marketOpportunityRadar);
+
+    // team_asian_handicap no pasa por buildRankedMarketSelection/
+    // generateCandidateLines (esas funciones no tienen concepto de equipo):
+    // se genera aparte, para ambos lados (home/away), reutilizando
+    // exclusivamente la matemática ya construida en teamAsianHandicap.js.
+    // Opt-in explícito, igual que asian_total_goals — nunca automático.
+    const teamAsianHandicapRawCandidates = requestedMarketIds.includes(TEAM_ASIAN_HANDICAP_FAMILY)
+      ? generateTeamAsianHandicapCandidates({
+        fixtureId: analysis.fixture?.fixtureId,
+        homeTeamId: analysis.fixture?.teams?.home?.id,
+        awayTeamId: analysis.fixture?.teams?.away?.id,
+        leagueProfile: analysis.leagueProfile,
+        homeTeamProfile: analysis.homeTeamProfile,
+        awayTeamProfile: analysis.awayTeamProfile,
+        refereeProfile: analysis.refereeProfile,
+      })
+      : [];
+    // rankMarketCandidates completa sports_score/overall_status/
+    // ranking_eligible/rank/family_rank con exactamente la misma
+    // calculateSportsScore settlement-aware ya usada por asian_total_goals
+    // — sin cuotas (sin quotes/preferredQuote en esta llamada).
+    const teamAsianHandicapCandidates = teamAsianHandicapRawCandidates.length
+      ? rankMarketCandidates(teamAsianHandicapRawCandidates)
+      : [];
+    const radarEnrichedCandidates = [...radarEnrichedCandidatesBase, ...teamAsianHandicapCandidates];
 
     const candidateCountByFamily = new Map();
     for (const candidate of radarEnrichedCandidates) {
